@@ -1,0 +1,13 @@
+target/
+*.lock
+!Cargo.lock
+bin/protoc*.exe
+bin/protoc-*.zip
+bin/protoc-*.tar.gz
+reference/
+apps/agent-hackathon/node_modules/
+apps/agent-hackathon/dist/
+apps/agent-hackathon/.next/
+apps/agent-hackathon/build/
+*.phase3
+*.bak.phase3

@@ -1,0 +1,89 @@
+{
+  "default": "grok-build",
+  "web_search": "grok-4.20-multi-agent",
+  "image_description": "grok-build",
+  "session_summary": "grok-build",
+  "models": [
+    {
+      "model": "grok-build",
+      "name": "Grok Build",
+      "description": "Best for advanced coding tasks (xAI)",
+      "context_window": 500000,
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "api_backend": "responses",
+      "supported_in_api": false
+    },
+    {
+      "model": "claude-3-5-sonnet-20241022",
+      "name": "Claude 3.5 Sonnet",
+      "description": "Anthropic Claude 3.5 Sonnet — excellent for coding and reasoning",
+      "base_url": "https://api.anthropic.com/v1",
+      "context_window": 200000,
+      "temperature": 1.0,
+      "top_p": 0.999,
+      "api_backend": "messages",
+      "env_key": "ANTHROPIC_API_KEY",
+      "auth_scheme": "x_api_key",
+      "extra_headers": {
+        "anthropic-version": "2023-06-01"
+      },
+      "supported_in_api": false
+    },
+    {
+      "model": "claude-3-5-haiku-20241022",
+      "name": "Claude 3.5 Haiku",
+      "description": "Anthropic Claude 3.5 Haiku — fast and efficient",
+      "base_url": "https://api.anthropic.com/v1",
+      "context_window": 200000,
+      "temperature": 1.0,
+      "top_p": 0.999,
+      "api_backend": "messages",
+      "env_key": "ANTHROPIC_API_KEY",
+      "auth_scheme": "x_api_key",
+      "extra_headers": {
+        "anthropic-version": "2023-06-01"
+      },
+      "supported_in_api": false
+    },
+    {
+      "model": "gpt-4o",
+      "name": "GPT-4o",
+      "description": "OpenAI GPT-4o — multimodal, great for coding",
+      "base_url": "https://api.openai.com/v1",
+      "context_window": 128000,
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "api_backend": "chat_completions",
+      "env_key": "OPENAI_API_KEY",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "model": "gpt-4o-mini",
+      "name": "GPT-4o mini",
+      "description": "OpenAI GPT-4o mini — fast and affordable",
+      "base_url": "https://api.openai.com/v1",
+      "context_window": 128000,
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "api_backend": "chat_completions",
+      "env_key": "OPENAI_API_KEY",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "model": "o1",
+      "name": "OpenAI o1",
+      "description": "OpenAI o1 — advanced reasoning model",
+      "base_url": "https://api.openai.com/v1",
+      "context_window": 200000,
+      "temperature": 1.0,
+      "api_backend": "responses",
+      "env_key": "OPENAI_API_KEY",
+      "auth_scheme": "bearer",
+      "supports_reasoning_effort": true,
+      "supported_in_api": false
+    }
+  ]
+}

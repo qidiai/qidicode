@@ -1,0 +1,33 @@
+[package]
+license = "Apache-2.0"
+name = "cf-update"
+version = "0.1.220-alpha.4"
+edition.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+# B2: Ed25519 detached-signature verification of self-update binaries.
+ed25519-dalek = { workspace = true }
+futures = { workspace = true }
+indicatif = { workspace = true }
+reqwest = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true, features = ["serde"] }
+tokio = { workspace = true, features = ["fs", "process", "io-util", "macros", "time"] }
+tracing = { workspace = true }
+cf-shell= { workspace = true }
+cf-tools= { workspace = true }
+cf-version= { workspace = true }
+
+[dev-dependencies]
+semver = { workspace = true }
+serde_json = { workspace = true }
+serial_test = { workspace = true }
+tempfile = { workspace = true }
+time = { workspace = true, features = ["serde"] }
+tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread", "test-util"] }
+wiremock = { workspace = true }
+dunce = { workspace = true }
