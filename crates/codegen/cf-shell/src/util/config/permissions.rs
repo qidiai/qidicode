@@ -168,6 +168,72 @@ pub fn effective_yolo_for_launch(
     )
 }
 
+/// B5: process-global YOLO tool allowlist, seeded once at launch from
+/// `--yolo-tools`. `None` = unrestricted (auto-approve any tool while YOLO is
+/// on — the historical `--yolo` behavior); `Some(set)` = only the listed tools
+/// auto-approve. Launch-scoped like `--sandbox`: one operator flag governs
+/// every session the process spawns (mirrors the `campaigns` process-global).
+static YOLO_TOOL_ALLOWLIST: std::sync::RwLock<Option<std::collections::HashSet<String>>> =
+    std::sync::RwLock::new(None);
+
+/// Seed the launch-scoped YOLO tool allowlist from the parsed `--yolo-tools`
+/// CLI value (clap already split on commas). An empty list is a no-op so the
+/// process stays unrestricted; a non-empty list confines YOLO auto-approval to
+/// exactly those tools. Blank entries are dropped.
+pub fn set_launch_yolo_allowlist(tools: &[String]) {
+    let set: std::collections::HashSet<String> = tools
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if set.is_empty() {
+        return;
+    }
+    if let Ok(mut g) = YOLO_TOOL_ALLOWLIST.write() {
+        *g = Some(set);
+    }
+}
+
+/// The launch-scoped YOLO tool allowlist if `--yolo-tools` confined it, else
+/// `None` (unrestricted). Read at session spawn to call
+/// `PermissionHandle::set_yolo_allowlist`.
+pub fn launch_yolo_allowlist() -> Option<std::collections::HashSet<String>> {
+    YOLO_TOOL_ALLOWLIST.read().ok().and_then(|g| g.clone())
+}
+
+/// B5 startup guard: refuse to launch **unrestricted** YOLO (`--yolo` with no
+/// `--yolo-tools`) when no OS sandbox is active, unless the operator explicitly
+/// accepted the risk with `--ack-no-sandbox`. A confined allowlist or an
+/// inactive YOLO always starts. Returns an error message to print + exit on;
+/// `None` means the launch is allowed. Wraps
+/// `cf_workspace::permission::yolo_startup_check` with the live sandbox state
+/// from `cf_sandbox::is_active()`.
+pub fn yolo_launch_refusal(effective_yolo: bool, ack_no_sandbox: bool) -> Option<&'static str> {
+    let mode = if effective_yolo {
+        // The allowlist may already be confined; only unrestricted YOLO trips
+        // the guard, so reflect the launch allowlist into the checked mode.
+        match launch_yolo_allowlist() {
+            Some(set) => cf_workspace::permission::YoloMode::allowlist(set),
+            None => cf_workspace::permission::YoloMode::all(),
+        }
+    } else {
+        cf_workspace::permission::YoloMode::disabled()
+    };
+    match cf_workspace::permission::yolo_startup_check(
+        &mode,
+        cf_sandbox::is_active(),
+        ack_no_sandbox,
+    ) {
+        cf_workspace::permission::YoloStartupCheck::RefuseNoSandbox => Some(
+            "refusing to start: --yolo auto-approves every tool but no OS sandbox is \
+             active. Re-run with a sandbox (--sandbox <profile>), confine it \
+             (--yolo-tools read_file,grep,...), or accept the risk explicitly \
+             (--ack-no-sandbox).",
+        ),
+        cf_workspace::permission::YoloStartupCheck::Ok => None,
+    }
+}
+
 /// Whether this launch should start in **auto** permission mode (LLM/heuristic
 /// classifier — not always-approve). CLI `--permission-mode auto` beats config.
 /// Mutually exclusive with effective yolo (yolo / `--yolo` wins if both requested).

@@ -17,6 +17,7 @@ pub(crate) struct SyntheticTurnTraceRequest {
         oneshot::Receiver<anyhow::Result<crate::session::persistence::SessionStateCopy>>,
 }
 /// Outcome of a session-state upload with categorized failure reason.
+#[allow(dead_code)]
 pub(crate) enum UploadOutcome {
     Confirmed,
     /// Not confirmed within the flush deadline; the upload continues in the

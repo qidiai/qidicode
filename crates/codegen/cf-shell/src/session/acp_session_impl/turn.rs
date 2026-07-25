@@ -1,4 +1,4 @@
-﻿//! Turn-execution concern for `SessionActor` (`handle_prompt`, turn-end,
+//! Turn-execution concern for `SessionActor` (`handle_prompt`, turn-end,
 //! sampling loop).
 use super::*;
 /// Synthetic tool the model calls to return its schema-constrained final answer
@@ -61,7 +61,7 @@ impl UsageDrainOutcome {
     /// sticky and background → report only.
     pub(super) fn from_outstanding_reply(
         reply: Option<
-            &cf_tools::implementations::grok_build::task::types::SubagentOutstandingReply,
+            &cf_tools::implementations::qidi_build::task::types::SubagentOutstandingReply,
         >,
     ) -> Self {
         match reply {
@@ -1215,7 +1215,7 @@ impl SessionActor {
         let Some(tx) = &self.tool_context.subagent_event_tx else {
             return false;
         };
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentMarkUsageNotAppliedRequest,
         };
         let (respond_to, ack) = tokio::sync::oneshot::channel();
@@ -1244,7 +1244,7 @@ impl SessionActor {
         let Some(buffer) = &self.tool_context.monitor_event_buffer else {
             return;
         };
-        let mine = cf_tools::implementations::grok_build::task::types::drain_owned(
+        let mine = cf_tools::implementations::qidi_build::task::types::drain_owned(
             buffer,
             Some(self.session_info.id.0.as_ref()),
         );

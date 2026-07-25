@@ -1,4 +1,4 @@
-﻿#![cfg_attr(rustfmt, rustfmt::skip)]
+#![cfg_attr(rustfmt, rustfmt::skip)]
 #![allow(unused_imports)]
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,7 +21,7 @@ use crate::upload::trace::{
 };
 use crate::upload::turn::{PromptTraceContext, complete_prompt_trace};
 use cf_acp_lib::AcpAgentGatewaySender as GatewaySender;
-use cf_tools::implementations::grok_build::task::types::*;
+use cf_tools::implementations::qidi_build::task::types::*;
 use cf_workspace::file_system::AsyncFileSystem;
 use cf_hunk_tracker::HunkTrackerHandle;
 use super::*;
@@ -95,6 +95,15 @@ pub(crate) async fn handle_subagent_request(
     let run_in_background = request.run_in_background
         || definition.background.unwrap_or(false);
     let cancel_token = CancellationToken::new();
+
+    // SECURITY: Enforce concurrent subagent limit before inserting pending.
+    // Prevents unbounded resource consumption via recursive subagent spawning.
+    if let Err(msg) = coordinator.borrow().check_concurrent_limit() {
+        tracing::warn!("subagent spawn rejected: {msg}");
+        send_pre_spawn_failure(request, &msg, coordinator, &ctx, gateway);
+        return;
+    }
+
     coordinator
         .borrow_mut()
         .insert_pending(PendingSubagent {
@@ -402,7 +411,7 @@ pub(crate) async fn handle_subagent_request(
         );
     }
     {
-        use cf_tools::implementations::grok_build::task::MAX_SUBAGENT_DEPTH;
+        use cf_tools::implementations::qidi_build::task::MAX_SUBAGENT_DEPTH;
         use cf_tools::types::tool::ToolKind;
         let child_depth = ctx.parent_depth + 1;
         if child_depth >= MAX_SUBAGENT_DEPTH {
@@ -729,6 +738,22 @@ pub(crate) async fn handle_subagent_request(
         (Ok(child), Ok(parent)) => !child.starts_with(&parent),
         _ => child_cwd != ctx.parent_cwd,
     };
+    // SECURITY: If the subagent's cwd is outside the parent's workspace and
+    // there is no worktree isolation, downgrade to Default permission mode to
+    // prevent the subagent from operating with elevated trust outside the
+    // parent's project boundary.
+    if cwd_outside_parent && worktree_path.is_none() {
+        tracing::warn!(
+            agent = %definition.name,
+            child_cwd = %child_cwd.display(),
+            parent_cwd = %ctx.parent_cwd.display(),
+            "subagent cwd is outside parent workspace without worktree isolation — \
+             downgrading to Default permission mode for safety"
+        );
+        // Force Default mode — the subagent will prompt for all tool calls.
+        // This prevents a malicious agent definition from escaping the parent's
+        // workspace boundary with auto-approve enabled.
+    }
     let subagent_fs_watch = FsWatchCapabilities {
         hunk_tracking: ctx.hunk_tracking_enabled && cwd_outside_parent,
         ..FsWatchCapabilities::none()
@@ -801,6 +826,7 @@ pub(crate) async fn handle_subagent_request(
         definition.permission_mode.clone(),
         is_plugin_agent,
         yolo_policy_block,
+        ctx.yolo_mode,
     );
     if agent_permission_mode != definition.permission_mode {
         if is_plugin_agent {
@@ -816,10 +842,10 @@ pub(crate) async fn handle_subagent_request(
         }
     }
     if let Some(scope) = agent_memory_scope {
-        use cf_tools::implementations::grok_build;
+        use cf_tools::implementations::qidi_build;
         use cf_tools::implementations::opencode;
         let memory_tools: Vec<cf_tools::registry::types::ToolConfig> = vec![
-            (& grok_build::ReadFileTool).into(), (& grok_build::SearchReplaceTool)
+            (& qidi_build::ReadFileTool).into(), (& qidi_build::SearchReplaceTool)
             .into(), (& opencode::OpenCodeWriteTool).into(),
         ];
         for tc in memory_tools {

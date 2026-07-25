@@ -8595,7 +8595,7 @@ mod tests {
     // `upgrade_is_idempotent_on_post_pr_rows`.
 
     #[test]
-    fn upgrade_legacy_reasoning_singular_grok_build_shape() {
+    fn upgrade_legacy_reasoning_singular_qidi_build_shape() {
         // Synthetic fixture (truncated text + encrypted stub)
         // (truncated text + encrypted for readability). The assistant row
         // carries `reasoning: { text, encrypted, id }` inline — the

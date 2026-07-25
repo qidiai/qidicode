@@ -1,4 +1,4 @@
-﻿//! Unit tests for the goal-mode degradation contract — back-off
+//! Unit tests for the goal-mode degradation contract — back-off
 //! streak, `handle_turn_end` dispatch, auto-pause helper, and the
 //! idempotent `/goal resume` slash command.
 use super::support::*;
@@ -462,8 +462,8 @@ async fn handle_turn_end_verified_complete_during_drain_skips_bail_nudge() {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             *actor.goal_update_rx.borrow_mut() = Some(rx);
             tx.send(
-                cf_tools::implementations::grok_build::update_goal::envelope_for_test(
-                    cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                cf_tools::implementations::qidi_build::update_goal::envelope_for_test(
+                    cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                         completed: Some(true),
                         message: None,
                         blocked_reason: None,
@@ -1439,8 +1439,8 @@ async fn drain_goal_updates_blocked_reason_transitions_after_three_attempts() {
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                 *actor.goal_update_rx.borrow_mut() = Some(rx);
                 tx.send(
-                    cf_tools::implementations::grok_build::update_goal::envelope_for_test(
-                        cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                    cf_tools::implementations::qidi_build::update_goal::envelope_for_test(
+                        cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                             completed: None,
                             message: Some("longer body".into()),
                             blocked_reason: Some("short label".into()),
@@ -1482,8 +1482,8 @@ async fn drain_goal_updates_blocked_reason_rejected_below_threshold() {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             *actor.goal_update_rx.borrow_mut() = Some(rx);
             tx.send(
-                cf_tools::implementations::grok_build::update_goal::envelope_for_test(
-                    cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                cf_tools::implementations::qidi_build::update_goal::envelope_for_test(
+                    cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                         completed: None,
                         message: None,
                         blocked_reason: Some("only label".into()),
@@ -1583,8 +1583,8 @@ async fn drain_goal_updates_blocked_reason_against_non_active_does_not_stash_pau
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             *actor.goal_update_rx.borrow_mut() = Some(rx);
             tx.send(
-                cf_tools::implementations::grok_build::update_goal::envelope_for_test(
-                    cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                cf_tools::implementations::qidi_build::update_goal::envelope_for_test(
+                    cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                         completed: None,
                         message: Some("body".into()),
                         blocked_reason: Some("would-block".into()),
@@ -1628,7 +1628,7 @@ async fn drain_goal_updates_completes_after_blocked_does_not_leak_pause_message(
                     .store(2, Ordering::Relaxed);
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                 *actor.goal_update_rx.borrow_mut() = Some(rx);
-                tx.send(cf_tools::implementations::grok_build::update_goal::envelope_for_test(cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                tx.send(cf_tools::implementations::qidi_build::update_goal::envelope_for_test(cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                         completed: None,
                         message: None,
                         blocked_reason: Some("blk".into()),
@@ -1644,7 +1644,7 @@ async fn drain_goal_updates_completes_after_blocked_does_not_leak_pause_message(
                 // accepts complete() from any paused variant (including
                 // Blocked), and the pause_message
                 // is cleared during the transition.
-                tx.send(cf_tools::implementations::grok_build::update_goal::envelope_for_test(cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                tx.send(cf_tools::implementations::qidi_build::update_goal::envelope_for_test(cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
 
                         completed: Some(true),
                         message: None,
@@ -1678,8 +1678,8 @@ async fn drain_goal_updates_skips_subsequent_completed_after_block() {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             *actor.goal_update_rx.borrow_mut() = Some(rx);
             tx.send(
-                cf_tools::implementations::grok_build::update_goal::envelope_for_test(
-                    cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                cf_tools::implementations::qidi_build::update_goal::envelope_for_test(
+                    cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                         completed: None,
                         message: None,
                         blocked_reason: Some("X".into()),
@@ -1688,8 +1688,8 @@ async fn drain_goal_updates_skips_subsequent_completed_after_block() {
             )
             .unwrap();
             tx.send(
-                cf_tools::implementations::grok_build::update_goal::envelope_for_test(
-                    cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                cf_tools::implementations::qidi_build::update_goal::envelope_for_test(
+                    cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                         completed: Some(true),
                         message: None,
                         blocked_reason: None,
@@ -2268,8 +2268,8 @@ async fn drain_goal_updates_message_only_does_not_change_status() {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             *actor.goal_update_rx.borrow_mut() = Some(rx);
             tx.send(
-                cf_tools::implementations::grok_build::update_goal::envelope_for_test(
-                    cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                cf_tools::implementations::qidi_build::update_goal::envelope_for_test(
+                    cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                         completed: None,
                         message: Some("Running tests...".into()),
                         blocked_reason: None,
@@ -2303,7 +2303,7 @@ async fn drain_goal_updates_message_only_does_not_change_status() {
 /// producing an ack"). The drain must instead reply with a clean ack.
 #[tokio::test(flavor = "current_thread")]
 async fn drain_goal_updates_harness_disabled_does_not_drop_ack() {
-    use cf_tools::implementations::grok_build::update_goal::{
+    use cf_tools::implementations::qidi_build::update_goal::{
         RejectReason, UpdateGoalAck, UpdateGoalInput,
     };
     let local = tokio::task::LocalSet::new();
@@ -2383,8 +2383,8 @@ async fn drain_goal_updates_blocked_reason_takes_precedence_over_completed() {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             *actor.goal_update_rx.borrow_mut() = Some(rx);
             tx.send(
-                cf_tools::implementations::grok_build::update_goal::envelope_for_test(
-                    cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                cf_tools::implementations::qidi_build::update_goal::envelope_for_test(
+                    cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                         completed: Some(true),
                         message: None,
                         blocked_reason: Some("stuck".into()),
@@ -2414,8 +2414,8 @@ async fn drain_goal_updates_blocked_reason_takes_precedence_over_completed() {
 // E2E suite using `MockSpawner` lives separately.
 
 fn make_completed_cmd()
--> cf_tools::implementations::grok_build::update_goal::UpdateGoalEnvelope {
-    let input = cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+-> cf_tools::implementations::qidi_build::update_goal::UpdateGoalEnvelope {
+    let input = cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
         completed: Some(true),
         message: None,
         blocked_reason: None,
@@ -2978,8 +2978,8 @@ async fn drain_goal_updates_completed_resets_blocked_streak() {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             *actor.goal_update_rx.borrow_mut() = Some(rx);
             tx.send(
-                cf_tools::implementations::grok_build::update_goal::envelope_for_test(
-                    cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                cf_tools::implementations::qidi_build::update_goal::envelope_for_test(
+                    cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                         completed: Some(true),
                         message: None,
                         blocked_reason: None,
@@ -3769,8 +3769,8 @@ async fn blocked_streak_reaches_pause_across_successful_turns() {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             *actor.goal_update_rx.borrow_mut() = Some(rx);
             let blocked = || {
-                cf_tools::implementations::grok_build::update_goal::envelope_for_test(
-                    cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                cf_tools::implementations::qidi_build::update_goal::envelope_for_test(
+                    cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                         completed: None,
                         message: None,
                         blocked_reason: Some("cannot reach service".into()),
@@ -4040,8 +4040,8 @@ async fn setup_goal_resets_streaks_from_previous_goal() {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             *actor.goal_update_rx.borrow_mut() = Some(rx);
             tx.send(
-                cf_tools::implementations::grok_build::update_goal::envelope_for_test(
-                    cf_tools::implementations::grok_build::update_goal::UpdateGoalInput {
+                cf_tools::implementations::qidi_build::update_goal::envelope_for_test(
+                    cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput {
                         completed: None,
                         message: None,
                         blocked_reason: Some("blk".into()),

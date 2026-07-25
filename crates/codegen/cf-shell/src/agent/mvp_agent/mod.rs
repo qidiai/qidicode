@@ -233,6 +233,7 @@ impl BridgeAttach {
     }
 }
 /// `_meta["x.ai/session"].kind` → [`SessionKind`]; absent/unknown/malformed → `Build`.
+#[allow(dead_code)]
 fn parse_session_kind(
     meta: Option<&acp::Meta>,
 ) -> crate::session::unified_list::SessionKind {
@@ -777,14 +778,14 @@ pub struct MvpAgent {
     /// Unified sender for all subagent coordinator events.
     /// LEADER-SAFE(shared): channel is multi-producer, coordinator drains.
     subagent_event_tx: tokio::sync::mpsc::UnboundedSender<
-        cf_tools::implementations::grok_build::task::types::SubagentEvent,
+        cf_tools::implementations::qidi_build::task::types::SubagentEvent,
     >,
     /// Receiver for subagent events. Taken once by `start_subagent_coordinator()`.
     /// `None` after the coordinator drain task has been spawned.
     subagent_event_rx: RefCell<
         Option<
             tokio::sync::mpsc::UnboundedReceiver<
-                cf_tools::implementations::grok_build::task::types::SubagentEvent,
+                cf_tools::implementations::qidi_build::task::types::SubagentEvent,
             >,
         >,
     >,
@@ -795,7 +796,7 @@ pub struct MvpAgent {
     /// Pushed by the `InjectNotification` handler when a turn is active and the
     /// notification has `Next` priority. Drained by the session turn loop
     /// (`inject_pending_monitor_events`) into a hidden synthetic user message.
-    monitor_event_buffer: cf_tools::implementations::grok_build::task::types::MonitorEventBuffer,
+    monitor_event_buffer: cf_tools::implementations::qidi_build::task::types::MonitorEventBuffer,
     /// Per-subagent model ID overrides from config.toml `[subagents.models]`.
     /// Populated from `SubagentsConfig.models` during `with_models()`.
     subagent_model_overrides: std::collections::HashMap<String, String>,
@@ -1771,7 +1772,7 @@ impl MvpAgent {
         self.tier_allowed.set(allow);
         if !allow {
             tracing::info!(
-                "auth: user blocked by allow_access (remote settings grok_build_access_gate)"
+                "auth: user blocked by allow_access (remote settings qidi_build_access_gate)"
             );
             self.retry_subscription_check().await;
         }
@@ -2626,7 +2627,7 @@ fn spawn_post_unblock_jwt_and_catalog_retry(
 ///
 /// Returns `true` only when remote settings explicitly set `allow_access: true`.
 /// Defaults to `false` (blocked) when settings are `None` or the field is
-/// absent — matching the `grok_build_access_gate` flag's server-side default.
+/// absent — matching the `qidi_build_access_gate` flag's server-side default.
 ///
 /// Used by both `enforce_grok_code_access` (initial login gate) and
 /// `retry_subscription_check` (poller gate lift) to keep the decision in

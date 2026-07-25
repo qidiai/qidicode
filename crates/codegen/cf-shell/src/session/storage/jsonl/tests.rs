@@ -1174,7 +1174,7 @@ async fn test_copy_session_data_copies_tool_state() {
         .await
         .unwrap();
     let tool_state_json = serde_json::json!(
-        { "state" : { "grok_build.TodoState" : { "todos" : [] } } }
+        { "state" : { "qidi_build.TodoState" : { "todos" : [] } } }
     );
     let source_dir = adapter.session_dir(&source_info);
     std::fs::write(

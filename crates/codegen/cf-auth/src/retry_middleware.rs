@@ -115,7 +115,7 @@ mod tests {
     impl AuthCredentialProvider for MockProvider {
         fn snapshot(&self) -> CredentialSnapshot {
             CredentialSnapshot {
-                token: self.token.lock().unwrap().clone(),
+                token: self.token.lock().unwrap().clone().map(zeroize::Zeroizing::new),
                 ..Default::default()
             }
         }
@@ -181,7 +181,7 @@ mod tests {
     impl AuthCredentialProvider for SimulatedAuthManager {
         fn snapshot(&self) -> CredentialSnapshot {
             CredentialSnapshot {
-                token: self.token.lock().unwrap().clone(),
+                token: self.token.lock().unwrap().clone().map(zeroize::Zeroizing::new),
                 ..Default::default()
             }
         }

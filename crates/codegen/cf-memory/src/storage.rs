@@ -18,6 +18,41 @@ pub enum MemoryScope {
     Workspace,
 }
 
+/// Create a directory with restrictive permissions (0o700 on Unix).
+/// For use with memory/session directories that contain sensitive data.
+fn create_secure_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true).mode(0o700);
+        builder.create(path)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(path)
+    }
+}
+
+/// Write file content with restrictive permissions (0o600 on Unix).
+/// For use with memory files that may contain sensitive conversation data.
+fn write_secure_file(path: &Path, content: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true).mode(0o600);
+        use std::io::Write;
+        let mut f = opts.open(path)?;
+        f.write_all(content.as_bytes())?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, content)
+    }
+}
+
 /// Handles file I/O for the memory storage layer.
 ///
 /// Memory files are human-readable/editable Markdown stored under
@@ -177,7 +212,7 @@ impl MemoryStorage {
             return Ok(path);
         }
 
-        std::fs::create_dir_all(&sessions_dir)?;
+        create_secure_dir(&sessions_dir)?;
 
         if append && path.exists() {
             use std::io::Write;
@@ -185,7 +220,7 @@ impl MemoryStorage {
             let mut file = std::fs::OpenOptions::new().append(true).open(&path)?;
             write!(file, "\n\n---\n\n<!-- flush {timestamp} -->\n\n{content}")?;
         } else {
-            std::fs::write(&path, content)?;
+            write_secure_file(&path, content)?;
         }
         tracing::debug!(path = %path.display(), append, "wrote daily session log");
 
@@ -203,16 +238,16 @@ impl MemoryStorage {
 
         let path = match scope {
             MemoryScope::Global => {
-                std::fs::create_dir_all(&self.global_dir)?;
+                create_secure_dir(&self.global_dir)?;
                 self.global_memory_file()
             }
             MemoryScope::Workspace => {
-                std::fs::create_dir_all(&self.workspace_dir)?;
+                create_secure_dir(&self.workspace_dir)?;
                 self.workspace_memory_file()
             }
         };
 
-        std::fs::write(&path, content)?;
+        write_secure_file(&path, content)?;
         tracing::debug!(path = %path.display(), scope = ?scope, "wrote long-term memory");
 
         Ok(())
@@ -238,25 +273,42 @@ impl MemoryStorage {
 
         let path = match scope {
             MemoryScope::Global => {
-                std::fs::create_dir_all(&self.global_dir)?;
+                create_secure_dir(&self.global_dir)?;
                 self.global_memory_file()
             }
             MemoryScope::Workspace => {
-                std::fs::create_dir_all(&self.workspace_dir)?;
+                create_secure_dir(&self.workspace_dir)?;
                 self.workspace_memory_file()
             }
         };
 
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
-
-        use std::io::Write;
-        if file.metadata()?.len() > 0 {
-            write!(file, "\n\n{normalized}")?;
-        } else {
-            write!(file, "{normalized}")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .mode(0o600)
+                .open(&path)?;
+            use std::io::Write;
+            if file.metadata()?.len() > 0 {
+                write!(file, "\n\n{normalized}")?;
+            } else {
+                write!(file, "{normalized}")?;
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)?;
+            use std::io::Write;
+            if file.metadata()?.len() > 0 {
+                write!(file, "\n\n{normalized}")?;
+            } else {
+                write!(file, "{normalized}")?;
+            }
         }
 
         tracing::debug!(path = %path.display(), scope = ?scope, "appended to memory");
@@ -359,11 +411,11 @@ impl MemoryStorage {
     ///
     /// Called on first run with `--experimental-memory` to bootstrap the layout.
     pub fn ensure_initialized(&self) -> std::io::Result<()> {
-        std::fs::create_dir_all(&self.global_dir)?;
+        create_secure_dir(&self.global_dir)?;
 
         let global_file = self.global_memory_file();
         if !global_file.exists() {
-            std::fs::write(
+            write_secure_file(
                 &global_file,
                 "# Global Memory\n\
                  \n\
@@ -382,7 +434,7 @@ impl MemoryStorage {
             return Ok(());
         }
 
-        std::fs::create_dir_all(&self.workspace_dir)?;
+        create_secure_dir(&self.workspace_dir)?;
 
         let workspace_file = self.workspace_memory_file();
         if !workspace_file.exists() {

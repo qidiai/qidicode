@@ -9,6 +9,7 @@ pub mod rules;
 mod shell_access;
 mod state;
 pub mod types;
+pub mod yolo;
 
 pub use auto_mode::{
     AUTO_MODE_CLASSIFIER_SYSTEM_PROMPT, AutoFastPath, ClassifierContext, ClassifierMessage,
@@ -42,4 +43,5 @@ pub use prompter::{
 pub use state::PermissionState;
 pub use state::cleanup_stale_permission_state;
 pub use types::{AccessKind, ClientType, Decision, PermissionCommand, PermissionEvent};
+pub use yolo::{YoloMode, YoloStartupCheck, parse_yolo_arg, yolo_startup_check};
 pub mod bash_command_splitting;

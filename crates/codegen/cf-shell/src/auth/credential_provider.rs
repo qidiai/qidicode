@@ -55,7 +55,7 @@ impl AuthCredentialProvider for ShellAuthCredentialProvider {
     fn snapshot(&self) -> CredentialSnapshot {
         if let Some(ref dk) = self.static_credentials.deployment_key {
             return CredentialSnapshot {
-                token: Some(dk.clone()),
+                token: Some(zeroize::Zeroizing::new(dk.clone())),
                 deployment_id: crate::managed_config::resolve_deployment_id(Some(dk)),
                 ..Default::default()
             };
@@ -65,7 +65,7 @@ impl AuthCredentialProvider for ShellAuthCredentialProvider {
         let team_id = auth.as_ref().and_then(|a| a.team_id.clone());
         let organization_id = auth.as_ref().and_then(|a| a.organization_id.clone());
         let api_key_id = api_key_id_for(auth.as_ref());
-        let token = auth.map(|a| a.key);
+        let token = auth.map(|a| zeroize::Zeroizing::new(a.key));
         CredentialSnapshot {
             token,
             user_id,
@@ -259,9 +259,9 @@ impl HttpAuth for OtelAuthCredentialProvider {
         let snapshot = self.snapshot_inner();
         let mut creds = GrokAuthCredentials::new(None);
         if self.deployment_key.load().is_some() {
-            creds.deployment_key = snapshot.token;
+            creds.deployment_key = snapshot.token.as_deref().map(|s| s.to_string());
         } else {
-            creds.user_token = snapshot.token;
+            creds.user_token = snapshot.token.as_deref().map(|s| s.to_string());
         }
         creds.apply(builder, base_url)
     }
@@ -270,7 +270,7 @@ impl OtelAuthCredentialProvider {
     fn snapshot_inner(&self) -> CredentialSnapshot {
         if let Some(ref dk) = **self.deployment_key.load() {
             return CredentialSnapshot {
-                token: Some(dk.clone()),
+                token: Some(zeroize::Zeroizing::new(dk.clone())),
                 deployment_id: crate::managed_config::resolve_deployment_id(Some(dk)),
                 ..Default::default()
             };
@@ -284,7 +284,7 @@ impl OtelAuthCredentialProvider {
         let team_id = auth.as_ref().and_then(|a| a.team_id.clone());
         let organization_id = auth.as_ref().and_then(|a| a.organization_id.clone());
         let api_key_id = api_key_id_for(auth.as_ref());
-        let token = auth.map(|a| a.key);
+        let token = auth.map(|a| zeroize::Zeroizing::new(a.key));
         CredentialSnapshot {
             token,
             user_id,

@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 /// Wrap `id` in a shared auth-method handle for `SessionActor` test literals
 /// (the field is now a shared live handle, not an owned id).
 pub(crate) fn test_auth_method_id(id: &str) -> crate::agent::auth_method::SharedAuthMethodId {
@@ -27,7 +27,7 @@ pub(crate) async fn test_agent_default() -> cf_agent::Agent {
 /// resolve to their builtins when a turn is driven through `handle_prompt`.
 #[cfg(test)]
 pub(crate) async fn test_agent_with_goal_tool() -> cf_agent::Agent {
-    use cf_tools::implementations::grok_build::update_goal::UpdateGoalTool;
+    use cf_tools::implementations::qidi_build::update_goal::UpdateGoalTool;
     use cf_tools::registry::types::ToolConfig;
     test_agent_with_tools(vec![ToolConfig::for_tool::<UpdateGoalTool>()]).await
 }
@@ -35,8 +35,8 @@ pub(crate) async fn test_agent_with_goal_tool() -> cf_agent::Agent {
 /// `Plan`) registered, so `tool_for_kind(ToolKind::Plan)` resolves through the
 /// live toolset instead of the literal fallback.
 #[cfg(test)]
-pub(crate) async fn test_grok_build_agent_with_todo() -> cf_agent::Agent {
-    use cf_tools::implementations::grok_build::todo::TodoWriteTool;
+pub(crate) async fn test_qidi_build_agent_with_todo() -> cf_agent::Agent {
+    use cf_tools::implementations::qidi_build::todo::TodoWriteTool;
     use cf_tools::registry::types::ToolConfig;
     test_agent_with_tools(vec![ToolConfig::for_tool::<TodoWriteTool>()]).await
 }
@@ -45,8 +45,8 @@ pub(crate) async fn test_grok_build_agent_with_todo() -> cf_agent::Agent {
 /// `exit_plan_mode` only finalizes when `enter_plan_mode` is also present.
 #[cfg(test)]
 pub(crate) async fn test_agent_with_plan_tools() -> cf_agent::Agent {
-    use cf_tools::implementations::grok_build::enter_plan_mode::EnterPlanModeTool;
-    use cf_tools::implementations::grok_build::exit_plan_mode::ExitPlanModeTool;
+    use cf_tools::implementations::qidi_build::enter_plan_mode::EnterPlanModeTool;
+    use cf_tools::implementations::qidi_build::exit_plan_mode::ExitPlanModeTool;
     use cf_tools::registry::types::ToolConfig;
     test_agent_with_tools(vec![
         ToolConfig::for_tool::<EnterPlanModeTool>(),
@@ -63,7 +63,7 @@ pub(crate) async fn test_agent_with_tools(
             tools,
             behavior_preset: None,
         },
-        cf_agent::AgentDefinition::default_grok_build(),
+        cf_agent::AgentDefinition::default_qidi_build(),
         std::sync::Arc::new(cf_tools::computer::local::LocalTerminalBackend::new()),
     )
     .await
@@ -79,7 +79,7 @@ async fn test_agent_from_config(
     use cf_tools::notification::ToolNotificationHandle;
     use cf_tools::registry::types::SessionContext;
     let builder = crate::tools::bridge::ToolBridge::get_builder();
-    let fs: std::sync::Arc<dyn AsyncFileSystem> = std::sync::Arc::new(LocalFs);
+    let fs: std::sync::Arc<dyn AsyncFileSystem> = std::sync::Arc::new(LocalFs::unconfined());
     let ctx = SessionContext {
         backend,
         fs,

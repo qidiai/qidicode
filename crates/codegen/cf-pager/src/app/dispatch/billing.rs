@@ -203,7 +203,7 @@ pub(super) fn open_credit_limit_upsell(
 
     // ── Default: Q&A question modal with two options ────────────────
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use cf_tools::implementations::grok_build::ask_user_question::{
+    use cf_tools::implementations::qidi_build::ask_user_question::{
         Question, QuestionOption,
     };
 
@@ -291,7 +291,7 @@ fn open_supergrok_upsell(
     auth_method: Option<String>,
 ) -> bool {
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use cf_tools::implementations::grok_build::ask_user_question::{
+    use cf_tools::implementations::qidi_build::ask_user_question::{
         Question, QuestionOption,
     };
 

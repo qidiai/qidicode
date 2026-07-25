@@ -1,6 +1,6 @@
 # Hook Examples
 
-Sample hooks for Grok. Copy to `~/.grok/hooks/` to enable globally, or to `<project>/.grok/hooks/` for project-scoped hooks (requires `/hooks-trust`).
+Sample hooks for Grok. Copy to `~/.qidi/hooks/` to enable globally, or to `<project>/.grok/hooks/` for project-scoped hooks (requires `/hooks-trust`).
 
 ## Available Examples
 
@@ -13,10 +13,10 @@ Denies obviously destructive shell commands before they execute:
 
 **Install:**
 ```sh
-mkdir -p ~/.grok/hooks/bin
-cp examples/hooks/safe-shell.json ~/.grok/hooks/
-cp examples/hooks/bin/safe-shell-guard.sh ~/.grok/hooks/bin/
-chmod +x ~/.grok/hooks/bin/safe-shell-guard.sh
+mkdir -p ~/.qidi/hooks/bin
+cp examples/hooks/safe-shell.json ~/.qidi/hooks/
+cp examples/hooks/bin/safe-shell-guard.sh ~/.qidi/hooks/bin/
+chmod +x ~/.qidi/hooks/bin/safe-shell-guard.sh
 ```
 
 ### 2. No Recursive Grep (`no-recursive-grep.json`)
@@ -38,10 +38,10 @@ allowed.
 
 **Install:**
 ```sh
-mkdir -p ~/.grok/hooks/bin
-cp examples/hooks/no-recursive-grep.json ~/.grok/hooks/
-cp examples/hooks/bin/no-recursive-grep-guard.py ~/.grok/hooks/bin/
-chmod +x ~/.grok/hooks/bin/no-recursive-grep-guard.py
+mkdir -p ~/.qidi/hooks/bin
+cp examples/hooks/no-recursive-grep.json ~/.qidi/hooks/
+cp examples/hooks/bin/no-recursive-grep-guard.py ~/.qidi/hooks/bin/
+chmod +x ~/.qidi/hooks/bin/no-recursive-grep-guard.py
 ```
 (Requires `python3` on `PATH`.)
 
@@ -49,28 +49,28 @@ chmod +x ~/.grok/hooks/bin/no-recursive-grep-guard.py
 
 **Type:** passive (`SessionStart` + `SessionEnd`)
 
-Appends session metadata to `~/.grok/session-audit.log` — event, session ID, cwd, timestamp.
+Appends session metadata to `~/.qidi/session-audit.log` — event, session ID, cwd, timestamp.
 
 **Install:**
 ```sh
-mkdir -p ~/.grok/hooks/bin
-cp examples/hooks/session-log.json ~/.grok/hooks/
-cp examples/hooks/bin/session-log.sh ~/.grok/hooks/bin/
-chmod +x ~/.grok/hooks/bin/session-log.sh
+mkdir -p ~/.qidi/hooks/bin
+cp examples/hooks/session-log.json ~/.qidi/hooks/
+cp examples/hooks/bin/session-log.sh ~/.qidi/hooks/bin/
+chmod +x ~/.qidi/hooks/bin/session-log.sh
 ```
 
 ### 4. Tool Activity Logger (`tool-logger.json`)
 
 **Type:** passive (`PreToolUse` + `PostToolUse`)
 
-Logs all tool calls to `~/.grok/tool-activity.log` — tool name, event type, effective tool name, backgrounded status.
+Logs all tool calls to `~/.qidi/tool-activity.log` — tool name, event type, effective tool name, backgrounded status.
 
 **Install:**
 ```sh
-mkdir -p ~/.grok/hooks/bin
-cp examples/hooks/tool-logger.json ~/.grok/hooks/
-cp examples/hooks/bin/tool-logger.sh ~/.grok/hooks/bin/
-chmod +x ~/.grok/hooks/bin/tool-logger.sh
+mkdir -p ~/.qidi/hooks/bin
+cp examples/hooks/tool-logger.json ~/.qidi/hooks/
+cp examples/hooks/bin/tool-logger.sh ~/.qidi/hooks/bin/
+chmod +x ~/.qidi/hooks/bin/tool-logger.sh
 ```
 
 ## Format
@@ -116,4 +116,4 @@ or
 
 ## Uninstall
 
-Remove the JSON file from `~/.grok/hooks/`. The hook stops running on the next session.
+Remove the JSON file from `~/.qidi/hooks/`. The hook stops running on the next session.

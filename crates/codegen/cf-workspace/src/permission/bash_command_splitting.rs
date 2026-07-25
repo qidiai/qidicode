@@ -422,7 +422,7 @@ pub fn all_commands_from_script(script: &str) -> Option<Vec<PlainCommand>> {
 /// Parse a single `command` node into a list of "words", rejecting anything
 /// non-trivial (substitutions, complex strings, etc.), and also returning
 /// the byte span for the *highlighted* portion (command + args, not env).
-fn parse_plain_command_from_node(cmd: Node, src: &str) -> Option<PlainCommand> {
+fn parse_plain_command_from_node<'a>(cmd: Node<'a>, src: &'a str) -> Option<PlainCommand> {
     if cmd.kind() != "command" {
         return None;
     }

@@ -1,4 +1,4 @@
-﻿//! Session signals tracking for feedback heuristics.
+//! Session signals tracking for feedback heuristics.
 //!
 //! This module tracks session-level signals that inform feedback request decisions.
 //! Signals are collected locally in the agent and periodically synced to the
@@ -273,7 +273,7 @@ pub struct SessionSignals {
     /// Number of edit-and-retry actions (user rewinds and submits a different prompt)
     pub edit_and_retry_count: u32,
 
-    // === Bash tool patterns (grok_build) ===
+    // === Bash tool patterns (qidi_build) ===
     /// Number of times the bash tool was used for a bare `echo "<msg>"` (or close
     /// variant). Tracked for usage statistics.
     #[serde(default)]

@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use crate::remote::DEFAULT_CONTEXT_WINDOW;
 use cf_chat_state::conversation_util::replace_or_insert_system_head;
 impl SessionActor {
@@ -211,7 +211,7 @@ impl SessionActor {
             }
             bridge
                 .update_resource(
-                    cf_tools::implementations::grok_build::update_goal::GoalUpdateHandle(
+                    cf_tools::implementations::qidi_build::update_goal::GoalUpdateHandle(
                         self.goal_update_tx.clone(),
                     ),
                 )

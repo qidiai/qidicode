@@ -15,10 +15,10 @@ impl DrainSource {
     pub(super) fn into_parts(
         self,
     ) -> (
-        cf_tools::implementations::grok_build::update_goal::UpdateGoalInput,
+        cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput,
         Option<
             tokio::sync::oneshot::Sender<
-                cf_tools::implementations::grok_build::update_goal::UpdateGoalAck,
+                cf_tools::implementations::qidi_build::update_goal::UpdateGoalAck,
             >,
         >,
     ) {
@@ -34,10 +34,10 @@ impl DrainSource {
 pub(super) fn try_send_ack(
     ack_tx: Option<
         tokio::sync::oneshot::Sender<
-            cf_tools::implementations::grok_build::update_goal::UpdateGoalAck,
+            cf_tools::implementations::qidi_build::update_goal::UpdateGoalAck,
         >,
     >,
-    ack: cf_tools::implementations::grok_build::update_goal::UpdateGoalAck,
+    ack: cf_tools::implementations::qidi_build::update_goal::UpdateGoalAck,
 ) {
     if let Some(tx) = ack_tx {
         send_ack(tx, ack);
@@ -154,9 +154,9 @@ impl<F: FnOnce(&mut crate::session::goal_tracker::GoalTracker)> Drop for Tracker
 /// the receiver was dropped (benign — tool future aborted).
 pub(super) fn send_ack(
     ack_tx: tokio::sync::oneshot::Sender<
-        cf_tools::implementations::grok_build::update_goal::UpdateGoalAck,
+        cf_tools::implementations::qidi_build::update_goal::UpdateGoalAck,
     >,
-    ack: cf_tools::implementations::grok_build::update_goal::UpdateGoalAck,
+    ack: cf_tools::implementations::qidi_build::update_goal::UpdateGoalAck,
 ) {
     if ack_tx.send(ack).is_err() {
         tracing::debug!("update_goal ack receiver dropped before harness could respond");
@@ -822,7 +822,7 @@ pub(crate) fn planner_failure_pause_message() -> String {
 }
 
 pub(crate) fn goal_slash_and_harness_available(goal_enabled: bool, tool_names: &[String]) -> bool {
-    use cf_tools::implementations::grok_build::UPDATE_GOAL_TOOL_NAME;
+    use cf_tools::implementations::qidi_build::UPDATE_GOAL_TOOL_NAME;
     goal_enabled && tool_names.iter().any(|n| n == UPDATE_GOAL_TOOL_NAME)
 }
 
@@ -1489,7 +1489,7 @@ impl SessionActor {
             .borrow()
             .tool_bridge()
             .update_resource(
-                cf_tools::implementations::grok_build::task::types::GoalLoopActive(active),
+                cf_tools::implementations::qidi_build::task::types::GoalLoopActive(active),
             )
             .await;
     }

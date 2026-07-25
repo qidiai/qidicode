@@ -10,6 +10,7 @@ cf-codebase-graph = { path = "../cf-codebase-graph" }
 cf-computer-hub-mcp-adapter = { workspace = true }
 cf-computer-hub-sdk = { workspace = true, features = ["metrics"] }
 cf-auth= { workspace = true }
+zeroize = "1"
 cf-paths= { path = "../cf-paths" }
 cf-telemetry= { path = "../cf-telemetry" }
 cf-version= { workspace = true }

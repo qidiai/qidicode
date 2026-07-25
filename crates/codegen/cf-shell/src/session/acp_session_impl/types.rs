@@ -1,4 +1,4 @@
-﻿//! Top-level enum definitions for `acp_session`; their `impl` blocks and
+//! Top-level enum definitions for `acp_session`; their `impl` blocks and
 //! helpers stay in `acp_session.rs`.
 
 use super::*;
@@ -199,8 +199,8 @@ pub(crate) enum DrainPurpose {
 /// Origin of a drain entry. `Pending` entries had their acks resolved
 /// at defer time; `Channel` entries still carry a live oneshot.
 pub(crate) enum DrainSource {
-    Pending(cf_tools::implementations::grok_build::update_goal::UpdateGoalInput),
-    Channel(cf_tools::implementations::grok_build::update_goal::UpdateGoalEnvelope),
+    Pending(cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput),
+    Channel(cf_tools::implementations::qidi_build::update_goal::UpdateGoalEnvelope),
 }
 
 /// Reason a NotAchieved verdict was synthesized without invoking the

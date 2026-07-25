@@ -50,7 +50,7 @@ async fn single_model_server(model: &str, backend: &str) -> MockInferenceServer 
     .expect("start mock server")
 }
 
-async fn grok_build_server() -> MockInferenceServer {
+async fn qidi_build_server() -> MockInferenceServer {
     MockInferenceServer::start_with_models(vec![
         MockModelEntry::with_agent_type("grok-4.5", "cf-tools")
             .with_api_backend("responses")
@@ -217,7 +217,7 @@ async fn test_headless_session_in_non_git_dir() {
 #[tokio::test]
 #[ignore] // requires pre-built binary; run with --ignored
 async fn test_headless_tools_allowlist_keeps_enabled_web_tools() {
-    let server = grok_build_server().await;
+    let server = qidi_build_server().await;
     server.preset_allow_access();
     let workdir = git_workdir();
 
@@ -275,7 +275,7 @@ async fn test_headless_tools_allowlist_keeps_enabled_web_tools() {
 #[tokio::test]
 #[ignore] // requires pre-built binary; run with --ignored
 async fn test_headless_tools_allowlist_does_not_fail_open_for_disabled_web_fetch() {
-    let server = grok_build_server().await;
+    let server = qidi_build_server().await;
     server.set_settings(serde_json::json!({
         "allow_access": true,
         "web_fetch_enabled": false,
@@ -315,7 +315,7 @@ async fn test_headless_tools_allowlist_does_not_fail_open_for_disabled_web_fetch
 #[tokio::test]
 #[ignore] // requires pre-built binary; run with --ignored
 async fn test_headless_terminal_only_allowlist_is_foreground_only() {
-    let server = grok_build_server().await;
+    let server = qidi_build_server().await;
     let workdir = git_workdir();
 
     let result = run_headless(

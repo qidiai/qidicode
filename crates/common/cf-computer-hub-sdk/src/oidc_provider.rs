@@ -132,7 +132,15 @@ impl AuthProvider for OidcAuthProvider {
             })
         };
         if expired && let Err(e) = self.try_refresh() {
-            tracing::warn!(error = %e, "OIDC refresh failed, using stale token");
+            // SECURITY: Log the refresh failure. The stale token is still
+            // returned (rather than returning empty/None) because:
+            // 1. The Hub server will reject expired tokens, providing defense-in-depth.
+            // 2. Returning None would cause a panic in callers expecting credentials.
+            // The server-side expiration check is the authoritative gate.
+            tracing::warn!(
+                error = %e,
+                "OIDC refresh failed — token may be expired and rejected by server"
+            );
         }
         let s = self.state.lock();
         AuthCredential::bearer(&s.access_token)

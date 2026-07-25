@@ -704,7 +704,7 @@ pub struct ToolsConfig {
     /// downloaded locally. Only effective when `disable_zdr_incompatible_tools`
     /// is `true`. Populated from `[tools.zdr_video_output_s3]` in config.
     pub zdr_video_output_s3:
-        Option<cf_tools::implementations::grok_build::video_gen::ZdrVideoOutputS3Config>,
+        Option<cf_tools::implementations::qidi_build::video_gen::ZdrVideoOutputS3Config>,
 }
 impl ToolsConfig {
     /// Resolve the final tools config, in priority order:
@@ -733,7 +733,7 @@ impl ToolsConfig {
                 .and_then(|s3_val| match s3_val
                     .clone()
                     .try_into::<
-                        cf_tools::implementations::grok_build::video_gen::ZdrVideoOutputS3Config,
+                        cf_tools::implementations::qidi_build::video_gen::ZdrVideoOutputS3Config,
                     >()
                 {
                     Ok(cfg) if cfg.is_valid() => Some(cfg),

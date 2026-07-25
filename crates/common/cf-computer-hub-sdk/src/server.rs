@@ -250,6 +250,14 @@ impl ToolServerBuilder {
     /// or TLS-terminating proxy) — the bearer would otherwise cross the
     /// wire in cleartext.
     pub fn allow_insecure_ws(mut self, allow: bool) -> Self {
+        if allow {
+            tracing::warn!(
+                "SECURITY: allow_insecure_ws is enabled. \
+                 Bearer tokens will be sent in cleartext over ws://. \
+                 Only use this for loopback (localhost) connections or \
+                 when a TLS-terminating proxy handles encryption."
+            );
+        }
         self.allow_insecure_ws = allow;
         self
     }

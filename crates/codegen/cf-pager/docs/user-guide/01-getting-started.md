@@ -56,7 +56,7 @@ Start Grok by running:
 grok
 ```
 
-On first launch, Grok opens your browser to authenticate with grok.com. After you sign in, Grok stores your credentials in `~/.grok/auth.json`, where they persist across sessions. Grok refreshes your credentials automatically and prompts you to sign in again when they can no longer be renewed.
+On first launch, Grok opens your browser to authenticate with grok.com. After you sign in, Grok stores your credentials in `~/.qidi/auth.json`, where they persist across sessions. Grok refreshes your credentials automatically and prompts you to sign in again when they can no longer be renewed.
 
 If you prefer API key authentication (e.g., for CI/CD or environments without a browser), set the `XAI_API_KEY` environment variable instead:
 
@@ -111,7 +111,7 @@ By default, Grok asks for permission before executing shell commands or editing 
 
 ### Sessions
 
-Every conversation is a **session**. Sessions are automatically saved to `~/.grok/sessions/` and can be resumed later. Each session tracks the full conversation history, tool calls, file edits, and task state.
+Every conversation is a **session**. Sessions are automatically saved to `~/.qidi/sessions/` and can be resumed later. Each session tracks the full conversation history, tool calls, file edits, and task state.
 
 - Start a new session: `Ctrl+N` or `/new`
 - Resume a previous session: `/resume` in the TUI, or `--resume <ID>` from the CLI
@@ -226,8 +226,16 @@ Output formats:
 Example CI/CD usage:
 
 ```bash
-grok -p "Review changes for bugs" --output-format json --yolo | jq -r '.text'
+# --yolo (alias of --always-approve) auto-approves tool calls. In CI, pair it
+# with a sandbox so an unattended agent still has an OS-level guardrail:
+qidi -p "Review changes for bugs" --output-format json --sandbox=readonly --yolo | jq -r '.text'
 ```
+
+> Security note: a fully-open `--yolo` with the sandbox disabled leaves no
+> OS-level protection. The permission layer also supports a YOLO *tool
+> allowlist* (see [`YoloMode`](../../../cf-workspace/src/permission/yolo.rs)) so
+> only chosen tools are auto-approved — prefer that over blanket `--yolo` when
+> running without a sandbox.
 
 ---
 
@@ -236,7 +244,7 @@ grok -p "Review changes for bugs" --output-format json --yolo | jq -r '.text'
 Add per-project instructions by creating an `AGENTS.md` file in your repository. Grok reads these files and injects their contents as a project-instructions message at the start of the conversation:
 
 ```
-~/.grok/AGENTS.md           # Global rules (apply to all projects)
+~/.qidi/AGENTS.md           # Global rules (apply to all projects)
 <repo-root>/AGENTS.md       # Repository-level rules
 <cwd>/AGENTS.md             # Directory-level rules (highest priority)
 ```

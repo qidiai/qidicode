@@ -1138,7 +1138,7 @@ mod compacted_history_shape_tests {
     /// `summary_before_recent_compaction_with_no_user_query_yields_three_messages` for cf-tools
     /// (`summary_before_recent = false`).
     #[tokio::test]
-    async fn grok_build_compaction_drops_working_tail_regression_206460() {
+    async fn qidi_build_compaction_drops_working_tail_regression_206460() {
         let conversation = vec![
             ConversationItem::system("You are a helpful assistant."),
             ConversationItem::user(

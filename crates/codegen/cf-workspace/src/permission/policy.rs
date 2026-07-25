@@ -1,9 +1,9 @@
-﻿use crate::permission::bash_command_splitting::{all_commands_from_script, unwrap_wrappers};
+use crate::permission::bash_command_splitting::{all_commands_from_script, unwrap_wrappers};
 use crate::permission::shell_access::combine_decisions;
 use crate::permission::types::{
     AccessKind, Decision, PatternMode, PermissionConfig, PermissionRule, RuleAction, ToolFilter,
 };
-use cf_tools::implementations::grok_build::web_fetch::domain::normalize_domain;
+use cf_tools::implementations::qidi_build::web_fetch::domain::normalize_domain;
 
 #[derive(Clone, Copy)]
 enum MatchContext {

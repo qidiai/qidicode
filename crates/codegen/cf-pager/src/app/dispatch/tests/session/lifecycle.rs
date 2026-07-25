@@ -1452,7 +1452,7 @@ fn dispatch_new_session_has_empty_scrollback() {
 #[test]
 fn translate_local_submit_always_returns_persist_always_for_new_session() {
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use cf_tools::implementations::grok_build::ask_user_question::{
+    use cf_tools::implementations::qidi_build::ask_user_question::{
         Question, QuestionOption,
     };
     let q = Question {
@@ -1494,7 +1494,7 @@ fn translate_local_submit_always_returns_persist_always_for_new_session() {
 #[test]
 fn translate_local_submit_never_returns_persist_never_for_new_session() {
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use cf_tools::implementations::grok_build::ask_user_question::{
+    use cf_tools::implementations::qidi_build::ask_user_question::{
         Question, QuestionOption,
     };
     let q = Question {

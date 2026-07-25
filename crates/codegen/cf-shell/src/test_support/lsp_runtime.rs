@@ -1,4 +1,4 @@
-﻿use crate::agent::subagent::SubagentSpawnContext;
+use crate::agent::subagent::SubagentSpawnContext;
 use crate::session::SessionCommand;
 use agent_client_protocol as acp;
 use std::collections::HashMap;
@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use cf_acp_lib::AcpAgentGatewaySender as GatewaySender;
-use cf_tools::implementations::grok_build::task::types::{SubagentRequest, SubagentResult};
+use cf_tools::implementations::qidi_build::task::types::{SubagentRequest, SubagentResult};
 pub(crate) type GatewayOut = <acp::AgentSide as cf_acp_lib::AcpSide>::OutMessage;
 pub(crate) fn test_gateway() -> GatewaySender {
     let (tx, _rx) = mpsc::unbounded_channel();

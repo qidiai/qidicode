@@ -60,11 +60,11 @@ pub struct BillingPeriodUsage {
 /// Current billing configuration for QIDI Code coding credits.
 ///
 /// Carries both the newer credits-config fields (`credit_usage_percent`,
-/// `current_period`) and the deprecated `GrokBuildBillingConfig` fields
+/// `current_period`) and the deprecated `QidiBuildBillingConfig` fields
 /// (`monthly_limit`, `used`, `billing_period_*`). Consumers should prefer the
 /// new fields and fall back to the deprecated ones, so the same struct works
 /// against both the new `GetGrokCreditsConfig` and the legacy
-/// `GetGrokBuildBillingConfig` backend responses.
+/// `GetQidiBuildBillingConfig` backend responses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BillingConfig {
@@ -95,7 +95,7 @@ pub struct BillingConfig {
     /// Whether this user is on unified usage billing (shared weekly/monthly
     /// pool). From `GrokCreditsConfig.is_unified_billing_user`, which billing
     /// sets from remote settings `unified_consumer_billing_enabled`. `None` when
-    /// absent (legacy `GetGrokBuildBillingConfig` shape or older servers).
+    /// absent (legacy `GetQidiBuildBillingConfig` shape or older servers).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_unified_billing_user: Option<bool>,
     /// Deprecated: use `current_period.start`.

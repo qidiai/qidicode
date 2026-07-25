@@ -303,7 +303,7 @@ pub(in crate::app::dispatch) fn set_ask_user_question_timeout_enabled(
     app: &mut AppView,
     new: bool,
 ) -> Vec<Effect> {
-    use cf_tools::implementations::grok_build::ask_user_question;
+    use cf_tools::implementations::qidi_build::ask_user_question;
     let prev_state = app.ask_user_question_timeout_enabled;
     let prev_effective =
         prev_state.unwrap_or(ask_user_question::DEFAULT_ASK_USER_QUESTION_TIMEOUT_ENABLED);
@@ -1820,7 +1820,7 @@ pub(in crate::app::dispatch) fn set_max_thoughts_width(app: &mut AppView, new: i
 /// (`show_tips`, `auto_update`, ask_user_question timeout).
 /// Matches the consumer's `.unwrap_or(...)` fallback.
 pub(super) fn pr13_effective_default(key: &str) -> Option<bool> {
-    use cf_tools::implementations::grok_build::ask_user_question;
+    use cf_tools::implementations::qidi_build::ask_user_question;
     match key {
         "show_tips" => Some(true),
         "auto_update" => Some(true),

@@ -64,7 +64,7 @@ async fn same_type_server() -> MockInferenceServer {
 /// the cf-tools identity string.
 #[tokio::test]
 #[ignore]
-async fn test_default_model_uses_grok_build_harness() {
+async fn test_default_model_uses_qidi_build_harness() {
     with_local_set(|| async {
         let server = MockInferenceServer::start()
             .await
@@ -175,7 +175,7 @@ async fn test_session_resume_preserves_harness() {
 /// default to `"cf-tools"`. This exercises the serde default.
 #[tokio::test]
 #[ignore]
-async fn test_model_without_agent_type_defaults_to_grok_build() {
+async fn test_model_without_agent_type_defaults_to_qidi_build() {
     with_local_set(|| async {
             let server = MockInferenceServer::start_with_models(
                     vec![MockModelEntry::new("no-agent-type-model"),],

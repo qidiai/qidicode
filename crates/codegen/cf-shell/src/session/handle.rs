@@ -1,4 +1,4 @@
-﻿//! `SessionHandle` — the `Clone + Send` proxy for interacting with a session actor.
+//! `SessionHandle` — the `Clone + Send` proxy for interacting with a session actor.
 //!
 //! Callers hold a `SessionHandle` and send `SessionCommand` messages via the
 //! internal channel. Extracted from `acp_session.rs` to keep the actor
@@ -162,7 +162,7 @@ pub struct SessionHandle {
     /// Scheduler handle for this session. Subagents inherit the parent's
     /// handle so scheduled tasks survive the subagent's exit.
     pub scheduler_handle:
-        Option<cf_tools::implementations::grok_build::scheduler::types::SchedulerHandle>,
+        Option<cf_tools::implementations::qidi_build::scheduler::types::SchedulerHandle>,
 }
 impl SessionHandle {
     /// Last assistant `model_id` / `model_fingerprint` in conversation (global, not turn-scoped).

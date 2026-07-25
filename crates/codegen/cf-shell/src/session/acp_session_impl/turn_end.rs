@@ -1,4 +1,4 @@
-﻿//! Turn-completion concern for `SessionActor`: completion handling
+//! Turn-completion concern for `SessionActor`: completion handling
 //! and turn-error classification.
 
 use super::*;
@@ -123,12 +123,12 @@ impl SessionActor {
     pub(super) async fn outstanding_reply_for_prompt(
         &self,
         prompt_id: &str,
-    ) -> Option<cf_tools::implementations::grok_build::task::types::SubagentOutstandingReply>
+    ) -> Option<cf_tools::implementations::qidi_build::task::types::SubagentOutstandingReply>
     {
         let Some(tx) = &self.tool_context.subagent_event_tx else {
             return Some(Default::default());
         };
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentOutstandingRequest,
         };
         let (respond_to, rx) = tokio::sync::oneshot::channel();
@@ -148,7 +148,7 @@ impl SessionActor {
     /// [`super::turn::UsageDrainOutcome::report_incomplete`].
     pub(super) fn usage_incomplete_from_reply(
         reply: Option<
-            &cf_tools::implementations::grok_build::task::types::SubagentOutstandingReply,
+            &cf_tools::implementations::qidi_build::task::types::SubagentOutstandingReply,
         >,
     ) -> bool {
         super::turn::UsageDrainOutcome::from_outstanding_reply(reply).report_incomplete()
@@ -158,7 +158,7 @@ impl SessionActor {
         let Some(tx) = &self.tool_context.subagent_event_tx else {
             return;
         };
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentClearUsageNotAppliedRequest, SubagentEvent,
         };
         let _ = tx.send(SubagentEvent::ClearUsageNotApplied(
@@ -186,7 +186,7 @@ impl SessionActor {
                 .borrow()
                 .tool_bridge()
                 .update_resource(
-                    cf_tools::implementations::grok_build::task::types::CurrentPromptIdResource(
+                    cf_tools::implementations::qidi_build::task::types::CurrentPromptIdResource(
                         String::new(),
                     ),
                 )

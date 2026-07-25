@@ -1,4 +1,4 @@
-﻿use std::collections::HashSet;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -18,7 +18,7 @@ use crate::permission::types::{
     AccessKind, ClientType, Decision, EditPolicy, PermissionCommand, PermissionEvent, PromptPolicy,
 };
 use cf_paths::AbsPathBuf;
-use cf_tools::implementations::grok_build::web_fetch::{
+use cf_tools::implementations::qidi_build::web_fetch::{
     DomainMatcher, domain::normalize_domain,
 };
 
@@ -329,6 +329,28 @@ fn is_dangerous_command_words(words: &[String]) -> bool {
         || matches_command_prefix(&joined, "kill")
         || matches_command_prefix(&joined, "killall")
         || matches_command_prefix(&joined, "git push")
+        // SECURITY: Extended dangerous command deny-list to cover common
+        // destructive operations that should always require user approval.
+        || matches_command_prefix(&joined, "sudo")
+        || matches_command_prefix(&joined, "su")
+        || matches_command_prefix(&joined, "dd")
+        || matches_command_prefix(&joined, "mkfs")
+        || matches_command_prefix(&joined, "fdisk")
+        || matches_command_prefix(&joined, "shutdown")
+        || matches_command_prefix(&joined, "reboot")
+        || matches_command_prefix(&joined, "halt")
+        || matches_command_prefix(&joined, "poweroff")
+        // Prevent piping to shell interpreters (common payload delivery)
+        || joined.contains("| sh")
+        || joined.contains("| bash")
+        || joined.contains("|/bin/sh")
+        || joined.contains("|/bin/bash")
+        || joined.contains("| zsh")
+        // Prevent curl/wget piped to shell (remote code execution pattern)
+        || (matches_command_prefix(&joined, "curl") && joined.contains("| sh"))
+        || (matches_command_prefix(&joined, "curl") && joined.contains("| bash"))
+        || (matches_command_prefix(&joined, "wget") && joined.contains("| sh"))
+        || (matches_command_prefix(&joined, "wget") && joined.contains("| bash"))
 }
 
 /// Whitelist matching helper. Uses `matches_command_prefix` so that user
@@ -473,6 +495,17 @@ impl PermissionHandle {
             if let Err(e) = cmd_tx.send(PermissionCommand::SetYoloMode(enabled)) {
                 tracing::error!(?e, "failed to send yolo mode command");
             }
+        }
+    }
+
+    /// B5: Set the YOLO tool allowlist. `None` = unrestricted (auto-approve any
+    /// tool while YOLO is on — the historical behavior); `Some(set)` = only the
+    /// listed tools are auto-approved by YOLO. No-op on the `AllowAll` handle.
+    pub fn set_yolo_allowlist(&self, allowlist: Option<std::collections::HashSet<String>>) {
+        if let PermissionHandle::Actor { cmd_tx, .. } = self
+            && let Err(e) = cmd_tx.send(PermissionCommand::SetYoloAllowlist(allowlist))
+        {
+            tracing::error!(?e, "failed to send yolo allowlist command");
         }
     }
 
@@ -964,6 +997,11 @@ fn spawn_permission_manager_with_pin(
             .with_hub_permission(hub_permission)
             .with_remember_tool_approvals(remember_tool_approvals);
         let mut yolo_mode = initial_yolo;
+        // B5: YOLO tool allowlist. `None` = unrestricted (auto-approve any tool
+        // when yolo_mode is on — the historical behavior, so unset means no
+        // change for existing callers/tests); `Some(set)` = only listed tools
+        // are auto-approved by YOLO.
+        let mut yolo_allowlist: Option<std::collections::HashSet<String>> = None;
         let mut auto_mode = seed_auto;
         if seed_auto {
             tracing::info!("auto permission mode seeded from Claude defaultMode / prompt_policy");
@@ -1003,6 +1041,13 @@ fn spawn_permission_manager_with_pin(
                         auto_mode = false;
                         auto_state_actor.store(false, Ordering::Relaxed);
                     }
+                }
+                PermissionCommand::SetYoloAllowlist(allowlist) => {
+                    match &allowlist {
+                        None => tracing::info!("YOLO allowlist cleared (unrestricted)"),
+                        Some(set) => tracing::info!(count = set.len(), "YOLO allowlist set"),
+                    }
+                    yolo_allowlist = allowlist;
                 }
                 PermissionCommand::SetAutoMode(enabled) => {
                     tracing::info!("auto permission mode set to: {}", enabled);
@@ -1173,7 +1218,16 @@ fn spawn_permission_manager_with_pin(
                         continue;
                     }
 
-                    if yolo_mode && !shell_forced_prompt {
+                    // B5: YOLO auto-approve is gated by the optional tool
+                    // allowlist. `None` = unrestricted (any tool — unchanged
+                    // legacy behavior); `Some(set)` = only listed tools are
+                    // auto-approved, others fall through to normal handling.
+                    let yolo_auto_approves = yolo_mode
+                        && match &yolo_allowlist {
+                            None => true,
+                            Some(set) => set.contains(&tool_name),
+                        };
+                    if yolo_auto_approves && !shell_forced_prompt {
                         tracing::debug!("YOLO mode: auto-approving permission request");
                         let decision = Decision::Allow;
                         emit_event(&decision, true, false, None, Some(reasons::YOLO));

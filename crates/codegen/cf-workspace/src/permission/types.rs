@@ -227,6 +227,10 @@ pub enum PermissionCommand {
     },
     /// Set the YOLO mode (auto-approve all permissions)
     SetYoloMode(bool),
+    /// B5: Set the YOLO tool allowlist. `None` = unrestricted (any tool
+    /// auto-approved when YOLO is on, the historical behavior); `Some(set)` =
+    /// only tools in `set` are auto-approved by YOLO, others still prompt.
+    SetYoloAllowlist(Option<std::collections::HashSet<String>>),
     /// Set auto mode (LLM classifier for non-fast-path tools). Mutually
     /// exclusive with YOLO at the handle level; enabling auto clears yolo
     /// and vice versa when applied by the actor.
@@ -490,7 +494,7 @@ mod tests {
     }
     #[test]
     fn hashline_edit_maps_to_edit_access() {
-        use cf_tools::implementations::grok_build_hashline::edit::types::HashlineEditInput;
+        use cf_tools::implementations::qidi_build_hashline::edit::types::HashlineEditInput;
         use cf_tools::types::ToolInput;
         let input = ToolInput::HashlineEdit(HashlineEditInput {
             file_path: "src/main.rs".into(),
@@ -504,7 +508,7 @@ mod tests {
     }
     #[test]
     fn bash_maps_to_bash_access() {
-        use cf_tools::implementations::grok_build::bash::BashToolInput;
+        use cf_tools::implementations::qidi_build::bash::BashToolInput;
         use cf_tools::types::ToolInput;
         let input = ToolInput::Bash(BashToolInput {
             command: "cargo test".into(),
@@ -535,7 +539,7 @@ mod tests {
     }
     #[test]
     fn monitor_maps_to_bash_access() {
-        use cf_tools::implementations::grok_build::monitor::types::MonitorInput;
+        use cf_tools::implementations::qidi_build::monitor::types::MonitorInput;
         use cf_tools::types::ToolInput;
         let input = ToolInput::Monitor(MonitorInput {
             command: "tail -f /var/log/syslog".into(),
@@ -552,7 +556,7 @@ mod tests {
     }
     #[test]
     fn search_replace_maps_to_edit_access() {
-        use cf_tools::implementations::grok_build::search_replace::SearchReplaceInput;
+        use cf_tools::implementations::qidi_build::search_replace::SearchReplaceInput;
         use cf_tools::types::ToolInput;
         let input = ToolInput::SearchReplace(SearchReplaceInput {
             file_path: "lib.rs".into(),
@@ -568,7 +572,7 @@ mod tests {
     }
     #[test]
     fn web_fetch_maps_to_web_fetch_access() {
-        use cf_tools::implementations::grok_build::web_fetch::WebFetchInput;
+        use cf_tools::implementations::qidi_build::web_fetch::WebFetchInput;
         use cf_tools::types::ToolInput;
         let input = ToolInput::WebFetch(WebFetchInput {
             url: "https://custom.example.com/api".into(),
@@ -582,7 +586,7 @@ mod tests {
     }
     #[test]
     fn web_search_maps_to_web_search_access() {
-        use cf_tools::implementations::grok_build::web_search::WebSearchInput;
+        use cf_tools::implementations::qidi_build::web_search::WebSearchInput;
         use cf_tools::types::ToolInput;
         let input = ToolInput::WebSearch(WebSearchInput {
             query: "rust lang".into(),

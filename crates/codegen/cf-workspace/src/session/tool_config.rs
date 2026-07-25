@@ -394,11 +394,11 @@ impl SessionContextFactory for WorkspaceSessionContextFactory {
         session_env: Arc<HashMap<String, String>>,
         backend: Arc<dyn cf_tools::computer::types::TerminalBackend>,
     ) -> cf_tools::registry::types::SessionContext {
-        use cf_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig;
-        use cf_tools::implementations::grok_build::image_gen::ImageGenConfig;
-        use cf_tools::implementations::grok_build::video_gen::VideoGenConfig;
+        use cf_tools::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig;
+        use cf_tools::implementations::qidi_build::image_gen::ImageGenConfig;
+        use cf_tools::implementations::qidi_build::video_gen::VideoGenConfig;
         use cf_tools::implementations::web_search::WebSearchConfig;
-        let fs = Arc::new(cf_tools::computer::local::LocalFs)
+        let fs = Arc::new(cf_tools::computer::local::LocalFs::unconfined())
             as Arc<dyn cf_tools::computer::types::AsyncFileSystem>;
         let notification_handle = cf_tools::notification::ToolNotificationHandle::noop();
         let (image_gen_config, video_gen_config, web_search_config, app_builder_deployer_config) =
@@ -508,9 +508,9 @@ fn build_proxy_headers(base_url: &str) -> indexmap::IndexMap<String, String> {
 }
 /// Build web fetch config. Enabled with default params unless
 /// `QIDI_DISABLE_WEB_FETCH=1` is set.
-fn build_web_fetch_config() -> cf_tools::implementations::grok_build::web_fetch::WebFetchConfig
+fn build_web_fetch_config() -> cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig
 {
-    use cf_tools::implementations::grok_build::web_fetch::{WebFetchConfig, WebFetchParams};
+    use cf_tools::implementations::qidi_build::web_fetch::{WebFetchConfig, WebFetchParams};
     if std::env::var("QIDI_DISABLE_WEB_FETCH").is_ok_and(|v| v == "1" || v == "true") {
         return WebFetchConfig::Disabled;
     }

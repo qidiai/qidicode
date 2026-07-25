@@ -117,7 +117,7 @@ async fn cli_should_use_device(
 /// Whether interactive xAI OAuth2 login uses the RFC 8628 device flow (vs loopback).
 ///
 /// Precedence: CLI (`--oauth`/`--device-auth`) > `QIDI_LOGIN_DEVICE_FLOW` env >
-/// `[auth] login_device_flow` config > `grok_build_login_device_flow` remote feature flag > loopback.
+/// `[auth] login_device_flow` config > `qidi_build_login_device_flow` remote feature flag > loopback.
 async fn should_use_device_flow(login_override: LoginTransportOverride) -> bool {
     // Already resolved (and logged) upstream — honor it without re-resolving or
     // emitting a second transport log.

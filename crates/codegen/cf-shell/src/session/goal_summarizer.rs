@@ -82,7 +82,7 @@ pub(crate) trait GoalSummarizerSpawner: Send + Sync {
 
 pub(crate) struct ChannelSpawner {
     pub(crate) event_tx: tokio::sync::mpsc::UnboundedSender<
-        cf_tools::implementations::grok_build::task::types::SubagentEvent,
+        cf_tools::implementations::qidi_build::task::types::SubagentEvent,
     >,
     pub(crate) parent_session_id: String,
     pub(crate) parent_prompt_id: Option<String>,
@@ -155,7 +155,7 @@ impl ChannelSpawner {
         model: Option<String>,
         harness_agent_type: Option<String>,
     ) -> Result<String, SpawnError> {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentRequest, SubagentRuntimeOverrides,
         };
         use cf_tool_types::SubagentCapabilityMode;
@@ -630,7 +630,7 @@ mod tests {
 
     #[tokio::test]
     async fn channel_spawner_request_is_harness_internal_and_read_only() {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
         use cf_tool_types::SubagentCapabilityMode;

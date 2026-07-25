@@ -107,7 +107,7 @@ pub(crate) fn strategist_should_fire(consecutive: u32, last_fired: u32, every: u
 
 pub(crate) struct ChannelSpawner {
     pub(crate) event_tx: tokio::sync::mpsc::UnboundedSender<
-        cf_tools::implementations::grok_build::task::types::SubagentEvent,
+        cf_tools::implementations::qidi_build::task::types::SubagentEvent,
     >,
     pub(crate) parent_session_id: String,
     pub(crate) parent_prompt_id: Option<String>,
@@ -181,7 +181,7 @@ impl ChannelSpawner {
         model: Option<String>,
         harness_agent_type: Option<String>,
     ) -> Result<String, SpawnError> {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentRequest, SubagentRuntimeOverrides,
         };
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
@@ -570,7 +570,7 @@ mod tests {
 
     #[tokio::test]
     async fn channel_spawner_request_is_harness_internal() {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
 
@@ -612,7 +612,7 @@ mod tests {
     /// request's `harness_agent_type`, not the subagent_type.
     #[tokio::test]
     async fn channel_spawner_threads_harness_override_to_request() {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1264,7 +1264,7 @@ mod tests {
     /// explicit `from_summary` path leaves no tool placeholder unresolved.
     #[test]
     fn strategist_template_renders_per_agent_type_names() {
-        use cf_tools::implementations::grok_build::task::types::SubagentTypeSummary;
+        use cf_tools::implementations::qidi_build::task::types::SubagentTypeSummary;
         let mut tool_names = std::collections::HashMap::new();
         tool_names.insert(
             cf_tools::types::tool::ToolKind::Read,

@@ -158,6 +158,10 @@ fn cache_hash(url: &str) -> String {
 
 /// Clone a git repo with depth 1.
 fn clone_repo(url: &str, branch: Option<&str>, dest: &Path) -> Result<(), String> {
+    // SECURITY: Validate URL protocol before any clone attempt, so both
+    // the git2 fast-path and the CLI fallback share the same whitelist.
+    validate_clone_url(url)?;
+
     // Try git2 first.
     match clone_with_git2(url, branch, dest) {
         Ok(()) => return Ok(()),
@@ -261,9 +265,33 @@ pub fn git_command() -> std::process::Command {
     cmd
 }
 
+/// Validate that a git URL uses an allowed protocol and is not a local path.
+/// Only HTTPS URLs are permitted for plugin marketplace sources to prevent
+/// `file://` protocol attacks and local path traversal.
+fn validate_clone_url(url: &str) -> Result<(), String> {
+    if url.starts_with("https://") {
+        return Ok(());
+    }
+    // Allow ssh:// for private repos but warn — SSH is harder to validate
+    // but is a legitimate enterprise use case.
+    if url.starts_with("ssh://") || url.starts_with("git@") {
+        tracing::warn!(
+            url = %url,
+            "plugin marketplace clone via SSH — ensure you trust this source"
+        );
+        return Ok(());
+    }
+    Err(format!(
+        "blocked plugin clone URL '{url}': only https:// and ssh:// protocols are allowed \
+         (file:// and local paths are rejected for security)"
+    ))
+}
+
 fn clone_with_cli(url: &str, branch: Option<&str>, dest: &Path) -> Result<(), String> {
+    validate_clone_url(url)?;
+
     let mut cmd = git_command();
-    cmd.args(["clone", "--depth", "1"]);
+    cmd.args(["clone", "--depth", "1", "--no-hooks"]);
     if let Some(b) = branch {
         cmd.args(["--branch", b]);
     }

@@ -1,4 +1,4 @@
-﻿//! Session status, sharing, privacy, usage, and info dispatchers.
+//! Session status, sharing, privacy, usage, and info dispatchers.
 
 use super::ctx::get_active_agent;
 use super::settings::ui::refresh_open_settings_modals;
@@ -246,7 +246,7 @@ pub(super) fn dispatch_show_context_info(app: &mut AppView) -> Vec<Effect> {
 
 /// Show credit usage: fetch billing data and display inline.
 ///
-/// When the remote settings `grok_build_usage_redirect_url` flag is set (delivered via
+/// When the remote settings `qidi_build_usage_redirect_url` flag is set (delivered via
 /// RemoteSettings, targeted at personal-team users), skip the backend fetch and
 /// just point the user at that URL instead. This is a kill switch for the
 /// personal-team billing path while it is unreliable.

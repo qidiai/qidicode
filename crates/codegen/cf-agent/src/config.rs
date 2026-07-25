@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use strum::{AsRefStr, Display, EnumIter, EnumString, IntoStaticStr};
 use cf_tools::implementations::codex;
-use cf_tools::implementations::grok_build;
-use cf_tools::implementations::grok_build_concise;
+use cf_tools::implementations::qidi_build;
+use cf_tools::implementations::qidi_build_concise;
 use cf_tools::implementations::memory;
 use cf_tools::implementations::opencode;
 use cf_tools::implementations::search_tool;
@@ -91,7 +91,7 @@ fn registered_public_toolset_preset_names() -> Vec<String> {
         .map(|(name, _)| name.clone())
         .collect()
 }
-/// Orchestrator-specific prompt body appended to the standard GrokBuild
+/// Orchestrator-specific prompt body appended to the standard QidiBuild
 /// system prompt (`prompt.md`). Instructs the GBL model to delegate
 /// coding and exploration work to subagents.
 const ORCHESTRATOR_PROMPT_BODY: &str = "\
@@ -143,50 +143,50 @@ Write prompts the way you would brief a senior engineer:
 /// Bash tool with clearer model-facing names:
 /// `run_terminal_cmd` → `run_terminal_command`, `is_background` → `background`.
 fn bash_tool_config() -> ToolConfig {
-    ToolConfig::from(&grok_build::BashTool)
+    ToolConfig::from(&qidi_build::BashTool)
         .with_name("run_terminal_command")
         .with_param_rename("is_background", "background")
 }
 /// Task/subagent tool with clearer model-facing names:
 /// `task` → `spawn_subagent`, `run_in_background` → `background`.
 fn task_tool_config() -> ToolConfig {
-    ToolConfig::from(&grok_build::TaskTool)
+    ToolConfig::from(&qidi_build::TaskTool)
         .with_name("spawn_subagent")
         .with_param_rename("run_in_background", "background")
 }
 /// Task output tool renamed for clarity:
 /// `get_task_output` → `get_command_or_subagent_output`.
 fn task_output_tool_config() -> ToolConfig {
-    ToolConfig::from(&grok_build::TaskOutputTool).with_name("get_command_or_subagent_output")
+    ToolConfig::from(&qidi_build::TaskOutputTool).with_name("get_command_or_subagent_output")
 }
 /// `wait_tasks` → `wait_commands_or_subagents`.
 fn wait_tasks_tool_config() -> ToolConfig {
-    ToolConfig::from(&grok_build::WaitTasksTool).with_name("wait_commands_or_subagents")
+    ToolConfig::from(&qidi_build::WaitTasksTool).with_name("wait_commands_or_subagents")
 }
 /// `kill_task` → `kill_command_or_subagent`.
 fn kill_task_tool_config() -> ToolConfig {
-    ToolConfig::from(&grok_build::KillTaskTool).with_name("kill_command_or_subagent")
+    ToolConfig::from(&qidi_build::KillTaskTool).with_name("kill_command_or_subagent")
 }
 /// Complete workspace-executable toolset for hub registration.
 ///
-/// Extends `default_grok_build_toolset()` with tools that are dynamically
+/// Extends `default_qidi_build_toolset()` with tools that are dynamically
 /// injected by `AgentBuilder::build()` or only available in specific modes.
 /// In proxy mode, the workspace server executes ALL tools — the shell has
 /// zero local dispatch.
-pub fn workspace_grok_build_toolset() -> ToolServerConfig {
-    let mut tools = default_grok_build_toolset().tools;
+pub fn workspace_qidi_build_toolset() -> ToolServerConfig {
+    let mut tools = default_qidi_build_toolset().tools;
     tools.push((&opencode::OpenCodeWriteTool).into());
-    tools.push((&grok_build::EnterPlanModeTool).into());
-    tools.push((&grok_build::ExitPlanModeTool).into());
-    tools.push((&grok_build::AskUserQuestionTool).into());
-    tools.push((&grok_build::WebSearchTool).into());
-    tools.push((&grok_build::ImageGenTool).into());
-    tools.push((&grok_build::ImageToVideoTool).into());
-    tools.push((&grok_build::ReferenceToVideoTool).into());
-    tools.push((&grok_build::WebFetchTool).into());
+    tools.push((&qidi_build::EnterPlanModeTool).into());
+    tools.push((&qidi_build::ExitPlanModeTool).into());
+    tools.push((&qidi_build::AskUserQuestionTool).into());
+    tools.push((&qidi_build::WebSearchTool).into());
+    tools.push((&qidi_build::ImageGenTool).into());
+    tools.push((&qidi_build::ImageToVideoTool).into());
+    tools.push((&qidi_build::ReferenceToVideoTool).into());
+    tools.push((&qidi_build::WebFetchTool).into());
     tools.push((&memory::search_tool::MemorySearchImpl).into());
     tools.push((&memory::get_tool::MemoryGetImpl).into());
-    tools.push((&grok_build::LspTool).into());
+    tools.push((&qidi_build::LspTool).into());
     ToolServerConfig {
         tools,
         behavior_preset: None,
@@ -197,13 +197,13 @@ fn grok_computer_toolset() -> ToolServerConfig {
     #[allow(unused_mut)]
     let mut tools = vec![
         bash_tool_config(),
-        (&grok_build::ReadFileTool).into(),
-        (&grok_build::SearchReplaceTool).into(),
+        (&qidi_build::ReadFileTool).into(),
+        (&qidi_build::SearchReplaceTool).into(),
         (&opencode::OpenCodeWriteTool).into(),
-        (&grok_build::ListDirTool).into(),
-        (&grok_build::GrepTool).into(),
-        (&grok_build::KillTerminalCommandTool).into(),
-        (&grok_build::GetTerminalCommandOutputTool).into(),
+        (&qidi_build::ListDirTool).into(),
+        (&qidi_build::GrepTool).into(),
+        (&qidi_build::KillTerminalCommandTool).into(),
+        (&qidi_build::GetTerminalCommandOutputTool).into(),
     ];
     ToolServerConfig {
         tools,
@@ -218,9 +218,9 @@ fn grok_computer_toolset() -> ToolServerConfig {
 /// Native (in-crate) toolset presets.
 fn native_toolset_presets() -> Vec<(&'static str, ToolServerConfig)> {
     vec![
-        ("cf-tools", workspace_grok_build_toolset()),
-        ("cf-tools-concise", grok_build_concise_toolset()),
-        ("cf-tools-plan", grok_build_plan_toolset()),
+        ("cf-tools", workspace_qidi_build_toolset()),
+        ("cf-tools-concise", qidi_build_concise_toolset()),
+        ("cf-tools-plan", qidi_build_plan_toolset()),
         ("codex", codex_toolset()),
         ("explore", explore_toolset()),
         ("plan", plan_toolset()),
@@ -260,46 +260,46 @@ pub fn toolset_for_preset(preset: &str) -> Option<ToolServerConfig> {
         .map(|(_, toolset)| toolset)
         .or_else(|| registered_toolset_preset(&normalized))
 }
-fn default_grok_build_toolset() -> ToolServerConfig {
+fn default_qidi_build_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
             bash_tool_config(),
-            (&grok_build::ReadFileTool).into(),
-            (&grok_build::SearchReplaceTool).into(),
-            (&grok_build::ListDirTool).into(),
-            (&grok_build::GrepTool).into(),
+            (&qidi_build::ReadFileTool).into(),
+            (&qidi_build::SearchReplaceTool).into(),
+            (&qidi_build::ListDirTool).into(),
+            (&qidi_build::GrepTool).into(),
             kill_task_tool_config(),
-            (&grok_build::TodoWriteTool).into(),
+            (&qidi_build::TodoWriteTool).into(),
             task_output_tool_config(),
             wait_tasks_tool_config(),
             task_tool_config(),
-            (&grok_build::SchedulerCreateTool).into(),
-            (&grok_build::SchedulerDeleteTool).into(),
-            (&grok_build::SchedulerListTool).into(),
-            (&grok_build::MonitorTool).into(),
+            (&qidi_build::SchedulerCreateTool).into(),
+            (&qidi_build::SchedulerDeleteTool).into(),
+            (&qidi_build::SchedulerListTool).into(),
+            (&qidi_build::MonitorTool).into(),
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
-            (&grok_build::UpdateGoalTool).into(),
+            (&qidi_build::UpdateGoalTool).into(),
         ],
         behavior_preset: None,
     }
 }
-fn grok_build_concise_toolset() -> ToolServerConfig {
+fn qidi_build_concise_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
-            (&grok_build_concise::BashConciseTool).into(),
-            (&grok_build_concise::ReadFileConciseTool).into(),
-            (&grok_build_concise::SearchReplaceConciseTool).into(),
-            (&grok_build::ListDirTool).into(),
-            (&grok_build::GrepTool).into(),
+            (&qidi_build_concise::BashConciseTool).into(),
+            (&qidi_build_concise::ReadFileConciseTool).into(),
+            (&qidi_build_concise::SearchReplaceConciseTool).into(),
+            (&qidi_build::ListDirTool).into(),
+            (&qidi_build::GrepTool).into(),
             kill_task_tool_config(),
-            (&grok_build::TodoWriteTool).into(),
+            (&qidi_build::TodoWriteTool).into(),
             task_output_tool_config(),
-            (&grok_build::SchedulerCreateTool).into(),
-            (&grok_build::SchedulerDeleteTool).into(),
-            (&grok_build::SchedulerListTool).into(),
-            (&grok_build::MonitorTool).into(),
-            (&grok_build::UpdateGoalTool).into(),
+            (&qidi_build::SchedulerCreateTool).into(),
+            (&qidi_build::SchedulerDeleteTool).into(),
+            (&qidi_build::SchedulerListTool).into(),
+            (&qidi_build::MonitorTool).into(),
+            (&qidi_build::UpdateGoalTool).into(),
         ],
         behavior_preset: None,
     }
@@ -309,26 +309,26 @@ fn grok_build_concise_toolset() -> ToolServerConfig {
 /// `hashline_tools` should be the 3 hashline `ToolConfig` entries produced by
 /// `FileToolset::Hashline.tool_configs(&hashline_config)` — they carry the
 /// scheme parameters as tool params.
-pub fn grok_build_hashline_toolset(
+pub fn qidi_build_hashline_toolset(
     hashline_tools: Vec<cf_tools::registry::types::ToolConfig>,
 ) -> ToolServerConfig {
     let mut tools: Vec<cf_tools::registry::types::ToolConfig> = vec![bash_tool_config()];
     tools.extend(hashline_tools);
     tools.extend([
-        (&grok_build::ListDirTool).into(),
+        (&qidi_build::ListDirTool).into(),
         kill_task_tool_config(),
-        (&grok_build::TodoWriteTool).into(),
+        (&qidi_build::TodoWriteTool).into(),
         task_output_tool_config(),
         wait_tasks_tool_config(),
         task_tool_config(),
-        (&grok_build::WebSearchTool).into(),
-        (&grok_build::SchedulerCreateTool).into(),
-        (&grok_build::SchedulerDeleteTool).into(),
-        (&grok_build::SchedulerListTool).into(),
-        (&grok_build::MonitorTool).into(),
+        (&qidi_build::WebSearchTool).into(),
+        (&qidi_build::SchedulerCreateTool).into(),
+        (&qidi_build::SchedulerDeleteTool).into(),
+        (&qidi_build::SchedulerListTool).into(),
+        (&qidi_build::MonitorTool).into(),
         (&search_tool::SearchTool).into(),
         (&use_tool::UseTool).into(),
-        (&grok_build::UpdateGoalTool).into(),
+        (&qidi_build::UpdateGoalTool).into(),
     ]);
     ToolServerConfig {
         tools,
@@ -344,7 +344,7 @@ fn codex_toolset() -> ToolServerConfig {
             (&codex::CodexListDirTool).into(),
             (&codex::CodexGrepFilesTool).into(),
             kill_task_tool_config(),
-            (&grok_build::TodoWriteTool).into(),
+            (&qidi_build::TodoWriteTool).into(),
             task_output_tool_config(),
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
@@ -362,9 +362,9 @@ fn codex_toolset() -> ToolServerConfig {
 fn explore_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
-            (&grok_build::ReadFileTool).into(),
-            (&grok_build::ListDirTool).into(),
-            (&grok_build::GrepTool).into(),
+            (&qidi_build::ReadFileTool).into(),
+            (&qidi_build::ListDirTool).into(),
+            (&qidi_build::GrepTool).into(),
         ],
         behavior_preset: None,
     }
@@ -377,10 +377,10 @@ fn explore_toolset() -> ToolServerConfig {
 fn plan_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
-            (&grok_build::ReadFileTool).into(),
-            (&grok_build::ListDirTool).into(),
-            (&grok_build::GrepTool).into(),
-            (&grok_build::TodoWriteTool).into(),
+            (&qidi_build::ReadFileTool).into(),
+            (&qidi_build::ListDirTool).into(),
+            (&qidi_build::GrepTool).into(),
+            (&qidi_build::TodoWriteTool).into(),
         ],
         behavior_preset: None,
     }
@@ -391,28 +391,28 @@ fn plan_toolset() -> ToolServerConfig {
 /// `enter_plan_mode`, `exit_plan_mode`, and `ask_user_question`.
 /// This allows the agent to enter a structured planning phase before
 /// writing code, with user-approved plans.
-fn grok_build_plan_toolset() -> ToolServerConfig {
+fn qidi_build_plan_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
             bash_tool_config(),
-            (&grok_build::ReadFileTool).into(),
-            (&grok_build::SearchReplaceTool).into(),
-            (&grok_build::ListDirTool).into(),
-            (&grok_build::GrepTool).into(),
+            (&qidi_build::ReadFileTool).into(),
+            (&qidi_build::SearchReplaceTool).into(),
+            (&qidi_build::ListDirTool).into(),
+            (&qidi_build::GrepTool).into(),
             kill_task_tool_config(),
-            (&grok_build::TodoWriteTool).into(),
+            (&qidi_build::TodoWriteTool).into(),
             task_output_tool_config(),
             task_tool_config(),
-            (&grok_build::SchedulerCreateTool).into(),
-            (&grok_build::SchedulerDeleteTool).into(),
-            (&grok_build::SchedulerListTool).into(),
-            (&grok_build::MonitorTool).into(),
+            (&qidi_build::SchedulerCreateTool).into(),
+            (&qidi_build::SchedulerDeleteTool).into(),
+            (&qidi_build::SchedulerListTool).into(),
+            (&qidi_build::MonitorTool).into(),
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
-            (&grok_build::UpdateGoalTool).into(),
-            (&grok_build::EnterPlanModeTool).into(),
-            (&grok_build::ExitPlanModeTool).into(),
-            (&grok_build::AskUserQuestionTool).into(),
+            (&qidi_build::UpdateGoalTool).into(),
+            (&qidi_build::EnterPlanModeTool).into(),
+            (&qidi_build::ExitPlanModeTool).into(),
+            (&qidi_build::AskUserQuestionTool).into(),
         ],
         behavior_preset: None,
     }
@@ -427,29 +427,29 @@ fn orchestrator_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
             bash_tool_config(),
-            (&grok_build::ReadFileTool).into(),
-            (&grok_build::ListDirTool).into(),
-            (&grok_build::GrepTool).into(),
+            (&qidi_build::ReadFileTool).into(),
+            (&qidi_build::ListDirTool).into(),
+            (&qidi_build::GrepTool).into(),
             task_tool_config(),
             task_output_tool_config(),
             wait_tasks_tool_config(),
             kill_task_tool_config(),
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
-            (&grok_build::TodoWriteTool).into(),
-            (&grok_build::EnterPlanModeTool).into(),
-            (&grok_build::ExitPlanModeTool).into(),
-            (&grok_build::AskUserQuestionTool).into(),
-            (&grok_build::UpdateGoalTool).into(),
-            (&grok_build::SchedulerCreateTool).into(),
-            (&grok_build::SchedulerDeleteTool).into(),
-            (&grok_build::SchedulerListTool).into(),
-            (&grok_build::MonitorTool).into(),
-            (&grok_build::WebSearchTool).into(),
-            (&grok_build::WebFetchTool).into(),
-            (&grok_build::ImageGenTool).into(),
-            (&grok_build::ImageToVideoTool).into(),
-            (&grok_build::ReferenceToVideoTool).into(),
+            (&qidi_build::TodoWriteTool).into(),
+            (&qidi_build::EnterPlanModeTool).into(),
+            (&qidi_build::ExitPlanModeTool).into(),
+            (&qidi_build::AskUserQuestionTool).into(),
+            (&qidi_build::UpdateGoalTool).into(),
+            (&qidi_build::SchedulerCreateTool).into(),
+            (&qidi_build::SchedulerDeleteTool).into(),
+            (&qidi_build::SchedulerListTool).into(),
+            (&qidi_build::MonitorTool).into(),
+            (&qidi_build::WebSearchTool).into(),
+            (&qidi_build::WebFetchTool).into(),
+            (&qidi_build::ImageGenTool).into(),
+            (&qidi_build::ImageToVideoTool).into(),
+            (&qidi_build::ReferenceToVideoTool).into(),
             (&memory::MemorySearchImpl).into(),
             (&memory::MemoryGetImpl).into(),
         ],
@@ -458,59 +458,59 @@ fn orchestrator_toolset() -> ToolServerConfig {
 }
 /// QIDI Code + plan mode toolset WITHOUT subagent tools.
 ///
-/// Same as `grok_build_plan_toolset` but excludes `TaskTool`,
+/// Same as `qidi_build_plan_toolset` but excludes `TaskTool`,
 /// `TaskOutputTool`, and `KillTaskTool`. Use this when the shell
 /// does not have subagent infrastructure wired up.
-fn grok_build_plan_no_subagents_toolset() -> ToolServerConfig {
+fn qidi_build_plan_no_subagents_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
             bash_tool_config(),
-            (&grok_build::ReadFileTool).into(),
-            (&grok_build::SearchReplaceTool).into(),
-            (&grok_build::ListDirTool).into(),
-            (&grok_build::GrepTool).into(),
+            (&qidi_build::ReadFileTool).into(),
+            (&qidi_build::SearchReplaceTool).into(),
+            (&qidi_build::ListDirTool).into(),
+            (&qidi_build::GrepTool).into(),
             kill_task_tool_config(),
-            (&grok_build::TodoWriteTool).into(),
+            (&qidi_build::TodoWriteTool).into(),
             task_output_tool_config(),
-            (&grok_build::SchedulerCreateTool).into(),
-            (&grok_build::SchedulerDeleteTool).into(),
-            (&grok_build::SchedulerListTool).into(),
-            (&grok_build::MonitorTool).into(),
+            (&qidi_build::SchedulerCreateTool).into(),
+            (&qidi_build::SchedulerDeleteTool).into(),
+            (&qidi_build::SchedulerListTool).into(),
+            (&qidi_build::MonitorTool).into(),
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
-            (&grok_build::UpdateGoalTool).into(),
-            (&grok_build::EnterPlanModeTool).into(),
-            (&grok_build::ExitPlanModeTool).into(),
-            (&grok_build::AskUserQuestionTool).into(),
+            (&qidi_build::UpdateGoalTool).into(),
+            (&qidi_build::EnterPlanModeTool).into(),
+            (&qidi_build::ExitPlanModeTool).into(),
+            (&qidi_build::AskUserQuestionTool).into(),
         ],
         behavior_preset: None,
     }
 }
 /// Default QIDI Code toolset + `ask_user_question`.
 ///
-/// Same as `default_grok_build_toolset` with the `AskUserQuestionTool` added,
+/// Same as `default_qidi_build_toolset` with the `AskUserQuestionTool` added,
 /// allowing the agent to ask structured questions without full plan mode.
-fn grok_build_ask_user_toolset() -> ToolServerConfig {
+fn qidi_build_ask_user_toolset() -> ToolServerConfig {
     ToolServerConfig {
         tools: vec![
             bash_tool_config(),
-            (&grok_build::ReadFileTool).into(),
-            (&grok_build::SearchReplaceTool).into(),
-            (&grok_build::ListDirTool).into(),
-            (&grok_build::GrepTool).into(),
+            (&qidi_build::ReadFileTool).into(),
+            (&qidi_build::SearchReplaceTool).into(),
+            (&qidi_build::ListDirTool).into(),
+            (&qidi_build::GrepTool).into(),
             kill_task_tool_config(),
-            (&grok_build::TodoWriteTool).into(),
+            (&qidi_build::TodoWriteTool).into(),
             task_output_tool_config(),
             wait_tasks_tool_config(),
             task_tool_config(),
-            (&grok_build::SchedulerCreateTool).into(),
-            (&grok_build::SchedulerDeleteTool).into(),
-            (&grok_build::SchedulerListTool).into(),
-            (&grok_build::MonitorTool).into(),
+            (&qidi_build::SchedulerCreateTool).into(),
+            (&qidi_build::SchedulerDeleteTool).into(),
+            (&qidi_build::SchedulerListTool).into(),
+            (&qidi_build::MonitorTool).into(),
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
-            (&grok_build::UpdateGoalTool).into(),
-            (&grok_build::AskUserQuestionTool).into(),
+            (&qidi_build::UpdateGoalTool).into(),
+            (&qidi_build::AskUserQuestionTool).into(),
         ],
         behavior_preset: None,
     }
@@ -655,11 +655,11 @@ where
 )]
 #[strum(serialize_all = "kebab-case")]
 pub enum BuiltinAgentName {
-    GrokBuild,
-    GrokBuildConcise,
-    GrokBuildPlan,
-    GrokBuildPlanNoSubagents,
-    GrokBuildAskUser,
+    QidiBuild,
+    QidiBuildConcise,
+    QidiBuildPlan,
+    QidiBuildPlanNoSubagents,
+    QidiBuildAskUser,
     Codex,
     Opencode,
     GeneralPurpose,
@@ -667,7 +667,7 @@ pub enum BuiltinAgentName {
     Plan,
     BrowserUse,
     #[strum(serialize = "cf-tools-orchestrator")]
-    GrokBuildOrchestrator,
+    QidiBuildOrchestrator,
 }
 /// Strict-harness predicate by name. Resolves via `BuiltinAgentName` and
 /// delegates to [`AgentDefinition::is_strict_harness`]; unknown names
@@ -684,18 +684,18 @@ impl BuiltinAgentName {
     /// Build the `AgentDefinition` for this built-in agent.
     pub fn definition(self) -> AgentDefinition {
         match self {
-            Self::GrokBuild => AgentDefinition::default_grok_build(),
-            Self::GrokBuildConcise => AgentDefinition::grok_build_concise(),
-            Self::GrokBuildPlan => AgentDefinition::grok_build_plan(),
-            Self::GrokBuildPlanNoSubagents => AgentDefinition::grok_build_plan_no_subagents(),
-            Self::GrokBuildAskUser => AgentDefinition::grok_build_ask_user(),
+            Self::QidiBuild => AgentDefinition::default_qidi_build(),
+            Self::QidiBuildConcise => AgentDefinition::qidi_build_concise(),
+            Self::QidiBuildPlan => AgentDefinition::qidi_build_plan(),
+            Self::QidiBuildPlanNoSubagents => AgentDefinition::qidi_build_plan_no_subagents(),
+            Self::QidiBuildAskUser => AgentDefinition::qidi_build_ask_user(),
             Self::Codex => AgentDefinition::codex(),
             Self::Opencode => AgentDefinition::opencode(),
             Self::GeneralPurpose => AgentDefinition::general_purpose(),
             Self::Explore => AgentDefinition::explore(),
             Self::Plan => AgentDefinition::plan(),
             Self::BrowserUse => AgentDefinition::browser_use(),
-            Self::GrokBuildOrchestrator => AgentDefinition::grok_build_orchestrator(),
+            Self::QidiBuildOrchestrator => AgentDefinition::qidi_build_orchestrator(),
         }
     }
     /// Built-in agents available as subagents via the Task tool.
@@ -719,7 +719,7 @@ pub struct AgentDefinition {
     pub plugin_name: Option<String>,
     #[serde(default = "default_prompt_mode")]
     pub prompt_mode: PromptMode,
-    #[serde(default = "default_grok_build_toolset")]
+    #[serde(default = "default_qidi_build_toolset")]
     pub tool_config: ToolServerConfig,
     /// Runtime capability mode that constrains which tool kinds the agent
     /// can use. Applied during subagent spawn in `handle_subagent_request`
@@ -874,7 +874,7 @@ pub enum AgentScope {
     User,
     /// ~/.qidi/bundled/agents/ (lowest-priority bundled cache)
     Bundled,
-    /// Built-in agent (e.g., default_grok_build(), browser_use()).
+    /// Built-in agent (e.g., default_qidi_build(), browser_use()).
     #[default]
     BuiltIn,
 }
@@ -1426,7 +1426,7 @@ impl AgentDefinition {
             description: description.to_string(),
             plugin_name: None,
             prompt_mode: PromptMode::Extend,
-            tool_config: default_grok_build_toolset(),
+            tool_config: default_qidi_build_toolset(),
             capability_mode: None,
             permission_mode: PermissionMode::Default,
             skills: vec![],
@@ -1458,49 +1458,49 @@ impl AgentDefinition {
             scope: AgentScope::BuiltIn,
         }
     }
-    pub fn default_grok_build() -> Self {
+    pub fn default_qidi_build() -> Self {
         Self::base(
-            BuiltinAgentName::GrokBuild,
+            BuiltinAgentName::QidiBuild,
             "QIDI Code agent for software engineering tasks.",
         )
     }
     /// QIDI Code Concise agent definition — concise output format for SFT/RL.
-    pub fn grok_build_concise() -> Self {
+    pub fn qidi_build_concise() -> Self {
         Self {
-            tool_config: grok_build_concise_toolset(),
+            tool_config: qidi_build_concise_toolset(),
             agents_md: false,
             ..Self::base(
-                BuiltinAgentName::GrokBuildConcise,
+                BuiltinAgentName::QidiBuildConcise,
                 "QIDI Code agent with concise output format.",
             )
         }
     }
     /// QIDI Code agent with plan mode tools.
-    pub fn grok_build_plan() -> Self {
+    pub fn qidi_build_plan() -> Self {
         Self {
-            tool_config: grok_build_plan_toolset(),
+            tool_config: qidi_build_plan_toolset(),
             ..Self::base(
-                BuiltinAgentName::GrokBuildPlan,
+                BuiltinAgentName::QidiBuildPlan,
                 "QIDI Code agent with plan mode support.",
             )
         }
     }
     /// QIDI Code + plan mode WITHOUT subagent tools.
-    pub fn grok_build_plan_no_subagents() -> Self {
+    pub fn qidi_build_plan_no_subagents() -> Self {
         Self {
-            tool_config: grok_build_plan_no_subagents_toolset(),
+            tool_config: qidi_build_plan_no_subagents_toolset(),
             ..Self::base(
-                BuiltinAgentName::GrokBuildPlanNoSubagents,
+                BuiltinAgentName::QidiBuildPlanNoSubagents,
                 "QIDI Code agent with plan mode (no subagents).",
             )
         }
     }
     /// Default QIDI Code agent with the `ask_user_question` tool.
-    pub fn grok_build_ask_user() -> Self {
+    pub fn qidi_build_ask_user() -> Self {
         Self {
-            tool_config: grok_build_ask_user_toolset(),
+            tool_config: qidi_build_ask_user_toolset(),
             ..Self::base(
-                BuiltinAgentName::GrokBuildAskUser,
+                BuiltinAgentName::QidiBuildAskUser,
                 "QIDI Code agent with ask-user-question tool.",
             )
         }
@@ -1573,21 +1573,21 @@ impl AgentDefinition {
             )
         }
     }
-    /// QIDI Code Orchestrator — GBL model with full GrokBuild tools
+    /// QIDI Code Orchestrator — GBL model with full QidiBuild tools
     /// (skills, MCPs, plan mode) that delegates coding/exploration to
     /// subagents.
     ///
     /// Subagent overrides are applied in `handle_subagent_request`:
     /// general-purpose children get `implementer_toolset()` and explore
     /// children get `explorer_toolset()`, both with the subagent model.
-    pub fn grok_build_orchestrator() -> Self {
+    pub fn qidi_build_orchestrator() -> Self {
         Self {
             tool_config: orchestrator_toolset(),
             inject_default_tools: false,
             prompt_body: Some(ORCHESTRATOR_PROMPT_BODY.to_string()),
             ..Self::base(
-                BuiltinAgentName::GrokBuildOrchestrator,
-                "GrokBuild orchestrator that delegates coding to specialized subagents",
+                BuiltinAgentName::QidiBuildOrchestrator,
+                "QidiBuild orchestrator that delegates coding to specialized subagents",
             )
         }
     }
@@ -1616,7 +1616,7 @@ impl AgentDefinition {
             }
         }
         if !value.get("toolConfig").is_some_and(|v| v.is_object()) {
-            def.tool_config = default_grok_build_toolset();
+            def.tool_config = default_qidi_build_toolset();
         }
         def.scope = AgentScope::BuiltIn;
         Ok(def)
@@ -1639,7 +1639,7 @@ mod tests {
     fn toolset_for_preset_resolves_known_names() {
         for name in [
             "cf-tools",
-            "grok_build",
+            "qidi_build",
             "cf-tools-concise",
             "cf-tools-plan",
             "codex",
@@ -1666,13 +1666,13 @@ mod tests {
     fn grok_computer_exclusive_ids() -> Vec<String> {
         #[allow(unused_mut)]
         let mut ids: Vec<String> = vec![
-            ToolConfig::from(&grok_build::GetTerminalCommandOutputTool).id,
-            ToolConfig::from(&grok_build::KillTerminalCommandTool).id,
+            ToolConfig::from(&qidi_build::GetTerminalCommandOutputTool).id,
+            ToolConfig::from(&qidi_build::KillTerminalCommandTool).id,
         ];
         ids
     }
     #[test]
-    fn grok_computer_preset_is_curated_grok_build_subset() {
+    fn grok_computer_preset_is_curated_qidi_build_subset() {
         let gc = toolset_for_preset("cf-tools-computer").unwrap();
         let gb = toolset_for_preset("cf-tools").unwrap();
         let gb_ids: std::collections::HashSet<&str> =
@@ -1700,24 +1700,24 @@ mod tests {
         let ids: std::collections::HashSet<&str> = gc.tools.iter().map(|t| t.id.as_str()).collect();
         assert!(
             ids.contains(
-                ToolConfig::from(&grok_build::GetTerminalCommandOutputTool)
+                ToolConfig::from(&qidi_build::GetTerminalCommandOutputTool)
                     .id
                     .as_str()
             )
         );
         assert!(
             ids.contains(
-                ToolConfig::from(&grok_build::KillTerminalCommandTool)
+                ToolConfig::from(&qidi_build::KillTerminalCommandTool)
                     .id
                     .as_str()
             )
         );
-        assert!(!ids.contains(ToolConfig::from(&grok_build::TaskOutputTool).id.as_str()));
-        assert!(!ids.contains(ToolConfig::from(&grok_build::KillTaskTool).id.as_str()));
-        assert!(!ids.contains(ToolConfig::from(&grok_build::TaskTool).id.as_str()));
+        assert!(!ids.contains(ToolConfig::from(&qidi_build::TaskOutputTool).id.as_str()));
+        assert!(!ids.contains(ToolConfig::from(&qidi_build::KillTaskTool).id.as_str()));
+        assert!(!ids.contains(ToolConfig::from(&qidi_build::TaskTool).id.as_str()));
         for t in &gc.tools {
-            if t.id == ToolConfig::from(&grok_build::GetTerminalCommandOutputTool).id
-                || t.id == ToolConfig::from(&grok_build::KillTerminalCommandTool).id
+            if t.id == ToolConfig::from(&qidi_build::GetTerminalCommandOutputTool).id
+                || t.id == ToolConfig::from(&qidi_build::KillTerminalCommandTool).id
             {
                 assert!(t.name_override.is_none(), "tool `{}` must not rename", t.id);
             }
@@ -1743,26 +1743,26 @@ mod tests {
         let gc_ids: std::collections::HashSet<&str> =
             gc.tools.iter().map(|t| t.id.as_str()).collect();
         for excluded in [
-            ToolConfig::from(&grok_build::LspTool).id,
-            ToolConfig::from(&grok_build::EnterPlanModeTool).id,
-            ToolConfig::from(&grok_build::ExitPlanModeTool).id,
+            ToolConfig::from(&qidi_build::LspTool).id,
+            ToolConfig::from(&qidi_build::EnterPlanModeTool).id,
+            ToolConfig::from(&qidi_build::ExitPlanModeTool).id,
         ] {
             assert!(
                 !gc_ids.contains(excluded.as_str()),
                 "cf-tools-computer preset must not advertise `{excluded}`"
             );
         }
-        let full = workspace_grok_build_toolset();
+        let full = workspace_qidi_build_toolset();
         let full_ids: std::collections::HashSet<&str> =
             full.tools.iter().map(|t| t.id.as_str()).collect();
         for present in [
-            ToolConfig::from(&grok_build::LspTool).id,
-            ToolConfig::from(&grok_build::EnterPlanModeTool).id,
-            ToolConfig::from(&grok_build::ExitPlanModeTool).id,
+            ToolConfig::from(&qidi_build::LspTool).id,
+            ToolConfig::from(&qidi_build::EnterPlanModeTool).id,
+            ToolConfig::from(&qidi_build::ExitPlanModeTool).id,
         ] {
             assert!(
                 full_ids.contains(present.as_str()),
-                "workspace_grok_build_toolset must ship `{present}`"
+                "workspace_qidi_build_toolset must ship `{present}`"
             );
         }
     }
@@ -1770,12 +1770,12 @@ mod tests {
     /// until classified.
     fn expected_strict_harness(name: BuiltinAgentName) -> bool {
         match name {
-            BuiltinAgentName::Codex | BuiltinAgentName::GrokBuildOrchestrator => true,
-            BuiltinAgentName::GrokBuild
-            | BuiltinAgentName::GrokBuildConcise
-            | BuiltinAgentName::GrokBuildPlan
-            | BuiltinAgentName::GrokBuildPlanNoSubagents
-            | BuiltinAgentName::GrokBuildAskUser
+            BuiltinAgentName::Codex | BuiltinAgentName::QidiBuildOrchestrator => true,
+            BuiltinAgentName::QidiBuild
+            | BuiltinAgentName::QidiBuildConcise
+            | BuiltinAgentName::QidiBuildPlan
+            | BuiltinAgentName::QidiBuildPlanNoSubagents
+            | BuiltinAgentName::QidiBuildAskUser
             | BuiltinAgentName::GeneralPurpose
             | BuiltinAgentName::Explore
             | BuiltinAgentName::Plan
@@ -2183,7 +2183,7 @@ completionRequirement:
         assert_eq!(rec.max_delay_ms, 10000);
     }
     #[test]
-    fn test_default_tool_config_has_grok_build_tools() {
+    fn test_default_tool_config_has_qidi_build_tools() {
         let content = r#"---
 name: default-tools
 description: Test default tool config
@@ -2192,7 +2192,7 @@ description: Test default tool config
         let def = AgentDefinition::parse(content).unwrap();
         assert!(
             !def.tool_config.tools.is_empty(),
-            "default tool_config should have grok_build tools"
+            "default tool_config should have qidi_build tools"
         );
     }
     #[test]
@@ -2416,9 +2416,9 @@ description: Test default tool config
     fn test_builtin_agent_name_strum_round_trip() {
         use std::str::FromStr;
         for (s, expected) in [
-            ("cf-tools", BuiltinAgentName::GrokBuild),
-            ("cf-tools-concise", BuiltinAgentName::GrokBuildConcise),
-            ("cf-tools-ask-user", BuiltinAgentName::GrokBuildAskUser),
+            ("cf-tools", BuiltinAgentName::QidiBuild),
+            ("cf-tools-concise", BuiltinAgentName::QidiBuildConcise),
+            ("cf-tools-ask-user", BuiltinAgentName::QidiBuildAskUser),
             ("codex", BuiltinAgentName::Codex),
             ("opencode", BuiltinAgentName::Opencode),
             ("general-purpose", BuiltinAgentName::GeneralPurpose),
@@ -2525,7 +2525,7 @@ description: Test default tool config
         assert_eq!(recovered.mcp_inheritance, def.mcp_inheritance);
     }
     fn def_with_template(tpl: crate::prompt::context::TemplateOverride) -> AgentDefinition {
-        let mut def = AgentDefinition::default_grok_build();
+        let mut def = AgentDefinition::default_qidi_build();
         def.system_prompt = tpl;
         def
     }

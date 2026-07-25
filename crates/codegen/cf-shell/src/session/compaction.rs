@@ -1268,7 +1268,7 @@ impl SessionActor {
                         self.tool_context.subagent_event_tx
                     {
                         let (tx, rx) = tokio::sync::oneshot::channel();
-                        use cf_tools::implementations::grok_build::task::types::{
+                        use cf_tools::implementations::qidi_build::task::types::{
                             SubagentEvent, SubagentListActiveRequest,
                         };
                         let _ =

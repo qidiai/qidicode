@@ -376,7 +376,7 @@ pub(crate) fn spawn_sync(cancel: tokio_util::sync::CancellationToken) {
 }
 
 /// Deployment id reported for `deployment_key` on chat requests, credential
-/// snapshots, and OTel: the **server** GrokBuildDeployment UUID (the id
+/// snapshots, and OTel: the **server** QidiBuildDeployment UUID (the id
 /// server-side dashboards filter on) when the managed-config sync marker was
 /// written by this same key (fingerprint match), else UUIDv5 of the key.
 /// `None` key (team/OAuth) → `None`, never a stale marker value.

@@ -4,7 +4,7 @@
 
 use agent_client_protocol as acp;
 use cf_shell::agent::config::UiConfig;
-use cf_tools::implementations::grok_build::ask_user_question;
+use cf_tools::implementations::qidi_build::ask_user_question;
 
 // ---------------------------------------------------------------------------
 // Types

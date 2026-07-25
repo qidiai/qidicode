@@ -1,6 +1,4 @@
 //! Sampling error types.
-//!
-//! TODO: Move from qidi-code/src/sampling/error.rs
 
 use std::fmt;
 

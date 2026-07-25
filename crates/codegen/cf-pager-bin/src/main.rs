@@ -209,7 +209,7 @@ async fn run_setup_command(json: bool) {
 fn resolve_target(args: &LeaderTargetArgs) -> LeaderTarget {
     match args.pid {
         Some(pid) => LeaderTarget::Pid(pid),
-        None => LeaderTarget::Environment(cf_shell::env::GrokBuildEnvironment::Production),
+        None => LeaderTarget::Environment(cf_shell::env::QidiBuildEnvironment::Production),
     }
 }
 async fn connect_to_leader(
@@ -914,6 +914,18 @@ async fn run_agent_command(
         eprintln!("grok: {warning}");
     }
     agent_config.default_yolo_mode = launch_yolo.yolo;
+    // B5: seed the launch-scoped YOLO tool allowlist (`--yolo-tools`) so every
+    // session this agent spawns confines auto-approval to it, and refuse an
+    // unrestricted `--yolo` with no active sandbox unless `--ack-no-sandbox`.
+    // apply_sandbox() already ran in main() before dispatch, so the sandbox
+    // state read by the guard is live.
+    cf_shell::util::config::set_launch_yolo_allowlist(&agent_args.yolo_tools);
+    if let Some(msg) =
+        cf_shell::util::config::yolo_launch_refusal(launch_yolo.yolo, agent_args.ack_no_sandbox)
+    {
+        eprintln!("grok: {msg}");
+        std::process::exit(1);
+    }
     agent_config.default_auto_mode = cf_shell::util::config::effective_auto_for_launch(
         agent_args.yolo,
         permission_mode_flag.as_deref(),
@@ -1454,6 +1466,24 @@ fn install_heap_profile_hooks() {
     });
 }
 fn main() {
+    // Debug builds use significantly more stack space than release builds.
+    // Spawn the actual main logic on a thread with a larger stack to avoid
+    // stack overflow on Windows (default 1MB is too small for debug builds
+    // of this large application).
+    let stack_size = if cfg!(debug_assertions) {
+        32 * 1024 * 1024 // 32 MB for debug builds
+    } else {
+        8 * 1024 * 1024 // 8 MB for release builds
+    };
+    let child = std::thread::Builder::new()
+        .stack_size(stack_size)
+        .spawn(real_main)
+        .expect("failed to spawn main thread");
+    let exit_code = child.join().unwrap_or(1);
+    std::process::exit(exit_code);
+}
+
+fn real_main() -> i32 {
     cf_pager_minimal::install();
     #[cfg(all(feature = "jemalloc", unix))]
     cf_pager::memory_release::install_release_hook(purge_jemalloc_retained_pages);
@@ -1524,8 +1554,9 @@ fn main() {
         cf_tty_utils::restore_native_stderr();
         eprintln!("Error: {e:#}");
         drop(_sentry_guard);
-        std::process::exit(1);
+        return 1;
     }
+    0
 }
 async fn async_main() -> Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -1791,6 +1822,16 @@ async fn async_main() -> Result<()> {
         if let Some(warning) = launch_yolo.blocked_warning {
             eprintln!("grok: {warning}");
         }
+        // B5: same launch-scoped YOLO allowlist + startup guard as the agent
+        // subcommand path. Headless is unattended, so an unrestricted --yolo
+        // with no sandbox refuses to start unless --ack-no-sandbox.
+        cf_shell::util::config::set_launch_yolo_allowlist(&args.yolo_tools);
+        if let Some(msg) =
+            cf_shell::util::config::yolo_launch_refusal(launch_yolo.yolo, args.ack_no_sandbox)
+        {
+            eprintln!("grok: {msg}");
+            std::process::exit(1);
+        }
         let json_schema = args
             .json_schema
             .as_deref()
@@ -1937,7 +1978,7 @@ async fn finish_update_on_exit(
 }
 /// Build an [`UpdateConfig`] from the current environment and config files.
 fn build_update_config() -> UpdateConfig {
-    let environment = cf_shell::env::GrokBuildEnvironment::from_flags(false, false);
+    let environment = cf_shell::env::QidiBuildEnvironment::from_flags(false, false);
     let mut config = UpdateConfig::from_environment(&environment);
     cryptify::flow_stmt!({
         {

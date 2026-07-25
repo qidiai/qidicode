@@ -548,7 +548,7 @@ fn compute_ahead_behind(repo: &Repository) -> Option<(usize, usize)> {
     let upstream_oid = upstream.get().target()?;
     repo.graph_ahead_behind(local_oid, upstream_oid).ok()
 }
-fn read_blob_from_tree(repo: &Repository, tree: &git2::Tree, path: &str) -> Result<Vec<u8>> {
+fn read_blob_from_tree(repo: &Repository, tree: &git2::Tree<'_>, path: &str) -> Result<Vec<u8>> {
     let entry = tree
         .get_path(Path::new(path))
         .map_err(|e| anyhow::anyhow!("path '{}' not found in commit: {}", path, e))?;
@@ -689,7 +689,7 @@ struct DiffFileStats {
     old_path: Option<String>,
     delta: Option<git2::Delta>,
 }
-fn extract_old_path(delta: &git2::DiffDelta, new_path: &str) -> Option<String> {
+fn extract_old_path(delta: &git2::DiffDelta<'_>, new_path: &str) -> Option<String> {
     if matches!(delta.status(), git2::Delta::Renamed | git2::Delta::Copied) {
         delta
             .old_file()

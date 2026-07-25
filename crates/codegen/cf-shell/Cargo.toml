@@ -19,6 +19,8 @@ cf-subagent-resolution = { path = "../cf-subagent-resolution" }
 cf-system-power = { path = "../cf-system-power" }
 cf-telemetry= { path = "../cf-telemetry" }
 cf-auth= { workspace = true }
+zeroize = "1"
+cf-secrets= { path = "../cf-secrets" }
 cf-shared= { path = "../cf-shared" }
 cf-interjection-core = { workspace = true }
 cf-computer-hub-sdk = { workspace = true }

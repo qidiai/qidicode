@@ -652,7 +652,7 @@ async fn upload_harness_trace_turns_build_per_turn_manifest() {
 /// With no overrides and model_agent_type = None, the default agent is used.
 #[test]
 #[serial_test::serial]
-fn resolve_agent_definition_defaults_to_grok_build() {
+fn resolve_agent_definition_defaults_to_qidi_build() {
     let prev = std::env::var("QIDI_AGENT").ok();
     unsafe {
         std::env::remove_var("QIDI_AGENT");
@@ -754,7 +754,7 @@ fn resolve_agent_definition_acp_profile_wins_when_model_agent_type_is_default() 
 /// with no strict requirement.
 #[test]
 #[serial_test::serial]
-fn resolve_agent_definition_acp_profile_wins_for_explicit_grok_build_family() {
+fn resolve_agent_definition_acp_profile_wins_for_explicit_qidi_build_family() {
     let prev = std::env::var("QIDI_AGENT").ok();
     unsafe {
         std::env::remove_var("QIDI_AGENT");
@@ -1002,14 +1002,14 @@ fn explicit_agent_type_wins_over_session_default() {
     );
 }
 #[test]
-fn null_agent_type_falls_back_to_session_default_grok_build_plan() {
+fn null_agent_type_falls_back_to_session_default_qidi_build_plan() {
     assert_eq!(
         resolve_required_agent_type(None, "cf-tools-plan"),
         "cf-tools-plan"
     );
 }
 #[test]
-fn null_agent_type_falls_back_to_session_default_grok_build() {
+fn null_agent_type_falls_back_to_session_default_qidi_build() {
     assert_eq!(
         resolve_required_agent_type(None, "cf-tools"),
         "cf-tools"
@@ -1063,7 +1063,7 @@ async fn file_toolset_override_e2e_to_finalized_toolset() {
     let builder = cf_tools::registry::types::ToolRegistryBuilder::new();
     let ctx = SessionContext {
         backend: std::sync::Arc::new(LocalTerminalBackend::new()),
-        fs: std::sync::Arc::new(LocalFs),
+        fs: std::sync::Arc::new(LocalFs::unconfined()),
         cwd: tmp.path().to_path_buf(),
         session_folder: tmp.path().join("session"),
         session_env: std::sync::Arc::new(std::collections::HashMap::new()),
@@ -1076,9 +1076,9 @@ async fn file_toolset_override_e2e_to_finalized_toolset() {
         web_search_config: cf_tools::implementations::web_search::WebSearchConfig::default(),
         web_fetch_config: Default::default(),
         lsp: None,
-        image_gen_config: cf_tools::implementations::grok_build::image_gen::ImageGenConfig::default(),
-        video_gen_config: cf_tools::implementations::grok_build::video_gen::VideoGenConfig::default(),
-        app_builder_deployer_config: cf_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig::default(),
+        image_gen_config: cf_tools::implementations::qidi_build::image_gen::ImageGenConfig::default(),
+        video_gen_config: cf_tools::implementations::qidi_build::video_gen::VideoGenConfig::default(),
+        app_builder_deployer_config: cf_tools::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig::default(),
         api_key_provider: None,
         auth_provider: None,
         attribution_callback: None,
@@ -2446,7 +2446,7 @@ async fn cached_token_fallthrough_falls_to_grok_com_without_credentials() {
 /// | true     | Some      | Enabled, S3 threaded (ZDR with upload path) |
 #[tokio::test(flavor = "current_thread")]
 async fn prepare_video_gen_config_disabled_when_zdr_flag_set() {
-    use cf_tools::implementations::grok_build::video_gen::{
+    use cf_tools::implementations::qidi_build::video_gen::{
         S3AccessCredentials, VideoGenConfig, ZdrVideoOutputS3Config,
     };
     fn zdr_s3() -> ZdrVideoOutputS3Config {
@@ -2503,7 +2503,7 @@ async fn prepare_video_gen_config_disabled_when_zdr_flag_set() {
 /// disabling a paid feature when tier info hasn't loaded.
 #[tokio::test(flavor = "current_thread")]
 async fn prepare_image_gen_config_fails_open_without_auth() {
-    use cf_tools::implementations::grok_build::image_gen::ImageGenConfig;
+    use cf_tools::implementations::qidi_build::image_gen::ImageGenConfig;
     let agent = build_minimal_agent_for_tests();
     agent.sampling_config.borrow_mut().api_key = Some("test-key".to_string());
     let ImageGenConfig::Enabled {

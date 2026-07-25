@@ -1,4 +1,4 @@
-﻿//! Fork and project-selection dispatchers and fork placeholder builders.
+//! Fork and project-selection dispatchers and fork placeholder builders.
 use super::lifecycle::{dispatch_new_session_inner_with_id, refuse_chat_mode_build_agent};
 use crate::acp::tracker::AcpUpdateTracker;
 use crate::app::actions::Effect;
@@ -95,8 +95,8 @@ pub(in crate::app::dispatch) fn apply_persist_worktree_mode(
 /// Build the two persistence options shared by the fork and new-session
 /// worktree question modals ("Always worktree" / "Never worktree").
 pub(super) fn worktree_persist_options()
--> [cf_tools::implementations::grok_build::ask_user_question::QuestionOption; 2] {
-    use cf_tools::implementations::grok_build::ask_user_question::QuestionOption;
+-> [cf_tools::implementations::qidi_build::ask_user_question::QuestionOption; 2] {
+    use cf_tools::implementations::qidi_build::ask_user_question::QuestionOption;
     [
         QuestionOption {
             label: "Always worktree".into(),
@@ -117,7 +117,7 @@ pub(super) fn worktree_persist_options()
 /// instead -- the modal-collision protocol.
 fn open_fork_question(app: &mut AppView, directive: Option<String>) -> Vec<Effect> {
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
-    use cf_tools::implementations::grok_build::ask_user_question::{
+    use cf_tools::implementations::qidi_build::ask_user_question::{
         Question, QuestionOption,
     };
     let ActiveView::Agent(id) = app.active_view else {

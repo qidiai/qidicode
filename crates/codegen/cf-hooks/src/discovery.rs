@@ -160,6 +160,20 @@ pub fn load_hooks_from_sources(
         for spec in &mut specs {
             spec.name = format!("project/{}", spec.name);
         }
+        if !specs.is_empty() {
+            // SECURITY: Warn when project-level hooks are loaded. Project hooks
+            // come from `<worktree-root>/.qidi/hooks/` and execute arbitrary
+            // commands. A malicious repository could inject hooks that run on
+            // clone/open. Users should verify that project hooks are expected.
+            tracing::warn!(
+                source = ?source,
+                count = specs.len(),
+                "SECURITY: loaded {} project-level hook(s) from project configuration. \
+                 Project hooks execute arbitrary commands on tool events (PreToolUse, \
+                 PostToolUse, etc.). Verify these are from a trusted source.",
+                specs.len()
+            );
+        }
         tracing::debug!(
             source = ?source,
             count = specs.len(),

@@ -425,6 +425,10 @@ async fn run_one_attempt(
     cancel_token: &CancellationToken,
     doom_check: Option<cf_sampling_types::DoomLoopRecoveryPolicy>,
 ) -> AttemptOutcome {
+    // Proactive rate limiting: acquire a token before every API call
+    // to avoid hitting server-side 429s.
+    client.rate_limiter().acquire().await;
+
     match client.api_backend() {
         ApiBackend::ChatCompletions => {
             let (raw, metadata) = match client.conversation_stream(request).await {

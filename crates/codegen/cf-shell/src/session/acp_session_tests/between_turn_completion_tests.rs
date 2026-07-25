@@ -1,4 +1,4 @@
-﻿use cf_tools::implementations::grok_build::task::types::SubagentCompletionSummary;
+use cf_tools::implementations::qidi_build::task::types::SubagentCompletionSummary;
 use cf_tools::reminders::task_completion::format_between_turn_completions;
 
 fn summary(

@@ -1401,10 +1401,12 @@ pub struct Config {
     pub session_summary_model_override: Option<String>,
     /// CLI override for YOLO mode (auto-approve all permissions).
     /// Takes precedence over default settings.
-    /// SECURITY (B5): --yolo is currently all-or-nothing with no tool whitelist.
-    /// TODO: Support --yolo=read,edit,grep style whitelisting.
-    /// TODO: Refuse to start when --yolo + sandbox-off on Windows (no OS protection).
-    /// TODO: Update README CI examples to use whitelist mode instead of full --yolo.
+    /// SECURITY (B5): the tool-whitelist model + startup guard live in
+    /// `cf_workspace::permission::yolo` (`YoloMode`, `yolo_startup_check`); the
+    /// permission actor already filters auto-approval by allowlist via
+    /// `PermissionCommand::SetYoloAllowlist`. This `bool` is the "unrestricted"
+    /// (allowlist = None) case. Remaining integration: expose a `--yolo-tools`
+    /// CLI surface and call `yolo_startup_check` to refuse `--yolo` + sandbox-off.
     #[serde(skip)]
     pub default_yolo_mode: bool,
     /// Start sessions in auto permission mode (classifier) when no per-session override.
@@ -1504,7 +1506,7 @@ pub struct Config {
     /// config is valid. Resolved by [`crate::config::ToolsConfig::resolve`].
     #[serde(skip)]
     pub zdr_video_output_s3:
-        Option<cf_tools::implementations::grok_build::video_gen::ZdrVideoOutputS3Config>,
+        Option<cf_tools::implementations::qidi_build::video_gen::ZdrVideoOutputS3Config>,
     /// Whether to enrich path-not-found errors with CWD reminders,
     /// "dropped repo folder" correction, and similar-name suggestions.
     /// Default `false`. Enabled via remote settings.
@@ -2284,7 +2286,7 @@ impl Config {
     /// it; otherwise the tool defaults on and is overridable via
     /// `QIDI_IMAGE_EDIT`.
     pub(crate) fn resolve_image_edit(&self) -> Resolved<bool> {
-        use cf_tools::implementations::grok_build::IMAGE_EDIT_TOOL_NAME;
+        use cf_tools::implementations::qidi_build::IMAGE_EDIT_TOOL_NAME;
         if let Some(pinned) = self.requirements.image_edit.pinned() {
             return Resolved::new(pinned, ConfigSource::Requirement);
         }
@@ -4129,7 +4131,7 @@ pub struct Features {
     pub codebase_indexing: CodebaseIndexingSetting,
     /// Show a blocking warning when Grok starts outside a Git repository.
     /// Default: false. Used as the local fallback when the `non_git_warning` remote settings
-    /// flag in `grok_build_settings` is absent. When the remote flag is present it takes
+    /// flag in `qidi_build_settings` is absent. When the remote flag is present it takes
     /// precedence — `Some(false)` from remote settings overrides `true` here.
     #[serde(default)]
     pub non_git_warning: bool,
@@ -4930,7 +4932,7 @@ mod tests {
             tools: Some(vec!["read_file".into()]),
             ..Default::default()
         };
-        let mut cases = vec![(AgentDefinition::default_grok_build(), true)];
+        let mut cases = vec![(AgentDefinition::default_qidi_build(), true)];
         for (mut definition, expected_injection) in cases {
             overrides.apply_to_definition(&mut definition);
             assert_eq!(definition.tools, vec!["read_file".to_string()]);
@@ -5301,7 +5303,7 @@ reasoning_effort = "low"
         assert_eq!(cfg.max_retries, Some(7));
     }
     #[test]
-    fn resolve_aux_model_honors_grok_build_override() {
+    fn resolve_aux_model_honors_qidi_build_override() {
         let endpoints = EndpointsConfig::default();
         let mut catalog = IndexMap::new();
         catalog.insert(
@@ -6546,7 +6548,7 @@ reasoning_effort = "low"
         assert_eq!(model.info.agent_type, "codex");
     }
     #[test]
-    fn model_agent_type_defaults_to_grok_build() {
+    fn model_agent_type_defaults_to_qidi_build() {
         let raw_config: toml::Value = toml::from_str(
             r#"
             [model.my-model]
@@ -9067,7 +9069,7 @@ agent_type = "cursor"
         )
         .unwrap();
         let cfg = Config::new_from_toml_cfg(&raw).expect("[goal] config must parse");
-        let grok_build = crate::util::config::GoalRoleModel {
+        let qidi_build = crate::util::config::GoalRoleModel {
             model: "cf-tools".into(),
             agent_type: "cf-tools-plan".into(),
         };
@@ -9086,7 +9088,7 @@ agent_type = "cursor"
         let planner = cfg.resolve_goal_planner_model(use_current);
         assert_eq!(
             planner.value,
-            GoalRoleModelChoice::Explicit(grok_build.clone())
+            GoalRoleModelChoice::Explicit(qidi_build.clone())
         );
         assert_eq!(planner.source, ConfigSource::Config);
         assert_eq!(
@@ -9096,7 +9098,7 @@ agent_type = "cursor"
         assert_eq!(
             cfg.resolve_goal_skeptic_models(use_current).value,
             vec![
-                GoalRoleModelChoice::Explicit(grok_build),
+                GoalRoleModelChoice::Explicit(qidi_build),
                 GoalRoleModelChoice::Explicit(composer),
             ]
         );

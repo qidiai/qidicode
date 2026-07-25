@@ -112,7 +112,7 @@ impl ResolvedStorageConfig {
     /// mirrors `GrokAuthCredentials::apply` precedence (deployment key wins).
     fn wire_bearer(&self) -> Option<String> {
         if let Some(ref creds) = self.credentials {
-            return creds.snapshot().token;
+            return creds.snapshot().token.as_deref().map(|s| s.to_string());
         }
         match self.config.upload_method() {
             UploadMethod::Proxy {

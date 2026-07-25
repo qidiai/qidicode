@@ -1,4 +1,4 @@
-﻿//! `AgentRebuildSpec` — the canonical recipe for constructing an
+//! `AgentRebuildSpec` — the canonical recipe for constructing an
 //! [`cf_agent::Agent`] for a given session.
 //!
 //! INVARIANT: This is the **only** place in the shell crate that calls
@@ -48,14 +48,14 @@ use cf_agent::prompt::context::PromptAudience;
 use cf_agent::prompt::skills::SkillsConfig;
 use cf_agent::{Agent, AgentBuilder, CompactionPolicy, ReminderPolicy};
 use cf_tools::computer::types::{AsyncFileSystem, TerminalBackend};
-use cf_tools::implementations::grok_build::ask_user_question::types::UserQuestionRequest;
-use cf_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig;
-use cf_tools::implementations::grok_build::image_gen::ImageGenConfig;
-use cf_tools::implementations::grok_build::task::types::{
+use cf_tools::implementations::qidi_build::ask_user_question::types::UserQuestionRequest;
+use cf_tools::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig;
+use cf_tools::implementations::qidi_build::image_gen::ImageGenConfig;
+use cf_tools::implementations::qidi_build::task::types::{
     MonitorEventBuffer, SubagentEvent, TaskModelValidator,
 };
-use cf_tools::implementations::grok_build::video_gen::VideoGenConfig;
-use cf_tools::implementations::grok_build::web_fetch::WebFetchConfig;
+use cf_tools::implementations::qidi_build::video_gen::VideoGenConfig;
+use cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig;
 use cf_tools::implementations::lsp::LspBackend;
 use cf_tools::implementations::web_search::WebSearchConfig;
 use cf_tools::notification::ToolNotificationHandle;
@@ -131,7 +131,7 @@ pub(crate) struct AgentRebuildSpec {
     pub system_prompt_label: String,
     pub owner_session_id: Option<String>,
     pub parent_scheduler_handle:
-        Option<cf_tools::implementations::grok_build::scheduler::types::SchedulerHandle>,
+        Option<cf_tools::implementations::qidi_build::scheduler::types::SchedulerHandle>,
 }
 impl AgentRebuildSpec {
     /// Build a fresh [`Agent`] from this spec and an [`AgentDefinition`].
@@ -316,10 +316,10 @@ impl AgentRebuildSpec {
             }))
             .await;
         if let Some(event_tx) = subagent_event_tx.clone() {
-            use cf_tools::implementations::grok_build::task::backend::{
+            use cf_tools::implementations::qidi_build::task::backend::{
                 ChannelBackend, SubagentBackendResource,
             };
-            use cf_tools::implementations::grok_build::task::types::{
+            use cf_tools::implementations::qidi_build::task::types::{
                 SessionIdResource, SubagentDepthCounter, SubagentEventSender,
             };
             let backend = SubagentBackendResource(Arc::new(ChannelBackend::new(event_tx.clone())));
@@ -356,7 +356,7 @@ impl AgentRebuildSpec {
             agent.tool_bridge().update_resource(client).await;
         }
         {
-            use cf_tools::implementations::grok_build::ask_user_question::UserQuestionSender;
+            use cf_tools::implementations::qidi_build::ask_user_question::UserQuestionSender;
             agent
                 .tool_bridge()
                 .update_resource(UserQuestionSender(user_question_tx.clone()))
@@ -379,7 +379,7 @@ pub(crate) fn test_rebuild_spec_default() -> Arc<AgentRebuildSpec> {
                 cf_tools::computer::local::SearchShadowConfig::default(),
             ),
         ),
-        fs_backend: Arc::new(cf_tools::computer::local::LocalFs),
+        fs_backend: Arc::new(cf_tools::computer::local::LocalFs::unconfined()),
         tools_notification_handle: ToolNotificationHandle::noop(),
         bridge_state_path: std::env::temp_dir().join("test_tool_state.json"),
         session_env: Arc::new(HashMap::new()),
@@ -441,13 +441,13 @@ mod tests {
         let toolset = agent.tool_bridge().toolset();
         let task_name = toolset
             .tool_name_for_kind(cf_tools::types::tool::ToolKind::Task)
-            .expect("GrokBuild Task tool should be present");
+            .expect("QidiBuild Task tool should be present");
         toolset
             .tool_definitions()
             .into_iter()
             .find(|definition| definition.function.name == task_name)
             .and_then(|definition| definition.function.description)
-            .expect("GrokBuild Task description should be present")
+            .expect("QidiBuild Task description should be present")
     }
     #[tokio::test(flavor = "current_thread")]
     async fn rebuild_projects_fresh_public_model_keys_into_task_description() {
@@ -470,7 +470,7 @@ mod tests {
                 models_manager
                     .insert_test_entry("private-unselectable-model", unselectable);
                 let first = spec
-                    .build_agent(AgentDefinition::default_grok_build())
+                    .build_agent(AgentDefinition::default_qidi_build())
                     .await
                     .expect("first agent build should succeed");
                 let first_description = task_description(&first);
@@ -495,7 +495,7 @@ mod tests {
                     .insert_test_entry("beta-public", model_entry("internal-beta"));
                 assert!(validator.error_for("beta-public").is_none());
                 let rebuilt = spec
-                    .build_agent(AgentDefinition::default_grok_build())
+                    .build_agent(AgentDefinition::default_qidi_build())
                     .await
                     .expect("rebuilt agent should succeed");
                 let rebuilt_description = task_description(&rebuilt);

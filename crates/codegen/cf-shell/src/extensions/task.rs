@@ -2,7 +2,7 @@ use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
 use cf_tools::types::{KillOutcome, TaskSnapshot};
 
-use cf_tools::implementations::grok_build::task::types::{
+use cf_tools::implementations::qidi_build::task::types::{
     SubagentCancelOutcome, SubagentSnapshot, SubagentSnapshotStatus,
 };
 

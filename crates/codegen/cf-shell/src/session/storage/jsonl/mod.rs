@@ -224,12 +224,31 @@ impl JsonlStorageAdapter {
     /// lenient readers (e.g. [`Self::read_chat_history_sync`]) then skip.
     async fn append_jsonl_line(&self, path: PathBuf, mut line: Vec<u8>) -> io::Result<()> {
         debug_assert!(line.ends_with(b"\n"), "JSONL record must end with \\n");
-        let mut file = tokio::fs::OpenOptions::new()
-            .read(true)
-            .create(true)
-            .append(true)
-            .open(&path)
-            .await?;
+        // SECURITY: Set restrictive permissions on session files (0o600 on Unix)
+        // to prevent world-readable storage of conversation data that may contain
+        // sensitive tool outputs (file contents, API keys read by tools, etc.).
+        let mut file = {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                tokio::fs::OpenOptions::new()
+                    .read(true)
+                    .create(true)
+                    .append(true)
+                    .mode(0o600)
+                    .open(&path)
+                    .await?
+            }
+            #[cfg(not(unix))]
+            {
+                tokio::fs::OpenOptions::new()
+                    .read(true)
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                    .await?
+            }
+        };
         let len = file.metadata().await?.len();
         if len > 0 {
             use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};

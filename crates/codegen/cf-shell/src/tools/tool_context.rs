@@ -60,7 +60,7 @@ pub struct ToolContext {
     /// `None` if subagent support is not enabled.
     pub subagent_event_tx: Option<
         tokio::sync::mpsc::UnboundedSender<
-            cf_tools::implementations::grok_build::task::types::SubagentEvent,
+            cf_tools::implementations::qidi_build::task::types::SubagentEvent,
         >,
     >,
     /// Shared LSP runtime — cloned cheaply (Arc) from parent to child.
@@ -76,7 +76,7 @@ pub struct ToolContext {
     /// (`inject_pending_monitor_events`) and surfaced as ONE hidden
     /// synthetic user message before the next sampling step.
     pub monitor_event_buffer:
-        Option<cf_tools::implementations::grok_build::task::types::MonitorEventBuffer>,
+        Option<cf_tools::implementations::qidi_build::task::types::MonitorEventBuffer>,
     /// Shared set of IDs delivered via auto-wake synthetic prompts.
     /// Used by `TaskCompletionReminder` to suppress duplicate reminders.
     pub auto_wake_delivered:

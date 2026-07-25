@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Access gate from `grok_build_access_gate`.
+/// Access gate from `qidi_build_access_gate`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GateInfo {
     pub message: String,

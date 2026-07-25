@@ -581,13 +581,13 @@ fn make_ask_user_question_args(
     cf_acp_lib::AcpArgs<acp::ExtRequest>,
     tokio::sync::oneshot::Receiver<cf_acp_lib::AcpResult<acp::ExtResponse>>,
 ) {
-    use cf_tools::implementations::grok_build::ask_user_question::{
+    use cf_tools::implementations::qidi_build::ask_user_question::{
         AskUserQuestionExtRequest, Question, QuestionOption,
     };
     let req = AskUserQuestionExtRequest {
         session_id: "test-session".into(),
         tool_call_id: tool_call_id.into(),
-        mode: cf_tools::implementations::grok_build::ask_user_question::AskUserQuestionMode::Default,
+        mode: cf_tools::implementations::qidi_build::ask_user_question::AskUserQuestionMode::Default,
         questions: vec![
             Question { question : "ACP-driven question".into(), options :
             vec![QuestionOption { label : "ok".into(), description : "ok".into(), preview

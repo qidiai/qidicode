@@ -370,7 +370,7 @@ mod tests {
     /// history shape, with the LLM output cleaned and the agent-state reminder
     /// carried through as the final item.
     #[tokio::test]
-    async fn full_replace_produces_grok_build_history_shape() {
+    async fn full_replace_produces_qidi_build_history_shape() {
         let llm_turns = vec![
             MockItem::System("you are a helpful assistant".into()),
             MockItem::User("fix the login bug".into()),

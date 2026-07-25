@@ -1,4 +1,4 @@
-﻿//! The session actor's main loop (`run_session`): command dispatch, idle
+//! The session actor's main loop (`run_session`): command dispatch, idle
 //! arms, and the free helpers only the loop consumes.
 #![allow(clippy::items_after_test_module)]
 use super::*;
@@ -390,7 +390,7 @@ pub(super) async fn run_session(
             acp::ContentBlock::Text(t) = b { Some(t.text.clone()) } else { None } })
             .collect::< Vec < _ >> ().join("\n"); let task_id = source.task_id()
             .to_owned(); const MAX_BUFFER_EVENTS : usize = 50; buffer
-            .push_capped(cf_tools::implementations::grok_build::task::types::MonitorEventNotification
+            .push_capped(cf_tools::implementations::qidi_build::task::types::MonitorEventNotification
             { task_id : task_id.clone(), event_text, owner_session_id : Some(session
             .session_info.id.0.to_string(),), }, MAX_BUFFER_EVENTS,);
             tracing::debug!(task_id = % task_id,

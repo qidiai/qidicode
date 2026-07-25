@@ -154,10 +154,10 @@ pub(crate) async fn spawn_session_actor(
     inference_idle_timeout_secs: u64,
     max_retries: Option<u32>,
     web_search_sampling_config: Option<cf_sampler::SamplerConfig>,
-    web_fetch_config: cf_tools::implementations::grok_build::web_fetch::WebFetchConfig,
-    image_gen_config: cf_tools::implementations::grok_build::image_gen::ImageGenConfig,
-    video_gen_config: cf_tools::implementations::grok_build::video_gen::VideoGenConfig,
-    app_builder_deployer_config: cf_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig,
+    web_fetch_config: cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig,
+    image_gen_config: cf_tools::implementations::qidi_build::image_gen::ImageGenConfig,
+    video_gen_config: cf_tools::implementations::qidi_build::video_gen::VideoGenConfig,
+    app_builder_deployer_config: cf_tools::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig,
     write_file_enabled: bool,
     goal_enabled: bool,
     subagents_enabled: bool,
@@ -190,7 +190,7 @@ pub(crate) async fn spawn_session_actor(
         std::sync::Arc<dyn cf_tools::computer::types::TerminalBackend>,
     >,
     parent_scheduler_handle: Option<
-        cf_tools::implementations::grok_build::scheduler::types::SchedulerHandle,
+        cf_tools::implementations::qidi_build::scheduler::types::SchedulerHandle,
     >,
     max_turns: Option<usize>,
     forked_tool_override: Option<Vec<ToolSpec>>,
@@ -309,6 +309,16 @@ pub(crate) async fn spawn_session_actor(
                 crate::util::config::remember_tool_approvals_from_disk(),
                 hub_permission,
             );
+        // B5: confine YOLO auto-approval to the launch-scoped `--yolo-tools`
+        // allowlist. `None` = unrestricted (historical `--yolo` behavior), so
+        // this is a no-op unless the operator passed `--yolo-tools`. Applied
+        // only when this session actually starts in YOLO; the permission actor
+        // filters auto-approval by the allowlist at its decision point.
+        if session_yolo_mode
+            && let Some(allow) = crate::util::config::launch_yolo_allowlist()
+        {
+            permissions.set_yolo_allowlist(Some(allow));
+        }
         if crate::util::config::auto_mode_session_active(
             crate::util::config::auto_permission_mode_enabled_from_disk(),
             session_auto_mode,
@@ -588,7 +598,7 @@ pub(crate) async fn spawn_session_actor(
                 tool_context.session_id.clone().unwrap(),
             ))
         } else {
-            std::sync::Arc::new(cf_tools::computer::local::LocalFs)
+            std::sync::Arc::new(cf_tools::computer::local::LocalFs::new(&tool_context.cwd))
         };
     let bridge_state_path =
         crate::session::persistence::session_dir(&session_info).join("tool_state.json");
@@ -646,7 +656,7 @@ pub(crate) async fn spawn_session_actor(
     };
     let reminder_policy = resolve_reminder_policy(remote_settings.as_ref(), todo_gate);
     let (user_question_tx, user_question_rx) = tokio::sync::mpsc::unbounded_channel::<
-        cf_tools::implementations::grok_build::ask_user_question::types::UserQuestionRequest,
+        cf_tools::implementations::qidi_build::ask_user_question::types::UserQuestionRequest,
     >();
     let attribution_callback_for_spec = auth_manager.as_ref().map(|am| {
         crate::auth::attribution::ShellAttribution::new_tool_callback(
@@ -909,7 +919,7 @@ pub(crate) async fn spawn_session_actor(
     let scheduler_handle_for_handle = {
         let toolset = agent.tool_bridge().toolset();
         let res = toolset.resources.lock().await;
-        res.get::<cf_tools::implementations::grok_build::scheduler::types::SchedulerHandle>()
+        res.get::<cf_tools::implementations::qidi_build::scheduler::types::SchedulerHandle>()
             .cloned()
     };
     if let Err(e) = workspace_ops.bind_local_session(
@@ -1089,7 +1099,7 @@ pub(crate) async fn spawn_session_actor(
         .collect();
     let upload_queue = Arc::new(std::sync::OnceLock::new());
     let (goal_update_tx, goal_update_rx) = tokio::sync::mpsc::unbounded_channel::<
-        cf_tools::implementations::grok_build::update_goal::UpdateGoalEnvelope,
+        cf_tools::implementations::qidi_build::update_goal::UpdateGoalEnvelope,
     >();
     let obs_bridge = {
         let sid = cf_tool_protocol::SessionId::new(&*session_info.id.0)
@@ -1403,7 +1413,7 @@ pub(crate) async fn spawn_session_actor(
         .borrow()
         .tool_bridge()
         .update_resource(
-            cf_tools::implementations::grok_build::update_goal::GoalUpdateHandle(
+            cf_tools::implementations::qidi_build::update_goal::GoalUpdateHandle(
                 session.goal_update_tx.clone(),
             ),
         )
@@ -1499,7 +1509,7 @@ pub(crate) async fn spawn_session_actor(
     }
     {
         use agent_client_protocol::Client as _;
-        use cf_tools::implementations::grok_build::ask_user_question::{
+        use cf_tools::implementations::qidi_build::ask_user_question::{
             AskUserQuestionExtRequest, AskUserQuestionExtResponse, UserQuestionError,
             UserQuestionResponse,
         };
@@ -1511,7 +1521,7 @@ pub(crate) async fn spawn_session_actor(
         let mut user_question_rx = user_question_rx;
         tokio::task::spawn_local(async move {
             while let Some(mut request) = user_question_rx.recv().await {
-                use cf_tools::implementations::grok_build::ask_user_question::AskUserQuestionMode;
+                use cf_tools::implementations::qidi_build::ask_user_question::AskUserQuestionMode;
                 let mode = match *current_prompt_mode.lock() {
                     PromptMode::Plan => AskUserQuestionMode::Plan,
                     _ => AskUserQuestionMode::Default,
@@ -1749,10 +1759,10 @@ pub(crate) async fn spawn_session_on_thread(
     inference_idle_timeout_secs: u64,
     max_retries: Option<u32>,
     web_search_sampling_config: Option<cf_sampler::SamplerConfig>,
-    web_fetch_config: cf_tools::implementations::grok_build::web_fetch::WebFetchConfig,
-    image_gen_config: cf_tools::implementations::grok_build::image_gen::ImageGenConfig,
-    video_gen_config: cf_tools::implementations::grok_build::video_gen::VideoGenConfig,
-    app_builder_deployer_config: cf_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig,
+    web_fetch_config: cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig,
+    image_gen_config: cf_tools::implementations::qidi_build::image_gen::ImageGenConfig,
+    video_gen_config: cf_tools::implementations::qidi_build::video_gen::VideoGenConfig,
+    app_builder_deployer_config: cf_tools::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig,
     write_file_enabled: bool,
     goal_enabled: bool,
     subagents_enabled: bool,
@@ -1786,7 +1796,7 @@ pub(crate) async fn spawn_session_on_thread(
         std::sync::Arc<dyn cf_tools::computer::types::TerminalBackend>,
     >,
     parent_scheduler_handle: Option<
-        cf_tools::implementations::grok_build::scheduler::types::SchedulerHandle,
+        cf_tools::implementations::qidi_build::scheduler::types::SchedulerHandle,
     >,
     max_turns: Option<usize>,
     forked_tool_override: Option<Vec<ToolSpec>>,

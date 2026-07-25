@@ -15,6 +15,7 @@ http = { workspace = true, optional = true }
 reqwest = { workspace = true }
 reqwest-middleware = { workspace = true, optional = true }
 tracing = { workspace = true }
+zeroize = "1"
 
 [dev-dependencies]
 mockito = { workspace = true }

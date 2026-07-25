@@ -41,6 +41,16 @@ globset = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 ignore = { workspace = true }
 
+# B3: Windows sandbox via Job Objects. The workspace `windows` dep already
+# carries these features; listing them here keeps the crate buildable on its
+# own and documents exactly what the Job Object path needs.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_System_JobObjects",
+    "Win32_Foundation",
+    "Win32_System_Threading",
+] }
+
 [features]
 default = ["enforce"]
 ## Enable kernel-enforced sandboxing via nono (Landlock/Seatbelt). Marker feature

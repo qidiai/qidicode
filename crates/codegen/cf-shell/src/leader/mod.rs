@@ -1,4 +1,4 @@
-﻿//! Leader-follower IPC architecture for grok-shell.
+//! Leader-follower IPC architecture for grok-shell.
 //!
 //! This module implements a single-leader-per-machine architecture where one leader
 //! process manages the agent state while multiple clients (TUI, IDE extensions, headless)
@@ -57,7 +57,7 @@ mod server;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod transport;
-use crate::env::GrokBuildEnvironment;
+use crate::env::QidiBuildEnvironment;
 pub use client::{ClientError, DisconnectReason, LeaderClient, LeaderRegistration};
 pub use lock::{
     LEADER_SOCKET_ENV, LeaderLock, LockError, compute_ws_url_suffix, lock_path_for_ws_url,
@@ -178,7 +178,7 @@ pub struct LeaderDescriptor {
     pub socket_path: Option<PathBuf>,
     pub ws_url_suffix: String,
     pub classification: LeaderDiscoveryState,
-    pub environment: Option<GrokBuildEnvironment>,
+    pub environment: Option<QidiBuildEnvironment>,
     pub live_info: Option<LiveLeaderInfo>,
     pub target_error: Option<LeaderTargetErrorCode>,
 }
@@ -202,19 +202,19 @@ impl LeaderTargetSelection {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeaderTarget {
-    Environment(GrokBuildEnvironment),
+    Environment(QidiBuildEnvironment),
     WsUrl(String),
     Pid(u32),
 }
-fn known_environment_for_ws_url(ws_url: &str) -> Option<GrokBuildEnvironment> {
-    let environments: &[GrokBuildEnvironment] = &[GrokBuildEnvironment::Production];
+fn known_environment_for_ws_url(ws_url: &str) -> Option<QidiBuildEnvironment> {
+    let environments: &[QidiBuildEnvironment] = &[QidiBuildEnvironment::Production];
     environments
         .iter()
         .copied()
         .find(|environment| environment.relay_ws_url() == ws_url)
 }
 fn environment_target_matches_descriptor(
-    environment: GrokBuildEnvironment,
+    environment: QidiBuildEnvironment,
     descriptor: &LeaderDescriptor,
 ) -> bool {
     descriptor.environment == Some(environment)
@@ -222,8 +222,8 @@ fn environment_target_matches_descriptor(
 fn ws_url_target_matches_descriptor(ws_url: &str, descriptor: &LeaderDescriptor) -> bool {
     descriptor.ws_url_suffix == compute_ws_url_suffix(ws_url)
 }
-fn known_environment_for_suffix(ws_url_suffix: &str) -> Option<GrokBuildEnvironment> {
-    let environments: &[GrokBuildEnvironment] = &[GrokBuildEnvironment::Production];
+fn known_environment_for_suffix(ws_url_suffix: &str) -> Option<QidiBuildEnvironment> {
+    let environments: &[QidiBuildEnvironment] = &[QidiBuildEnvironment::Production];
     environments
         .iter()
         .copied()

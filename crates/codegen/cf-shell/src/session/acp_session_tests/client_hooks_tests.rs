@@ -1,4 +1,4 @@
-﻿use super::support::*;
+use super::support::*;
 use super::*;
 
 /// Client hooks must fire even with no on-disk hook registry: `notify_client_hooks`
@@ -444,7 +444,7 @@ async fn post_tool_use_and_failure_never_double_fire() {
                 tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
             // The agent's tool bridge must know `todo_write` for it to parse + dispatch.
-            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
+            *actor.agent.borrow_mut() = test_qidi_build_agent_with_todo().await;
 
             let mut client_hooks = crate::extensions::hooks::ClientHooks::new();
             for event in [
@@ -545,7 +545,7 @@ async fn pre_tool_use_deny_feeds_reason_back_and_continues_turn() {
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
             // The agent's tool bridge must know `todo_write` so it parses + reaches
             // the PreToolUse gate (rather than short-circuiting as an unknown tool).
-            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
+            *actor.agent.borrow_mut() = test_qidi_build_agent_with_todo().await;
 
             let mut client_hooks = crate::extensions::hooks::ClientHooks::new();
             client_hooks.insert(

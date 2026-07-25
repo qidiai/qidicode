@@ -41,7 +41,7 @@ Grok discovers plugins from these locations, in priority order:
 | `_meta.pluginDirs` (`session/new` / `session/load`) | Session -- loaded for that session only | Trusted automatically |
 | `--plugin-dir` (CLI flag, `grok agent`) | Process -- loaded for that agent process only | Trusted automatically |
 | `.grok/plugins/` | Project -- shared with the team through version control | Requires trust |
-| `~/.grok/plugins/` | User -- personal plugins for every project | Trusted automatically |
+| `~/.qidi/plugins/` | User -- personal plugins for every project | Trusted automatically |
 | `[plugins].paths` (config) | Custom directories you add in `config.toml` | Depends on location |
 
 Grok also reads the `.claude/plugins/` equivalents for compatibility. When two plugins share a name, the higher-priority location wins.
@@ -174,7 +174,7 @@ In an interactive session, these commands open the modal on a specific tab. They
 
 ## Configuration
 
-Configure plugin directories and per-plugin state in `~/.grok/config.toml`:
+Configure plugin directories and per-plugin state in `~/.qidi/config.toml`:
 
 ```toml
 [plugins]
@@ -187,7 +187,7 @@ List a plugin in `disabled` to discover it but skip loading its components. List
 
 ### Hide the plugins UI
 
-To hide the hooks and plugins UI — the `/hooks` and `/plugins` commands and the scrollback annotations — set this in `~/.grok/pager.toml`:
+To hide the hooks and plugins UI — the `/hooks` and `/plugins` commands and the scrollback annotations — set this in `~/.qidi/pager.toml`:
 
 ```toml
 disable_plugins = true
@@ -227,7 +227,7 @@ Add sources under `extraKnownMarketplaces`, keyed by name. Each entry's `source`
 }
 ```
 
-Place this file at `~/.grok/settings.json` or `~/.claude/settings.json`.
+Place this file at `~/.qidi/settings.json` or `~/.claude/settings.json`.
 
 ---
 
@@ -235,7 +235,7 @@ Place this file at `~/.grok/settings.json` or `~/.claude/settings.json`.
 
 Enabling a plugin loads its skills, slash commands, and agents. Trust is separate and controls whether a plugin's code runs: even for an enabled plugin, its hooks, MCP servers, and LSP servers stay inactive until you trust it. This prevents an untrusted repository from running code on your machine.
 
-Grok trusts plugins from `~/.grok/plugins/` automatically. Project plugins in `.grok/plugins/` require explicit trust. To trust a plugin, install it with `--trust`:
+Grok trusts plugins from `~/.qidi/plugins/` automatically. Project plugins in `.grok/plugins/` require explicit trust. To trust a plugin, install it with `--trust`:
 
 ```bash
 grok plugin install <source> --trust

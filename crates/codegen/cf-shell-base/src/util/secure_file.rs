@@ -33,6 +33,13 @@ use std::os::unix::fs::OpenOptionsExt;
 /// On Unix, this sets mode 0o600. On Windows, this restricts the file's ACL
 /// to grant access only to the current user.
 ///
+/// **TOCTOU hardening (B6):** if the file already exists with looser perms
+/// (e.g. 0o644 from an earlier writer that didn't go through this helper, or
+/// a pre-existing placeholder), `OpenOptions::truncate(true).create(true)`
+/// will silently truncate it WITHOUT re-setting the mode — `OpenOptions::mode`
+/// only applies at *creation* time. We therefore explicitly re-apply the
+/// secure permissions after the write so a stale-perms file can't survive.
+///
 /// # Arguments
 /// * `path` - The path to the file to create/open
 /// * `contents` - The data to write to the file
@@ -57,6 +64,24 @@ pub fn write_secure_file(path: &Path, contents: &[u8]) -> io::Result<()> {
     let mut file = open_secure_file(path)?;
     file.write_all(contents)?;
     file.flush()?;
+    drop(file);
+
+    // B6: re-apply secure perms in case `path` already existed before this call
+    // (OpenOptions::mode is creation-time only — truncate won't reset it).
+    // Failure here is best-effort: we don't want a perms-reset error to mask
+    // a successful write, but we DO warn so an operator sees a stale-perms file.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            tracing::warn!(
+                file = %path.display(),
+                error = %e,
+                "write_secure_file: failed to re-tighten perms to 0600 after write \
+                 (file may retain stale loose perms from a prior writer)"
+            );
+        }
+    }
 
     // On Windows, we need to set permissions after file creation
     #[cfg(windows)]

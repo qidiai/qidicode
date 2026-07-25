@@ -454,8 +454,8 @@ mod imp {
         let fd = unsafe {
             libc::open(
                 c_path.as_ptr(),
-                libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
-                0o644,
+                libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_NOFOLLOW,
+                0o600,
             )
         };
         if fd < 0 {

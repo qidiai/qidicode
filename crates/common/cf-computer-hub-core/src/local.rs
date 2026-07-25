@@ -70,6 +70,11 @@ impl Transport for LocalTransport {
         args: Value,
         ctx: ToolCallContext,
     ) -> ToolStream<TypedToolOutput> {
+        // SECURITY: Scope authorization is enforced at connection time via
+        // `authorize()`. The local transport trusts that the resolver's
+        // session-scoped registry prevents cross-session tool access.
+        // Per-call scope re-checks require propagating Principal through
+        // ToolCallContext, which is a future architectural change.
         self.resolver
             .resolve_and_dispatch(&self.session_id, tool_id, args, ctx)
             .await

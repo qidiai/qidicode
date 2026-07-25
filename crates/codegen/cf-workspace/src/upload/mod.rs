@@ -164,7 +164,7 @@ impl AuthCredentialProvider for HubAuthCredentialProvider {
         let cred = self.auth.current();
         match &cred {
             AuthCredential::Bearer { token } => CredentialSnapshot {
-                token: Some(token.clone()),
+                token: Some(zeroize::Zeroizing::new(token.clone())),
                 user_id,
                 team_id,
                 ..Default::default()

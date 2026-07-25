@@ -21,10 +21,10 @@ cf-tool-protocol = { workspace = true }
 cf-tool-runtime = { workspace = true }
 cf-tool-types = { workspace = true }
 cf-computer-hub-sdk = { workspace = true }
+futures = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
-futures = { workspace = true }
 
 [lints]
 workspace = true

@@ -7,7 +7,7 @@ pub mod sources;
 
 use std::path::{Path, PathBuf};
 
-use cf_tools::implementations::grok_build::ask_user_question::{Question, QuestionOption};
+use cf_tools::implementations::qidi_build::ask_user_question::{Question, QuestionOption};
 
 /// `resolved_paths` is index-aligned with the leading `question.options`.
 /// The trailing "Don't ask me again" option at `dont_ask_index` has no

@@ -153,6 +153,7 @@ pub(crate) async fn upload_session_state(
 /// only while the cancellation left the item parked on queue confirmation (the
 /// live worker still owns it); a cancelled direct attempt queued nothing
 /// durable and must record the loss.
+#[allow(dead_code)]
 fn confirm_timeout_artifact_result(
     direct_attempt_started: bool,
 ) -> super::manifest::ArtifactResult<'static> {
@@ -995,6 +996,7 @@ pub(crate) async fn upload_turn_messages(
 /// `reason` so the caller records the matching artifact-failure category
 /// (`serialize_failed` vs `archive_failed`), mirroring `upload_turn_messages`.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct SessionStateBuildError {
     pub reason: &'static str,
     pub error: anyhow::Error,
@@ -1362,6 +1364,7 @@ pub(crate) fn spawn_upload_queue(
 /// `direct_attempt_started`, when provided, is set the moment the helper
 /// leaves the queue path for the direct attempt — the one state where a
 /// caller cancelling this future (Defer-timeout) holds nothing durable.
+#[allow(dead_code)]
 pub(crate) async fn upload_trace_artifact_blocking(
     ctx: &PromptTraceContext,
     content: &[u8],
@@ -1608,6 +1611,7 @@ pub(crate) async fn upload_trace_artifact(
         );
     }
 }
+#[allow(dead_code)]
 fn sort_session_files_by_priority(files: &mut [crate::session::persistence::CopiedSessionFile]) {
     files.sort_by_key(|f| match f.name.as_str() {
         "summary.json" => 0,

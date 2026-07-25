@@ -16,8 +16,8 @@ confidence-threshold = 0.8
 multiple-versions = "warn"
 
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
+db-urls = ["https://github.com/RustSec/advisory-db"]
+version = 2
 yanked = "deny"
 
 [sources]

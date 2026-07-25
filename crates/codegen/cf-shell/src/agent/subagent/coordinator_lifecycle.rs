@@ -1,4 +1,4 @@
-﻿#![cfg_attr(rustfmt, rustfmt::skip)]
+#![cfg_attr(rustfmt, rustfmt::skip)]
 #![allow(unused_imports)]
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,7 +21,7 @@ use crate::upload::trace::{
 };
 use crate::upload::turn::{PromptTraceContext, complete_prompt_trace};
 use cf_acp_lib::AcpAgentGatewaySender as GatewaySender;
-use cf_tools::implementations::grok_build::task::types::*;
+use cf_tools::implementations::qidi_build::task::types::*;
 use cf_workspace::file_system::AsyncFileSystem;
 use cf_hunk_tracker::HunkTrackerHandle;
 use super::*;
@@ -38,7 +38,25 @@ impl SubagentCoordinator {
             running_gauge: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             block_wait_slots: HashMap::new(),
             subagent_usage_not_applied_prompts: std::collections::HashSet::new(),
+            max_concurrent: std::env::var("QIDI_MAX_CONCURRENT_SUBAGENTS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10),
         }
+    }
+    /// Check if the concurrent subagent limit has been reached.
+    /// Returns an error message if the limit is exceeded.
+    pub fn check_concurrent_limit(&self) -> Result<(), String> {
+        let current = self.pending.len() + self.active.len();
+        if current >= self.max_concurrent {
+            return Err(format!(
+                "concurrent subagent limit reached ({current}/{}). \
+                 Wait for existing subagents to complete or increase the limit \
+                 via QIDI_MAX_CONCURRENT_SUBAGENTS env var.",
+                self.max_concurrent
+            ));
+        }
+        Ok(())
     }
     pub fn mark_subagent_usage_not_applied(&mut self, prompt_id: &str) {
         self.subagent_usage_not_applied_prompts.insert(prompt_id.to_string());
@@ -163,8 +181,8 @@ impl SubagentCoordinator {
     pub fn outstanding_reply_for_prompt(
         &self,
         prompt_id: &str,
-    ) -> cf_tools::implementations::grok_build::task::types::SubagentOutstandingReply {
-        cf_tools::implementations::grok_build::task::types::SubagentOutstandingReply {
+    ) -> cf_tools::implementations::qidi_build::task::types::SubagentOutstandingReply {
+        cf_tools::implementations::qidi_build::task::types::SubagentOutstandingReply {
             live_ids: self.outstanding_for_prompt(prompt_id),
             background_live: self.background_live_for_prompt(prompt_id),
             subagent_usage_not_applied: self.subagent_usage_not_applied(prompt_id),

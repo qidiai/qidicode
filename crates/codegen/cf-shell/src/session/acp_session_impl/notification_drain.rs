@@ -1,4 +1,4 @@
-﻿//! Idle-gated pending-notification buffering and drain for `SessionActor`,
+//! Idle-gated pending-notification buffering and drain for `SessionActor`,
 //! plus auto-start of queued prompts (`maybe_start_running_task`).
 
 use super::*;
@@ -100,7 +100,7 @@ impl SessionActor {
             .borrow()
             .tool_bridge()
             .update_resource(
-                cf_tools::implementations::grok_build::task::types::CurrentPromptIdResource(
+                cf_tools::implementations::qidi_build::task::types::CurrentPromptIdResource(
                     prompt_id.clone(),
                 ),
             )
@@ -258,7 +258,7 @@ impl SessionActor {
         let Some(buffer) = &self.tool_context.monitor_event_buffer else {
             return;
         };
-        for event in cf_tools::implementations::grok_build::task::types::drain_owned(
+        for event in cf_tools::implementations::qidi_build::task::types::drain_owned(
             buffer,
             Some(self.session_info.id.0.as_ref()),
         ) {
@@ -317,7 +317,7 @@ impl SessionActor {
         notifications: Vec<PendingNotification>,
         task_output_tool_name: &str,
     ) -> bool {
-        use cf_tools::implementations::grok_build::task::types::MonitorEventNotification;
+        use cf_tools::implementations::qidi_build::task::types::MonitorEventNotification;
 
         // Collapse monitor entries: collect their text into events, remember
         // where the first one sat so the batch lands in arrival position.

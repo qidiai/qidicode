@@ -1,4 +1,4 @@
-﻿//! Blocking interaction surfaces: permission prompts, the question view,
+//! Blocking interaction surfaces: permission prompts, the question view,
 //! and the cancel-turn confirm flow (keys, mouse, and submit paths).
 #[cfg(test)]
 use super::paste::paste_key_tests;
@@ -1107,7 +1107,7 @@ impl AgentView {
         self.submit_question_answers(skipped)
     }
     fn submit_question_answers(&mut self, skipped: bool) -> InputOutcome {
-        use cf_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse;
+        use cf_tools::implementations::qidi_build::ask_user_question::AskUserQuestionExtResponse;
         self.swap_question_freeform();
         let Some(mut qv) = self.question_view.take() else {
             return InputOutcome::Changed;
@@ -1617,7 +1617,7 @@ mod question_no_freeform_tests {
     };
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
-    use cf_tools::implementations::grok_build::ask_user_question::{
+    use cf_tools::implementations::qidi_build::ask_user_question::{
         Question, QuestionOption,
     };
     /// Fixed options, single-select — shaped like the free-usage upsell.

@@ -245,6 +245,17 @@ pub struct AgentArgs {
     /// Auto-approve all tool executions
     #[arg(long = "always-approve", alias = "yolo")]
     pub yolo: bool,
+    /// B5: Confine `--yolo` auto-approval to a comma-separated tool allowlist
+    /// (e.g. `--yolo-tools read_file,grep`). Has no effect without `--yolo`;
+    /// with it, only the listed tools auto-approve and every other tool still
+    /// prompts. Parsed into `cf_workspace::permission::YoloMode`.
+    #[arg(long = "yolo-tools", value_name = "TOOLS", value_delimiter = ',')]
+    pub yolo_tools: Vec<String>,
+    /// B5: Explicitly accept unrestricted `--yolo` without an active OS sandbox.
+    /// Without this, unrestricted YOLO + no sandbox refuses to start
+    /// (see `cf_workspace::permission::yolo_startup_check`).
+    #[arg(long = "ack-no-sandbox")]
+    pub ack_no_sandbox: bool,
     /// Path to an agent profile file.
     #[arg(long = "agent-profile", value_name = "PATH")]
     pub agent_profile: Option<PathBuf>,
@@ -434,6 +445,17 @@ pub struct PagerArgs {
         alias = "dangerously-skip-permissions"
     )]
     pub yolo: bool,
+    /// B5: Confine `--yolo` auto-approval to a comma-separated tool allowlist
+    /// (e.g. `--yolo-tools read_file,grep`). Has no effect without `--yolo`;
+    /// with it, only the listed tools auto-approve and every other tool still
+    /// prompts. Parsed into `cf_workspace::permission::YoloMode`.
+    #[arg(long = "yolo-tools", value_name = "TOOLS", value_delimiter = ',')]
+    pub yolo_tools: Vec<String>,
+    /// B5: Explicitly accept unrestricted `--yolo` without an active OS sandbox.
+    /// Without this, unrestricted YOLO + no sandbox refuses to start
+    /// (see `cf_workspace::permission::yolo_startup_check`).
+    #[arg(long = "ack-no-sandbox")]
+    pub ack_no_sandbox: bool,
     /// Trust this folder and persist the decision to the trust store.
     #[arg(long = "trust", alias = "trust-folder", hide = true)]
     pub trust: bool,

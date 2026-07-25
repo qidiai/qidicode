@@ -229,7 +229,7 @@ async fn list_outstanding_background_tasks(
 async fn list_session_todos(
     toolset: &cf_tools::registry::types::FinalizedToolset,
 ) -> Vec<cf_workspace_types::rpc::workspace::TodoSummaryWire> {
-    use cf_tools::implementations::grok_build::todo::{TodoState, TodoStatus};
+    use cf_tools::implementations::qidi_build::todo::{TodoState, TodoStatus};
     use cf_tools::types::resources::State;
     use cf_workspace_types::rpc::workspace::TodoSummaryWire;
     let res = toolset.resources.lock().await;

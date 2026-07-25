@@ -1081,7 +1081,7 @@ fn parse_slash_prefix(prompt_blocks: &[acp::ContentBlock]) -> Option<(&str, &str
 /// default: the model derives the cadence from the request and asks when none
 /// is given.
 fn build_loop_prompt_blocks(args: &str) -> Vec<acp::ContentBlock> {
-    use cf_tools::implementations::grok_build::{
+    use cf_tools::implementations::qidi_build::{
         loop_schedule_instruction, loop_usage_message,
     };
 
@@ -1687,7 +1687,7 @@ mod tests {
     #[test]
     fn loop_prompt_matches_pager_wording() {
         // The shell and pager must stay textually identical so they don't drift.
-        use cf_tools::implementations::grok_build::{
+        use cf_tools::implementations::qidi_build::{
             loop_schedule_instruction, loop_usage_message,
         };
         assert_eq!(loop_text(""), loop_usage_message());

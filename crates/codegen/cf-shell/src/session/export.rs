@@ -40,6 +40,9 @@ impl ExportedMessage {
             params: notification,
         };
         let content = serde_json::to_string(&wrapper).unwrap_or_else(|_| "{}".to_string());
+        // SECURITY: Redact sensitive patterns (API keys, tokens, passwords)
+        // from exported content to prevent leaking secrets in shared exports.
+        let content = redact_sensitive_content(&content);
 
         let timestamp = notification
             .meta
@@ -168,4 +171,15 @@ impl ExportedSession {
             })
             .collect()
     }
+}
+
+/// SECURITY: Redact sensitive patterns from exported content.
+///
+/// Uses the project's `cf-secrets` sanitizer to detect and redact common
+/// secret patterns (API keys, Bearer tokens, PEM blocks, AWS keys, etc.)
+/// before exporting session data to prevent accidental credential leakage.
+fn redact_sensitive_content(content: &str) -> String {
+    // Use the cf-secrets redactor to detect and redact common secret patterns
+    // (API keys, Bearer tokens, PEM blocks, AWS keys, etc.) before exporting.
+    cf_secrets::redact_secrets(content).into_owned()
 }

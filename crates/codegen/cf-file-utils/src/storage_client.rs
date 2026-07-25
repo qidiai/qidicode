@@ -632,7 +632,7 @@ impl StorageClient {
     /// send and 401 response, though in practice this is rare).
     fn fire_401_attribution(&self, operation: &str) {
         if let Some(ref cb) = self.attribution {
-            let bearer_prefix = self.credentials.snapshot().token;
+            let bearer_prefix = self.credentials.snapshot().token.as_deref().map(|s| s.to_string());
             cb.record_401(operation, bearer_prefix.as_deref());
         }
     }

@@ -3755,7 +3755,7 @@ pub async fn connect_local_workspace(
         ready_file,
         diag,
     };
-    let tool_config = cf_agent::workspace_grok_build_toolset();
+    let tool_config = cf_agent::workspace_qidi_build_toolset();
     let mut ws_config = WorkspaceConfig::new_for_proxy(
         cwd,
         Arc::new(factory),

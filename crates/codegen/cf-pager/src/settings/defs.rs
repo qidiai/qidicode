@@ -12,7 +12,7 @@ use crate::appearance::TextSelection;
 use crate::appearance::permission_cursor::DefaultSelectedPermission;
 
 use cf_shell::agent::config::UiConfig;
-use cf_tools::implementations::grok_build::ask_user_question;
+use cf_tools::implementations::qidi_build::ask_user_question;
 
 // ---------------------------------------------------------------------------
 // Int bounds for `max_thoughts_width`.

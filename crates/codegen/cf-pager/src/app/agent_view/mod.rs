@@ -1,4 +1,4 @@
-﻿//! Per-agent view component.
+//! Per-agent view component.
 //!
 //! [`AgentView`] is a view-model that owns both business state (session,
 //! entries) and UI state (scroll, selection, focus, mode). It handles
@@ -2051,7 +2051,7 @@ fn resolve_action(action_id: Option<ActionId>) -> Option<InputOutcome> {
 fn question_visible_h(
     scroll_region: Option<(u16, u16)>,
     prompt_height: u16,
-    question: &cf_tools::implementations::grok_build::ask_user_question::Question,
+    question: &cf_tools::implementations::qidi_build::ask_user_question::Question,
     content_w: usize,
     preview: Option<&str>,
     fullscreen: bool,

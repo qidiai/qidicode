@@ -3372,6 +3372,9 @@ impl McpClient {
                 config,
                 auth_manager,
             } => {
+                // SSRF defense: reject URLs pointing to internal/private/loopback addresses.
+                validate_mcp_http_url(&config.url, name)?;
+
                 let mut headers = reqwest::header::HeaderMap::new();
                 for (key, value) in &config.headers {
                     if key.eq_ignore_ascii_case("Authorization") {
@@ -3580,6 +3583,9 @@ impl McpClient {
         StreamableHttpClientTransport<crate::mcp_http_client::McpHttpClient<reqwest::Client>>,
         McpError,
     > {
+        // SSRF defense: reject URLs pointing to internal/private/loopback addresses.
+        validate_mcp_http_url(&config.url, server_name)?;
+
         let mut headers = reqwest::header::HeaderMap::new();
         for (key, value) in &config.headers {
             match (
@@ -4059,6 +4065,31 @@ pub async fn start_mcp_server(
         }) => {
             if let Some(mc) = meta_config {
                 tracing::info!(server = %name, ?mc, "MCP stdio: meta config override");
+            }
+
+            // SECURITY: Log a warning that a stdio MCP server is about to execute
+            // an arbitrary command from project configuration. This is by design
+            // (MCP servers are user-installed tools), but the warning ensures
+            // visibility in case a malicious project injects an MCP config.
+            tracing::warn!(
+                server = %name,
+                command = %command.display(),
+                args = ?args,
+                "MCP stdio server starting: executing command from project/user configuration. \
+                 Verify this is a trusted MCP server."
+            );
+
+            // Block PATH override attempts — MCP env vars may try to replace PATH
+            // to hijack command resolution.
+            for env_var in &env {
+                if env_var.name.eq_ignore_ascii_case("PATH") {
+                    tracing::warn!(
+                        server = %name,
+                        "MCP server attempts to override PATH — this is a potential \
+                         command hijack vector. The PATH override will be applied but \
+                         may affect command resolution.",
+                    );
+                }
             }
 
             let (startup_timeout, _, _) = McpClient::load_timeouts(overrides, meta_config);
@@ -7535,4 +7566,81 @@ mod tests {
         };
         assert_eq!(ev.server_name(), Some("srv"));
     }
+}
+
+/// Validate that an MCP HTTP URL does not point to a private/internal address.
+///
+/// Blocks SSRF attacks where a malicious project config directs MCP HTTP
+/// transport to internal services (e.g. cloud metadata endpoints like
+/// 169.254.169.254, loopback, RFC 1918 private ranges).
+fn validate_mcp_http_url(url_str: &str, server_name: &str) -> Result<(), McpError> {
+    let url = url::Url::parse(url_str).map_err(|e| {
+        McpError::ClientError(format!("MCP server '{server_name}': invalid URL: {e}"))
+    })?;
+
+    // Only http and https schemes are allowed.
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(McpError::ClientError(format!(
+            "MCP server '{server_name}': URL scheme '{}' is not allowed (only http/https)",
+            url.scheme()
+        )));
+    }
+
+    let host = url.host_str().unwrap_or("");
+    if host.is_empty() {
+        return Err(McpError::ClientError(format!(
+            "MCP server '{server_name}': URL has no host"
+        )));
+    }
+
+    // Check against known internal hostnames/patterns.
+    let host_lower = host.to_lowercase();
+
+    // Reject obvious internal hostnames.
+    if matches!(
+        host_lower.as_str(),
+        "localhost" | "metadata" | "metadata.google.internal"
+    ) {
+        tracing::warn!(
+            server = server_name,
+            url = %url_str,
+            host = %host,
+            "MCP HTTP URL blocked: internal hostname"
+        );
+        return Err(McpError::ClientError(format!(
+            "MCP server '{server_name}': URL host '{host}' is a blocked internal address (SSRF protection)"
+        )));
+    }
+
+    // Check IP addresses against private ranges.
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        let is_blocked = match ip {
+            std::net::IpAddr::V4(v4) => {
+                v4.is_loopback()
+                    || v4.is_link_local()
+                    || v4.is_private()
+                    || v4.is_unspecified()
+                    || v4.is_broadcast()
+            }
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    // IPv6 link-local: fe80::/10
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80
+            }
+        };
+        if is_blocked {
+            tracing::warn!(
+                server = server_name,
+                url = %url_str,
+                ip = %ip,
+                "MCP HTTP URL blocked: private/internal IP"
+            );
+            return Err(McpError::ClientError(format!(
+                "MCP server '{server_name}': URL host '{host}' resolves to a private/internal IP (SSRF protection)"
+            )));
+        }
+    }
+
+    Ok(())
 }

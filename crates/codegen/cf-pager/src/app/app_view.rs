@@ -982,7 +982,7 @@ pub struct AppView {
     pub zdr_access_enabled: bool,
     /// When set, `/usage` shows a link to this URL instead of fetching billing
     /// data from the backend. Server-controlled via RemoteSettings (remote settings
-    /// `grok_build_usage_redirect_url`, targeted at personal-team users).
+    /// `qidi_build_usage_redirect_url`, targeted at personal-team users).
     /// `None` (default) fetches usage from the backend.
     pub usage_billing_redirect_url: Option<String>,
     pub access_gate_shown_logged: bool,
@@ -992,7 +992,7 @@ pub struct AppView {
     /// event's `id`).
     pub announcement_cta_impressions_logged:
         std::collections::BTreeSet<(String, cf_telemetry::events::AnnouncementCtaSurface)>,
-    /// Access gate from `grok_build_access_gate`. `Some` = blocked.
+    /// Access gate from `qidi_build_access_gate`. `Some` = blocked.
     pub gate: Option<cf_shell::auth::GateInfo>,
     /// User-friendly subscription tier name (e.g. "SuperGrok", "Free").
     pub subscription_tier: Option<String>,
@@ -2882,7 +2882,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
         let entry_count = entry_map.len();
         let non_selectable_flags: Vec<bool> = entry_map.iter().map(|e| e.is_none()).collect();
         let config = PickerConfig {
-            title: Some("Resume session"),
+            title: Some("Resume session | 恢复会话"),
             show_search_hint: true,
             expandable: true,
             esc_clears_query: true,
@@ -9640,7 +9640,7 @@ pub(crate) mod tests {
         n_questions: usize,
     ) {
         use crate::views::question_view::QuestionViewState;
-        use cf_tools::implementations::grok_build::ask_user_question::{
+        use cf_tools::implementations::qidi_build::ask_user_question::{
             Question, QuestionOption,
         };
         let questions: Vec<Question> = (0..n_questions)

@@ -773,7 +773,7 @@ mod tests {
         let output = ToolOutput::Todo(TodoWriteOutput::TodosUpdated(TodoWriteSuccess {
             summary_for_prompt: "tasks".to_string(),
             todos: vec![],
-            state: cf_tools::implementations::grok_build::todo::TodoState::default(),
+            state: cf_tools::implementations::qidi_build::todo::TodoState::default(),
         }));
         let update = acp_tool_update(&output, "call-1", None, None).unwrap();
         assert_eq!(update.fields.status, Some(acp::ToolCallStatus::Completed));
@@ -782,7 +782,7 @@ mod tests {
     #[test]
     fn test_turn_end_plan_cleanup_preserves_semantics_and_priority() {
         use crate::tools::todo::plan_entry_from_todo_item;
-        use cf_tools::implementations::grok_build::todo::{
+        use cf_tools::implementations::qidi_build::todo::{
             TodoItem, TodoPriority, TodoStatus,
         };
 
@@ -853,16 +853,16 @@ mod tests {
         let output = ToolOutput::Todo(TodoWriteOutput::TodosUpdated(TodoWriteSuccess {
             summary_for_prompt: "tasks".to_string(),
             todos: vec![
-                cf_tools::implementations::grok_build::todo::TodoItem {
+                cf_tools::implementations::qidi_build::todo::TodoItem {
                     content: "Task 1".to_string(),
                     priority:
-                        cf_tools::implementations::grok_build::todo::TodoPriority::Medium,
+                        cf_tools::implementations::qidi_build::todo::TodoPriority::Medium,
                     status:
-                        cf_tools::implementations::grok_build::todo::TodoStatus::Completed,
+                        cf_tools::implementations::qidi_build::todo::TodoStatus::Completed,
                     meta: None,
                 },
             ],
-            state: cf_tools::implementations::grok_build::todo::TodoState::default(),
+            state: cf_tools::implementations::qidi_build::todo::TodoState::default(),
         }));
         let plan = acp_plan_update(&output).unwrap();
         assert_eq!(plan.entries.len(), 1);

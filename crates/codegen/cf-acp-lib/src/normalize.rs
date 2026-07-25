@@ -40,7 +40,7 @@ pub(crate) fn normalize_json_line(line: Vec<u8>) -> Vec<u8> {
     }
     // Same type + bytes the acp crate will parse (trailing terminator is JSON
     // whitespace): if it accepts the line, forward it byte-identical.
-    if serde_json::from_slice::<agent_client_protocol::RawIncomingMessage>(&line).is_ok() {
+    if serde_json::from_slice::<agent_client_protocol::RawIncomingMessage<'_>>(&line).is_ok() {
         return line;
     }
     let body_len = line

@@ -1477,7 +1477,7 @@ fn model_overrides_local_image_description_wins_over_remote() {
     );
 }
 #[test]
-fn model_overrides_default_image_description_is_grok_build() {
+fn model_overrides_default_image_description_is_qidi_build() {
     with_model_overrides_env(
         None,
         None,
@@ -1493,7 +1493,7 @@ fn model_overrides_default_image_description_is_grok_build() {
     );
 }
 #[test]
-fn model_overrides_default_session_summary_is_grok_build() {
+fn model_overrides_default_session_summary_is_qidi_build() {
     with_model_overrides_env(
         None,
         None,

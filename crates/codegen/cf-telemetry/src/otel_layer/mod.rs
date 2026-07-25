@@ -271,7 +271,7 @@ impl opentelemetry_sdk::trace::SpanExporter for RefreshableSpanExporter {
             && self.credentials.has_usable_credential())
         .then(|| {
             let snapshot = self.credentials.snapshot();
-            let token = snapshot.token.clone().unwrap_or_else(|| {
+            let token = snapshot.token.as_deref().map(|s| s.to_string()).unwrap_or_else(|| {
                 tracing::debug!(
                     "auth: otel credential snapshot has no token, using cached last_token"
                 );
@@ -340,7 +340,7 @@ impl opentelemetry_sdk::trace::SpanExporter for RefreshableSpanExporter {
                 return result;
             }
             let retry_snapshot = credentials.snapshot();
-            let new_token = retry_snapshot.token.clone().unwrap_or_default();
+            let new_token = retry_snapshot.token.as_deref().map(|s| s.to_string()).unwrap_or_default();
             if new_token.is_empty() {
                 tracing::warn!("token refresh reported success but snapshot returned no token");
                 return result;
@@ -385,7 +385,7 @@ fn build_server_provider(client: OtelClientInfo, config: OtelLayerConfig) -> Sdk
         app_entrypoint,
     } = client;
     let snapshot = config.credentials.snapshot();
-    let initial_token = snapshot.token.unwrap_or_default();
+    let initial_token = snapshot.token.as_deref().map(|s| s.to_string()).unwrap_or_default();
     if initial_token.is_empty() {
         tracing::debug!(
             "No authentication credentials found at init. OTLP exporter will retry after auth."
@@ -530,7 +530,7 @@ mod tests {
     impl AuthCredentialProvider for TestProvider {
         fn snapshot(&self) -> CredentialSnapshot {
             CredentialSnapshot {
-                token: self.token.lock().unwrap().clone(),
+                token: self.token.lock().unwrap().clone().map(zeroize::Zeroizing::new),
                 ..Default::default()
             }
         }

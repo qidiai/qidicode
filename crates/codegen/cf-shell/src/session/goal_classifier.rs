@@ -509,7 +509,7 @@ pub(crate) fn record_subagent_trace(
 /// discoverable in data collection.
 pub(crate) struct ChannelSpawner {
     pub(crate) event_tx: tokio::sync::mpsc::UnboundedSender<
-        cf_tools::implementations::grok_build::task::types::SubagentEvent,
+        cf_tools::implementations::qidi_build::task::types::SubagentEvent,
     >,
     pub(crate) parent_session_id: String,
     pub(crate) parent_prompt_id: Option<String>,
@@ -594,7 +594,7 @@ impl ChannelSpawner {
         harness_agent_type: Option<String>,
         resume_from: Option<&str>,
     ) -> Result<String, SpawnError> {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentRequest, SubagentRuntimeOverrides,
         };
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
@@ -2446,7 +2446,7 @@ mod tests {
 
     #[tokio::test]
     async fn channel_spawner_request_is_harness_internal() {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
 
@@ -2496,7 +2496,7 @@ mod tests {
     /// SAME model — i.e. skeptic-0 keeps `pool[0]` on the cold fallback.
     #[tokio::test]
     async fn channel_spawner_applies_per_index_model_to_request() {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
 
@@ -2567,7 +2567,7 @@ mod tests {
     /// `None` — the historic default-spawn behavior.
     #[tokio::test]
     async fn channel_spawner_inherit_index_leaves_model_none() {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -4053,7 +4053,7 @@ mod tests {
     /// renders leave no tool placeholder unresolved.
     #[test]
     fn verifier_template_renders_per_agent_type_and_falls_back() {
-        use cf_tools::implementations::grok_build::task::types::SubagentTypeSummary;
+        use cf_tools::implementations::qidi_build::task::types::SubagentTypeSummary;
         let mut tool_names = std::collections::HashMap::new();
         tool_names.insert(
             cf_tools::types::tool::ToolKind::Read,
@@ -5822,7 +5822,7 @@ mod tests {
     #[tokio::test]
     async fn cold_fallback_after_resume_failure_carries_pool0_model_on_request() {
         use std::sync::Mutex as StdMutex;
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
 
@@ -6216,7 +6216,7 @@ mod tests {
 
     #[tokio::test]
     async fn channel_spawner_blocks_until_subagent_result() {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
 

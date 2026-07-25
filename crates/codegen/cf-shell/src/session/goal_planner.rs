@@ -21,7 +21,7 @@ use cf_file_utils::events::EventWriter;
 /// and the parent-side `describe_subagent_type` probe so the gated/probed
 /// toolset matches the spawned one.
 ///
-/// [`SubagentRuntimeOverrides::harness_agent_type`]: cf_tools::implementations::grok_build::task::types::SubagentRuntimeOverrides::harness_agent_type
+/// [`SubagentRuntimeOverrides::harness_agent_type`]: cf_tools::implementations::qidi_build::task::types::SubagentRuntimeOverrides::harness_agent_type
 pub(crate) const GOAL_ROLE_SUBAGENT_TYPE: &str = "general-purpose";
 
 /// Resolved per-role spawn override.
@@ -254,7 +254,7 @@ pub(crate) fn parse_terminal_response(text: &str) -> bool {
 
 pub(crate) struct ChannelSpawner {
     pub(crate) event_tx: tokio::sync::mpsc::UnboundedSender<
-        cf_tools::implementations::grok_build::task::types::SubagentEvent,
+        cf_tools::implementations::qidi_build::task::types::SubagentEvent,
     >,
     pub(crate) parent_session_id: String,
     pub(crate) parent_prompt_id: Option<String>,
@@ -330,7 +330,7 @@ impl ChannelSpawner {
         model: Option<String>,
         harness_agent_type: Option<String>,
     ) -> Result<String, SpawnError> {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentRequest, SubagentRuntimeOverrides,
         };
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
@@ -628,7 +628,7 @@ mod tests {
 
     #[tokio::test]
     async fn channel_spawner_request_is_harness_internal() {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
 
@@ -1231,7 +1231,7 @@ mod tests {
     /// request's `harness_agent_type`, not the subagent_type.
     #[tokio::test]
     async fn channel_spawner_threads_harness_override_to_request() {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1531,7 +1531,7 @@ mod tests {
     /// `ChannelSpawner` whose explicit spawn fails still returns `Planned`.
     #[tokio::test]
     async fn planner_retries_to_inherit_instead_of_failing_closed() {
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
         let plan_file = tmp_plan_file("retry-failopen");
@@ -1602,7 +1602,7 @@ mod tests {
     #[tokio::test]
     async fn planner_cancellation_pauses_as_aborted_without_retry() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentEvent, SubagentResult,
         };
         let plan_file = tmp_plan_file("cancel-aborted");

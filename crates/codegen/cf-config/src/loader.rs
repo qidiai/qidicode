@@ -655,9 +655,14 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("bad.toml");
         // Duplicate key: the message names the key; the secret-bearing source line is only in Display.
+        // The placeholder value is intentionally NOT a valid key prefix so static
+        // secret-scanners don't flag it as a real credential.
+        const TEST_PLACEHOLDER: &str = "TEST-PLACEHOLDER-NOT-A-REAL-SECRET";
         std::fs::write(
             &path,
-            "api_key = \"xai-secretmustnotleak\"\napi_key = \"xai-secretmustnotleak2\"\n",
+            format!(
+                "api_key = \"{TEST_PLACEHOLDER}\"\napi_key = \"{TEST_PLACEHOLDER}\"\n",
+            ),
         )
         .unwrap();
 
@@ -668,7 +673,7 @@ mod tests {
         );
         assert!(msg.contains("duplicate key"), "want parser kind: {msg}");
         assert!(
-            !msg.contains("xai-secretmustnotleak"),
+            !msg.contains(TEST_PLACEHOLDER),
             "leaked the secret value: {msg}"
         );
         assert!(

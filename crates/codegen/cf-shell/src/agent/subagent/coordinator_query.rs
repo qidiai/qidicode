@@ -1,4 +1,4 @@
-﻿#![cfg_attr(rustfmt, rustfmt::skip)]
+#![cfg_attr(rustfmt, rustfmt::skip)]
 #![allow(unused_imports)]
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -21,7 +21,7 @@ use crate::upload::trace::{
 };
 use crate::upload::turn::{PromptTraceContext, complete_prompt_trace};
 use cf_acp_lib::AcpAgentGatewaySender as GatewaySender;
-use cf_tools::implementations::grok_build::task::types::*;
+use cf_tools::implementations::qidi_build::task::types::*;
 use cf_workspace::file_system::AsyncFileSystem;
 use cf_hunk_tracker::HunkTrackerHandle;
 use super::*;

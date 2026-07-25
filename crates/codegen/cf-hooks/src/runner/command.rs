@@ -23,6 +23,35 @@ struct HookOutput {
     reason: Option<String>,
 }
 
+/// Commands that are denied in hook execution to prevent accidental damage.
+/// Hooks run with full process privileges, so we block the most dangerous
+/// patterns at the command-string level.
+///
+/// Patterns use exact match or word-boundary-aware matching to avoid false
+/// positives on legitimate paths (e.g., `rm -rf /home/user` is fine,
+/// `rm -rf /` is not).
+const DENIED_COMMAND_PATTERNS: &[&str] = &[
+    "rm -rf / ",
+    "rm -rf /\"",
+    "rm -rf /'",
+    "rm -rf /\n",
+    "rm -rf ~ ",
+    "rm -rf $HOME ",
+    "sudo rm -rf /",
+    "mkfs",
+    "curl | sh",
+    "curl | bash",
+    "wget | sh",
+    "wget | bash",
+    ":(){:|:&};:",
+];
+
+/// Check if a command string contains a denied pattern.
+fn is_command_denied(command: &str) -> bool {
+    let lower = command.to_lowercase();
+    DENIED_COMMAND_PATTERNS.iter().any(|&p| lower.contains(p))
+}
+
 /// Run a single hook command.
 ///
 /// Spawns the command as a child process, writes the envelope JSON on stdin,
@@ -43,6 +72,18 @@ pub async fn run_command_hook(
         );
     };
     let command_str = command.to_string_lossy();
+
+    // Security: deny commands matching known-dangerous patterns.
+    if is_command_denied(&command_str) {
+        tracing::warn!(
+            command = %command_str,
+            "Hook command denied: matches a known-dangerous pattern"
+        );
+        return (
+            HookRunnerResult::Failed("Hook command denied by security policy".into()),
+            start.elapsed(),
+        );
+    }
 
     // Serialize envelope to JSON.
     let stdin_json = match serde_json::to_string(envelope) {

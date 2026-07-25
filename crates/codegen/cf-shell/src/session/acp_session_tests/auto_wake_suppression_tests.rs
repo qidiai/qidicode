@@ -1,4 +1,4 @@
-﻿use super::support::*;
+use super::support::*;
 use super::*;
 use cf_tools::reminders::task_completion::consumed_completion_ids;
 use cf_tools::types::output::{BashOutput, TextOutput, ToolOutput};
@@ -908,7 +908,7 @@ async fn reparented_record_is_noop_without_goal_harness() {
 /// subagent(s) completed" reminder.
 #[tokio::test(flavor = "current_thread")]
 async fn between_turn_drain_suppresses_auto_wake_delivered_subagents() {
-    use cf_tools::implementations::grok_build::task::types::{
+    use cf_tools::implementations::qidi_build::task::types::{
         SubagentCompletionSummary, SubagentEvent,
     };
     use cf_tools::reminders::task_completion::AutoWakeDeliveredIds;

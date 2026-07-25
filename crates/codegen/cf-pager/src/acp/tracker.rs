@@ -5143,7 +5143,7 @@ mod tests {
         .status(acp::ToolCallStatus::Pending)
     }
     #[test]
-    fn is_task_tool_recognizes_grok_build_variant() {
+    fn is_task_tool_recognizes_qidi_build_variant() {
         assert!(is_task_tool(&initial_tool_call("tc1", "task")));
         let mut with_variant = initial_tool_call("tc2", "anything");
         with_variant.raw_input = Some(serde_json::json!({ "variant" : "Task" }));

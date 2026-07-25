@@ -127,7 +127,7 @@ impl RoleToolNames {
     /// summary (the `name_override`-aware client name per kind), and
     /// `{TOOLSET_TOOLS}` enumerates the toolset.
     pub(crate) fn from_summary(
-        summary: &cf_tools::implementations::grok_build::task::types::SubagentTypeSummary,
+        summary: &cf_tools::implementations::qidi_build::task::types::SubagentTypeSummary,
     ) -> Self {
         let get = |kind: ToolKind| summary.tool_names.get(&kind).cloned();
         Self::from_parts(
@@ -264,7 +264,7 @@ fn enumerate_toolset_tools(tool_names: &std::collections::HashMap<ToolKind, Stri
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use cf_tools::implementations::grok_build::task::types::SubagentTypeSummary;
+    use cf_tools::implementations::qidi_build::task::types::SubagentTypeSummary;
 
     /// Build a `SubagentTypeSummary` from `(ToolKind, name)` pairs for the
     /// per-agent_type rendering tests. Shared with the planner / classifier /
@@ -312,7 +312,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn from_summary_uses_grok_build_names() {
+    fn from_summary_uses_qidi_build_names() {
         // A cf-tools toolset: client names match the literal defaults.
         let tn = RoleToolNames::from_summary(&summary_with(&[
             (ToolKind::Read, "read_file"),
@@ -389,7 +389,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn from_summary_write_falls_back_to_edit_on_default_grok_build_host() {
+    fn from_summary_write_falls_back_to_edit_on_default_qidi_build_host() {
         // Default cf-tools host: the pre-spawn describe probe exposes only
         // `Edit` (`search_replace`); `Write` is injection-only and absent. The
         // planner gate accepts this toolset, so `{WRITE_TOOL}` must name the
@@ -510,7 +510,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn parent_and_summary_renders_agree_on_default_grok_build_mutator() {
+    fn parent_and_summary_renders_agree_on_default_qidi_build_mutator() {
         // The explicit-pair `primary` (from_summary) and inherit/fail-open
         // `fallback` (from_parent) renders must name the SAME mutator on the
         // default cf-tools host (Edit-only toolset), so a fail-open retry

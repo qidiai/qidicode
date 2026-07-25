@@ -3,11 +3,11 @@
 //! Types are canonical in `qidi-code`. This module adds ACP ↔ TodoItem
 //! conversions since `qidi-code` is protocol-agnostic.
 
-pub use cf_tools::implementations::grok_build::todo::TodoId;
-pub use cf_tools::implementations::grok_build::todo::TodoItem;
-pub use cf_tools::implementations::grok_build::todo::TodoPriority;
-pub use cf_tools::implementations::grok_build::todo::TodoState;
-pub use cf_tools::implementations::grok_build::todo::TodoStatus;
+pub use cf_tools::implementations::qidi_build::todo::TodoId;
+pub use cf_tools::implementations::qidi_build::todo::TodoItem;
+pub use cf_tools::implementations::qidi_build::todo::TodoPriority;
+pub use cf_tools::implementations::qidi_build::todo::TodoState;
+pub use cf_tools::implementations::qidi_build::todo::TodoStatus;
 
 use agent_client_protocol as acp;
 

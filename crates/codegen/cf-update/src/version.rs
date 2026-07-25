@@ -6,7 +6,7 @@ use serde_json::Value;
 use tokio::fs;
 use tokio::process::Command;
 
-use cf_shell::env::GrokBuildEnvironment;
+use cf_shell::env::QidiBuildEnvironment;
 use cf_shell::util::grok_home::grok_home;
 
 const TTL_SECONDS_BEFORE_AUTO_UPDATE: Duration = Duration::from_secs(60 * 30);
@@ -28,9 +28,9 @@ pub(crate) const CLI_BASE_URLS: &[&str] = &[CLI_BASE_URL_PRIMARY, CLI_BASE_URL_F
 
 /// Minimal configuration the update system needs from the environment.
 ///
-/// Constructed once from `GrokBuildEnvironment` at startup and threaded through the
+/// Constructed once from `QidiBuildEnvironment` at startup and threaded through the
 /// update call chain so that `auto_update` and `version` never need to know
-/// about the `GrokBuildEnvironment` enum directly.
+/// about the `QidiBuildEnvironment` enum directly.
 #[derive(Debug, Clone)]
 pub struct UpdateConfig {
     /// Chat API proxy base URL (versioned `https://cli-chat-proxy.grok.com/v1` endpoint).
@@ -48,7 +48,7 @@ pub struct UpdateConfig {
 }
 
 impl UpdateConfig {
-    pub fn from_environment(env: &GrokBuildEnvironment) -> Self {
+    pub fn from_environment(env: &QidiBuildEnvironment) -> Self {
         Self {
             proxy_base_url: env.cli_chat_proxy_base_url(),
             auth_scope: cf_shell::auth::GrokComConfig::default().auth_scope(),
@@ -777,8 +777,8 @@ mod tests {
 
     #[test]
     fn test_update_config_default_channel_is_stable() {
-        use cf_shell::env::GrokBuildEnvironment;
-        let cfg = UpdateConfig::from_environment(&GrokBuildEnvironment::Production);
+        use cf_shell::env::QidiBuildEnvironment;
+        let cfg = UpdateConfig::from_environment(&QidiBuildEnvironment::Production);
         assert_eq!(cfg.channel, "stable");
     }
 }

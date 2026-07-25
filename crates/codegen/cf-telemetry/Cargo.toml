@@ -63,6 +63,7 @@ mid = "4.0.0"
 tokio = { workspace = true, features = ["macros", "sync", "rt"] }
 parking_lot = { workspace = true }
 cf-auth= { workspace = true }
+zeroize = "1"
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = [
     "experimental_logs_batch_log_processor_with_async_runtime",

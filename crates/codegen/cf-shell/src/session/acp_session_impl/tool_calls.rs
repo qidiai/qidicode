@@ -192,7 +192,7 @@ pub(super) enum PlanApprovalOutcome {
 }
 impl PlanApprovalOutcome {
     fn from_response(
-        resp: &cf_tools::implementations::grok_build::exit_plan_mode::ExitPlanModeExtResponse,
+        resp: &cf_tools::implementations::qidi_build::exit_plan_mode::ExitPlanModeExtResponse,
     ) -> Self {
         match resp.outcome.as_str() {
             "approved" => Self::Approved,
@@ -1361,11 +1361,11 @@ impl SessionActor {
         tool_call_id: &acp::ToolCallId,
         plan_content: Option<String>,
     ) -> Result<
-        cf_tools::implementations::grok_build::exit_plan_mode::ExitPlanModeExtResponse,
+        cf_tools::implementations::qidi_build::exit_plan_mode::ExitPlanModeExtResponse,
         acp::Error,
     > {
         use agent_client_protocol::Client as _;
-        use cf_tools::implementations::grok_build::exit_plan_mode::{
+        use cf_tools::implementations::qidi_build::exit_plan_mode::{
             ExitPlanModeExtRequest, ExitPlanModeExtResponse,
         };
         let ext_req = ExitPlanModeExtRequest {
@@ -2732,7 +2732,7 @@ mod plan_mode_edit_gate_tests {
         plan_mode_edit_gate(tracker, input, &AccessKind::from(input))
     }
     fn search_replace(path: &str) -> ToolInput {
-        use cf_tools::implementations::grok_build::search_replace::SearchReplaceInput;
+        use cf_tools::implementations::qidi_build::search_replace::SearchReplaceInput;
         ToolInput::SearchReplace(SearchReplaceInput {
             file_path: path.into(),
             old_string: "a".into(),
@@ -2836,7 +2836,7 @@ mod plan_approval_helper_tests {
         PlanApprovalOutcome, ResumeAction, ext_method_no_client, resume_action_for,
         revise_plan_message,
     };
-    use cf_tools::implementations::grok_build::exit_plan_mode::ExitPlanModeExtResponse;
+    use cf_tools::implementations::qidi_build::exit_plan_mode::ExitPlanModeExtResponse;
     fn resp(outcome: &str) -> ExitPlanModeExtResponse {
         ExitPlanModeExtResponse {
             outcome: outcome.into(),

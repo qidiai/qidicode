@@ -1244,8 +1244,8 @@ impl MvpAgent {
     /// meters Imagine usage per-user.
     pub(super) fn prepare_image_gen_config(
         &self,
-    ) -> cf_tools::implementations::grok_build::image_gen::ImageGenConfig {
-        use cf_tools::implementations::grok_build::image_gen::ImageGenConfig;
+    ) -> cf_tools::implementations::qidi_build::image_gen::ImageGenConfig {
+        use cf_tools::implementations::qidi_build::image_gen::ImageGenConfig;
         let sampling_config = self.sampling_config.borrow();
         let Some(ref api_key) = sampling_config.api_key else {
             return ImageGenConfig::Disabled;
@@ -1279,15 +1279,15 @@ impl MvpAgent {
     /// Build deploy-service config. The tool talks directly to the deployer service.
     pub(super) fn prepare_app_builder_deployer_config(
         &self,
-    ) -> cf_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig {
-        use cf_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig;
+    ) -> cf_tools::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig {
+        use cf_tools::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig;
         AppBuilderDeployerConfig::Disabled
     }
     /// Build video generation config. Video tools call the xAI API directly.
     pub(super) fn prepare_video_gen_config(
         &self,
-    ) -> cf_tools::implementations::grok_build::video_gen::VideoGenConfig {
-        use cf_tools::implementations::grok_build::video_gen::VideoGenConfig;
+    ) -> cf_tools::implementations::qidi_build::video_gen::VideoGenConfig {
+        use cf_tools::implementations::qidi_build::video_gen::VideoGenConfig;
         let Some(api_key) = self.sampling_config.borrow().api_key.clone() else {
             return VideoGenConfig::Disabled;
         };
@@ -1372,8 +1372,8 @@ impl MvpAgent {
     /// - `allowed_domains`: `[toolset.web_fetch] allowed_domains` > remote settings > built-in defaults
     pub(super) fn prepare_web_fetch_config(
         &self,
-    ) -> cf_tools::implementations::grok_build::web_fetch::WebFetchConfig {
-        use cf_tools::implementations::grok_build::web_fetch::WebFetchConfig;
+    ) -> cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig {
+        use cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig;
         let cfg = self.cfg.borrow();
         if cfg.disable_web_search {
             return WebFetchConfig::Disabled;
@@ -1538,7 +1538,7 @@ impl MvpAgent {
             subagent_event_tx,
             subagent_event_rx: RefCell::new(Some(subagent_event_rx)),
             subagent_coordinator: RefCell::new(subagent_coordinator),
-            monitor_event_buffer: cf_tools::implementations::grok_build::task::types::MonitorEventBuffer::default(),
+            monitor_event_buffer: cf_tools::implementations::qidi_build::task::types::MonitorEventBuffer::default(),
             bundle_sync_in_flight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             post_unblock_jwt_retry_in_flight: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
@@ -1831,7 +1831,7 @@ impl MvpAgent {
     pub fn cancel_subagent(
         &self,
         subagent_id: &str,
-    ) -> cf_tools::implementations::grok_build::task::types::SubagentCancelOutcome {
+    ) -> cf_tools::implementations::qidi_build::task::types::SubagentCancelOutcome {
         self.subagent_coordinator.borrow_mut().cancel_with_outcome(subagent_id)
     }
     /// List running subagent seeds for a given parent session.
@@ -2784,8 +2784,8 @@ impl MvpAgent {
         let agent_name = std::env::var("QIDI_AGENT").ok();
         let resolved = match agent_name.as_deref() {
             Some("browser-use") | Some("browser_use") => AgentDefinition::browser_use(),
-            Some("cf-tools-concise") | Some("grok_build_concise") => {
-                AgentDefinition::grok_build_concise()
+            Some("cf-tools-concise") | Some("qidi_build_concise") => {
+                AgentDefinition::qidi_build_concise()
             }
             Some(path) if std::path::Path::new(path).is_absolute() => {
                 match AgentDefinition::from_file(path) {
@@ -2795,15 +2795,15 @@ impl MvpAgent {
                             path = path, error = % e,
                             "Failed to load agent definition from file, falling back to default"
                         );
-                        AgentDefinition::grok_build_plan()
+                        AgentDefinition::qidi_build_plan()
                     }
                 }
             }
             Some(name) => {
                 cf_agent::discovery::by_name_in_cwd(name, cwd)
-                    .unwrap_or_else(AgentDefinition::grok_build_plan)
+                    .unwrap_or_else(AgentDefinition::qidi_build_plan)
             }
-            None => AgentDefinition::grok_build_plan(),
+            None => AgentDefinition::qidi_build_plan(),
         };
         if !grok_agent_env_set && !config_agent_explicitly_set
             && model_requires_strict_harness && let Some(required) = model_agent_type

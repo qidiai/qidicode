@@ -1199,7 +1199,27 @@ async fn download_verified_from_base(
     // Published already +x (see `publish_downloaded_artifact`).
     download_cli_artifact_from_gcs(gcs_base_url, &binary_name, &binary_path, true).await?;
 
-    // Smoke-test: run the binary before activating it. A truncated or
+    // B2: 供应链完整性校验——在 smoke-test 之前执行。
+    // 签名校验必须先于任何对下载二进制的执行，防止恶意二进制在 smoke-test
+    // 阶段即获得代码执行。
+    if crate::signing::verification_active() {
+        verify_downloaded_signature(gcs_base_url, &binary_name, &binary_path).await?;
+    } else {
+        // Fail-closed: 无受信公钥时拒绝自更新，而非静默降级为仅 HTTPS + smoke-test。
+        let _ = tokio::fs::remove_file(&binary_path).await;
+        anyhow::bail!(
+            "supply-chain integrity check failed: Ed25519 signature verification\n\
+             is INACTIVE (trusted_pubkey.bin is a placeholder). Self-update is\n\
+             refused to prevent installing untrusted binaries.\n\n\
+             To enable self-update:\n\
+             1. Ship a real 32-byte Ed25519 public key in\n\
+                crates/codegen/cf-update/trusted_pubkey.bin\n\
+             2. Publish a matching .sig sidecar alongside every release binary.\n\n\
+             Your current version is unchanged."
+        );
+    }
+
+    // Smoke-test: run the binary after signature verification. A truncated or
     // corrupt download is caught here and never becomes the active grok.
     if !smoke_test_binary(&binary_path).await {
         let _ = tokio::fs::remove_file(&binary_path).await;
@@ -1210,13 +1230,6 @@ async fn download_verified_from_base(
              To update manually: {}",
             manual_install_cmd()
         );
-    }
-
-    // B2: 供应链完整性校验。仅当已配置真实受信公钥时启用（见 crate::signing）。
-    // 占位符公钥时保持惰性，跳过校验且不请求 `.sig`，避免破坏尚未发布签名的
-    // 自更新链路；此时下载完整性仍由上面的 smoke-test 兜底。
-    if crate::signing::verification_active() {
-        verify_downloaded_signature(gcs_base_url, &binary_name, &binary_path).await?;
     }
 
     Ok(VerifiedDownload {

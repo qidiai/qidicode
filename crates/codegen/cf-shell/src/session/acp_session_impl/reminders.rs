@@ -1,4 +1,4 @@
-﻿//! System-reminder injection concern for `SessionActor`: reminder policy,
+//! System-reminder injection concern for `SessionActor`: reminder policy,
 //! the TodoGate, date/interrupt reminders, and between-turn completion
 //! reminders.
 use super::*;
@@ -319,7 +319,7 @@ impl SessionActor {
         let Some(tx) = &self.tool_context.subagent_event_tx else {
             return;
         };
-        use cf_tools::implementations::grok_build::task::types::{
+        use cf_tools::implementations::qidi_build::task::types::{
             SubagentCompletionsRequest, SubagentEvent,
         };
         let suppress_ids = self

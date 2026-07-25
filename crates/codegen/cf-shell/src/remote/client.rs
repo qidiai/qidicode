@@ -606,7 +606,7 @@ struct LoginConfigResponse {
     #[serde(default)]
     device_flow: Option<bool>,
 }
-/// Fetch `grok_build_login_device_flow` from cli-chat-proxy `GET /v1/login-config`.
+/// Fetch `qidi_build_login_device_flow` from cli-chat-proxy `GET /v1/login-config`.
 ///
 /// Unauthenticated (pre-login); `x-grok-agent-id` is the per-install bucketing key.
 /// Best-effort: any error or unset flag returns `None` so the caller keeps the

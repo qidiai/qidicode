@@ -12,6 +12,8 @@
 //! headers (proxy auth, OTel context, etc.)
 //! into [`SamplerConfig::extra_headers`] before constructing the client.
 
+use std::sync::Arc;
+
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
@@ -281,6 +283,8 @@ pub struct SamplingClient {
     default_headers: HeaderMap,
     base_url: String,
     defaults: ClientDefaults,
+    /// Proactive rate limiter to avoid hitting API 429s.
+    rate_limiter: Arc<crate::rate_limiter::ApiRateLimiter>,
     /// Optional 401-attribution hook. The shell wires this to emit a
     /// structured event at every UNAUTHORIZED arm so 401s can be
     /// bucketed by stale-snapshot vs. live-token-rejected. `None` for
@@ -406,7 +410,7 @@ impl SamplingClient {
                 AuthScheme::XApiKey => {
                     let header_value = HeaderValue::from_str(api_key).map_err(|_| {
                         tracing::debug!(
-                            api_key = %api_key,
+                            api_key_len = api_key.len(),
                             "Invalid api_key: cannot be converted to a valid HTTP header"
                         );
                         SamplingError::Auth(
@@ -420,7 +424,7 @@ impl SamplingClient {
                     let bearer = format!("Bearer {}", api_key);
                     let header_value = HeaderValue::from_str(&bearer).map_err(|_| {
                         tracing::debug!(
-                            api_key = %api_key,
+                            api_key_len = api_key.len(),
                             "Invalid api_key: cannot be converted to a valid HTTP Authorization header"
                         );
                         SamplingError::Auth(
@@ -538,12 +542,18 @@ impl SamplingClient {
             attribution_callback: config.attribution_callback,
             bearer_resolver: config.bearer_resolver,
             header_injector: config.header_injector,
+            rate_limiter: Arc::new(crate::rate_limiter::ApiRateLimiter::default()),
         })
     }
 
     /// The configured API backend for this client.
     pub fn api_backend(&self) -> ApiBackend {
         self.defaults.api_backend.clone()
+    }
+
+    /// Access the proactive rate limiter.
+    pub fn rate_limiter(&self) -> &crate::rate_limiter::ApiRateLimiter {
+        &self.rate_limiter
     }
 
     /// POST with default headers. Overrides auth from resolver if wired.

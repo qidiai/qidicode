@@ -1,4 +1,4 @@
-﻿//! Tool dispatch helpers for `SessionActor`: `dispatch_tool` and its lock /
+//! Tool dispatch helpers for `SessionActor`: `dispatch_tool` and its lock /
 //! display helpers, direct bash-mode execution, and tool argument
 //! parse-error formatting.
 
@@ -41,11 +41,11 @@ fn str_arg<'a>(args: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
 /// serializing concurrent same-file edits inside `execute_tool_calls`.
 ///
 /// Different toolsets advertise the path under different JSON keys:
-/// - `file_path` — grok_build (`search_replace`), opencode (`EditTool`,
-///   `WriteTool`, `ReadTool`), codex (`read_file`), grok_build_hashline
+/// - `file_path` — qidi_build (`search_replace`), opencode (`EditTool`,
+///   `WriteTool`, `ReadTool`), codex (`read_file`), qidi_build_hashline
 ///   (`hashline_edit`)
 /// - `path` — alternate edit/read tools
-/// - `target_file` — grok_build (`read_file`, via `#[serde(rename)]`)
+/// - `target_file` — qidi_build (`read_file`, via `#[serde(rename)]`)
 ///
 /// Returning the same string for two calls in a batch causes them to share a
 /// `tokio::sync::Mutex` and therefore run sequentially in model-emitted order.

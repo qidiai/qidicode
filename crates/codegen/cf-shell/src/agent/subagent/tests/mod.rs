@@ -2479,7 +2479,7 @@ fn subagent_keeps_default_flavor_when_parent_model_is_non_strict() {
     let mut ctx = ctx_with_toggle(HashMap::new());
     ctx.parent_agent_name = Some("ai-oncall-bot".to_string());
     ctx.parent_model_agent_type = Some(
-        BuiltinAgentName::GrokBuildPlan.as_ref().to_string(),
+        BuiltinAgentName::QidiBuildPlan.as_ref().to_string(),
     );
     let mut def = resolve_agent_definition("general-purpose", &ctx).expect("resolves");
     resolve_subagent_toolset("general-purpose", None, &ctx, &mut def);

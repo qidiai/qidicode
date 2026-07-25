@@ -125,7 +125,7 @@ This setting is off by default for security reasons. Without it, OSC 52 writes f
 
 **Fix**:
 - In Zellij or control mode, Grok intentionally runs inline (no alt screen).
-- Set `[terminal] alt_screen = "always"` in `~/.grok/pager.toml` to force fullscreen.
+- Set `[terminal] alt_screen = "always"` in `~/.qidi/pager.toml` to force fullscreen.
 - Use the CLI flag `--no-alt-screen` to disable alt-screen mode entirely (useful for debugging or when the alternate screen causes issues in your terminal).
 
 ### Problem: Zellij keybindings interfere with Grok (Ctrl+g, Ctrl+o, etc.)

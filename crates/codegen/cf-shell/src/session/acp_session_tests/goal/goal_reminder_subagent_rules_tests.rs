@@ -1,4 +1,4 @@
-﻿use super::goal::GapsUpdate;
+use super::goal::GapsUpdate;
 use super::support::*;
 use super::*;
 /// Legacy verifier directive removed by the prompt overhaul. The const
@@ -129,7 +129,7 @@ async fn setup_goal_includes_simplified_prompt() {
 }
 #[tokio::test(flavor = "current_thread")]
 async fn goal_enabled_without_update_goal_disables_harness_continuation_and_todo_gate() {
-    use cf_tools::implementations::grok_build::UPDATE_GOAL_TOOL_NAME;
+    use cf_tools::implementations::qidi_build::UPDATE_GOAL_TOOL_NAME;
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {

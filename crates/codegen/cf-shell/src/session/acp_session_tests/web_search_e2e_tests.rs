@@ -83,7 +83,7 @@ async fn web_search_uses_model_override_from_config_end_to_end() {
         }],
         behavior_preset: None,
     };
-    let fs: std::sync::Arc<dyn AsyncFileSystem> = std::sync::Arc::new(LocalFs);
+    let fs: std::sync::Arc<dyn AsyncFileSystem> = std::sync::Arc::new(LocalFs::unconfined());
     let terminal: std::sync::Arc<dyn TerminalBackend> =
         std::sync::Arc::new(LocalTerminalBackend::new());
     let ctx = SessionContext {
@@ -162,7 +162,7 @@ async fn web_search_errors_when_configured_model_cannot_be_resolved() {
         }],
         behavior_preset: None,
     };
-    let fs: std::sync::Arc<dyn AsyncFileSystem> = std::sync::Arc::new(LocalFs);
+    let fs: std::sync::Arc<dyn AsyncFileSystem> = std::sync::Arc::new(LocalFs::unconfined());
     let terminal: std::sync::Arc<dyn TerminalBackend> =
         std::sync::Arc::new(LocalTerminalBackend::new());
     let ctx = SessionContext {

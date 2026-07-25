@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 /// Handle `x.ai/ask_user_question` ext-method.
 ///
@@ -14,7 +14,7 @@ pub(crate) fn handle_ask_user_question(
     app: &mut AppView,
 ) -> bool {
     use crate::views::question_view::QuestionViewState;
-    use cf_tools::implementations::grok_build::ask_user_question::{
+    use cf_tools::implementations::qidi_build::ask_user_question::{
         AskUserQuestionExtRequest, AskUserQuestionExtResponse,
     };
 

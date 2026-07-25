@@ -807,7 +807,7 @@ mod tests {
     }
 
     #[test]
-    fn test_by_name_builtin_grok_build() {
+    fn test_by_name_builtin_qidi_build() {
         let def = by_name("cf-tools");
         assert!(def.is_some());
         assert_eq!(def.unwrap().name, "cf-tools");
@@ -1050,7 +1050,7 @@ mod tests {
         use std::str::FromStr;
         let variant = BuiltinAgentName::from_str("cf-tools-orchestrator")
             .expect("from_str must resolve cf-tools-orchestrator");
-        assert_eq!(variant, BuiltinAgentName::GrokBuildOrchestrator);
+        assert_eq!(variant, BuiltinAgentName::QidiBuildOrchestrator);
         let def = variant.definition();
         assert_eq!(def.name, "cf-tools-orchestrator");
         assert!(
@@ -1461,7 +1461,7 @@ mod tests {
         let registry = make_plugin_registry("plugin-one", PluginScope::User, vec![]);
         let plugin = registry.get("plugin-one").unwrap();
 
-        let mut def = AgentDefinition::default_grok_build();
+        let mut def = AgentDefinition::default_qidi_build();
         def.prompt_body = Some("Body ${CLAUDE_PLUGIN_ROOT}/x".to_string());
         def.system_prompt =
             TemplateOverride::Custom("Data at ${CLAUDE_PLUGIN_DATA}/db".to_string());

@@ -1196,10 +1196,10 @@ pub(super) mod paste_key_tests {
     pub(in crate::app::agent_view) fn make_question_view_state_in_input_mode()
     -> crate::views::question_view::QuestionViewState {
         let question =
-            cf_tools::implementations::grok_build::ask_user_question::Question {
+            cf_tools::implementations::qidi_build::ask_user_question::Question {
                 question: "Pick one?".to_string(),
                 options: vec![
-                cf_tools::implementations::grok_build::ask_user_question::QuestionOption
+                cf_tools::implementations::qidi_build::ask_user_question::QuestionOption
                 { label : "A".to_string(), description : "Option A".to_string(), preview
                 : None, id : None, },
             ],

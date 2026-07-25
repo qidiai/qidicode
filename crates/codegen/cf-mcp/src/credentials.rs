@@ -153,15 +153,38 @@ impl McpCredentialStore {
     /// Save to a specific path.
     ///
     /// Writes atomically via temp file + rename to prevent credential loss on
-    /// crash. On Unix, the temp file is created with 0600 permissions from the
-    /// start (no TOCTOU window where secrets are world-readable).
+    /// crash. The temp file is created with restrictive permissions from the
+    /// start (no TOCTOU window where secrets are world-readable):
+    ///
+    /// - **Unix**: mode 0600 (owner read/write only).
+    /// - **Windows**: ACL granting full control only to the current user,
+    ///   removing inherited permissions (equivalent to Unix 0600).
+    ///
+    /// The temp file name is unique per writer (pid + counter) so concurrent
+    /// `save_to` calls on the same path don't collide.
     pub fn save_to(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
         let content = serde_json::to_string_pretty(self)?;
-        let tmp_path = path.with_extension("tmp");
+
+        // Unique temp sibling: pid + global counter avoids concurrent-writer
+        // collision on the fixed `path.tmp` name.
+        static SAVE_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let nonce = SAVE_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp_name = format!(
+            "{}.{}.{}.tmp",
+            path.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "mcp_creds".to_owned()),
+            std::process::id(),
+            nonce,
+        );
+        let tmp_path = path
+            .parent()
+            .map(|p| p.join(&tmp_name))
+            .unwrap_or_else(|| std::path::PathBuf::from(&tmp_name));
 
         {
             use std::io::Write;
@@ -171,7 +194,7 @@ impl McpCredentialStore {
                 use std::os::unix::fs::OpenOptionsExt;
                 std::fs::OpenOptions::new()
                     .write(true)
-                    .create(true)
+                    .create_new(true)
                     .truncate(true)
                     .mode(0o600)
                     .open(&tmp_path)?
@@ -179,7 +202,7 @@ impl McpCredentialStore {
             #[cfg(not(unix))]
             let file = std::fs::OpenOptions::new()
                 .write(true)
-                .create(true)
+                .create_new(true)
                 .truncate(true)
                 .open(&tmp_path)?;
 
@@ -188,7 +211,23 @@ impl McpCredentialStore {
             writer.flush()?;
         }
 
-        std::fs::rename(&tmp_path, path)?;
+        // Windows: tighten ACL on the temp file BEFORE the rename so the final
+        // file never exists with loose perms. Unix mode is set at open time.
+        #[cfg(windows)]
+        {
+            if let Err(e) = set_windows_owner_only_acl(&tmp_path) {
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(McpCredentialError::Other(format!(
+                    "failed to secure credential file perms: {e}"
+                )));
+            }
+        }
+
+        // Best-effort cleanup of a stale temp file on rename failure.
+        if let Err(e) = std::fs::rename(&tmp_path, path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(e.into());
+        }
         Ok(())
     }
 
@@ -240,6 +279,98 @@ impl McpCredentialStore {
     fn default_path() -> Option<PathBuf> {
         Some(cf_config::user_grok_home()?.join(CREDENTIALS_FILENAME))
     }
+}
+
+/// Windows-only: tighten the ACL on `path` to grant full control only to the
+/// current user, removing inherited permissions. Equivalent to Unix mode 0600.
+///
+/// Used by [`McpCredentialStore::save_to`] on the temp file BEFORE the atomic
+/// rename so the final credential file never exists with loose perms.
+#[cfg(windows)]
+fn set_windows_owner_only_acl(path: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Foundation::{CloseHandle, HLOCAL, LocalFree};
+    use windows::Win32::Security::Authorization::{
+        EXPLICIT_ACCESS_W, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
+        SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
+        NO_MULTIPLE_TRUSTEE,
+    };
+    use windows::Win32::Security::{
+        ACE_FLAGS, ACL, DACL_SECURITY_INFORMATION, GetTokenInformation,
+        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows::core::PCWSTR;
+
+    unsafe {
+        let mut token_handle = windows::Win32::Foundation::HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token_handle)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
+
+        let mut return_length = 0u32;
+        let _ = GetTokenInformation(token_handle, TokenUser, None, 0, &mut return_length);
+
+        let mut token_user_buffer = vec![0u8; return_length as usize];
+        GetTokenInformation(
+            token_handle,
+            TokenUser,
+            Some(token_user_buffer.as_mut_ptr() as *mut _),
+            return_length,
+            &mut return_length,
+        )
+        .map_err(|e| {
+            let _ = CloseHandle(token_handle);
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, e)
+        })?;
+
+        let token_user = &*(token_user_buffer.as_ptr() as *const TOKEN_USER);
+        let user_sid = token_user.User.Sid;
+
+        let explicit_access = EXPLICIT_ACCESS_W {
+            grfAccessPermissions: 0x10000000, // GENERIC_ALL
+            grfAccessMode: SET_ACCESS,
+            grfInheritance: ACE_FLAGS(0),
+            Trustee: TRUSTEE_W {
+                pMultipleTrustee: std::ptr::null_mut(),
+                MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_USER,
+                ptstrName: windows::core::PWSTR(user_sid.0 as *mut u16),
+            },
+        };
+
+        let mut new_acl: *mut ACL = std::ptr::null_mut();
+        let result = SetEntriesInAclW(Some(&[explicit_access]), None, &mut new_acl);
+        if result.0 != 0 {
+            let _ = CloseHandle(token_handle);
+            return Err(std::io::Error::from_raw_os_error(result.0 as i32));
+        }
+
+        let wide_path: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let result = SetNamedSecurityInfoW(
+            PCWSTR::from_raw(wide_path.as_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(new_acl),
+            None,
+        );
+
+        let _ = LocalFree(Some(HLOCAL(new_acl as *mut _)));
+        let _ = CloseHandle(token_handle);
+
+        if result.0 != 0 {
+            return Err(std::io::Error::from_raw_os_error(result.0 as i32));
+        }
+    }
+
+    Ok(())
 }
 
 /// Adapter implementing rmcp's `CredentialStore` trait backed by the on-disk

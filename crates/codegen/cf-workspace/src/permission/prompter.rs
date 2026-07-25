@@ -1,4 +1,4 @@
-﻿use indexmap::IndexMap;
+use indexmap::IndexMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -9,7 +9,7 @@ use crate::permission::{
 use agent_client_protocol::{self as acp, Client as _};
 use cf_acp_lib::AcpAgentGatewaySender as GatewaySender;
 use cf_file_utils::events::{Event, EventWriter, PermissionDecision};
-use cf_tools::implementations::grok_build::web_fetch::domain_from_url;
+use cf_tools::implementations::qidi_build::web_fetch::domain_from_url;
 
 const REJECT_ONCE_LABEL: &str = "No, and tell Grok what to do differently";
 

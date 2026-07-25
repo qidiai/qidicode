@@ -20,6 +20,17 @@ pub(crate) fn detect_plain_urls(
     detect_plain_urls_with_offset(lines, 0, existing, next_id)
 }
 
+/// Check if a URL has a safe scheme (http/https only).
+/// Blocks javascript:, data:, file:, and other potentially dangerous schemes.
+fn is_safe_url_scheme(url: &str) -> bool {
+    if let Some(scheme_end) = url.find(':') {
+        let scheme = url[..scheme_end].to_lowercase();
+        scheme == "http" || scheme == "https"
+    } else {
+        false
+    }
+}
+
 /// Like [`detect_plain_urls`] but scans `lines` whose first element
 /// represents document line `line_index_offset` (caller passes a tail
 /// slice of `self.output.lines` and the index of its first element).
@@ -54,6 +65,11 @@ pub(crate) fn detect_plain_urls_with_offset(
                 let col_start = display_col + unicode_display_width(before);
                 let col_end = col_start + unicode_display_width(matched);
                 let url = link.as_str().to_string();
+
+                // Security: reject URLs with unsafe schemes (javascript:, data:, file:, etc.)
+                if !is_safe_url_scheme(&url) {
+                    continue;
+                }
 
                 // Dedup: skip if any existing or already-added target overlaps
                 // on the same line. Overlap: cand.start < ex.end && ex.start < cand.end.

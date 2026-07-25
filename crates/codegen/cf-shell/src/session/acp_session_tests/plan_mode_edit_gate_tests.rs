@@ -10,8 +10,8 @@ use super::*;
 /// tools (so `${{ tools.by_kind.exit_plan }}` resolves in the rejection
 /// message), with a gateway drain answering session notifications.
 async fn build_gate_actor() -> SessionActor {
-    use cf_tools::implementations::grok_build::enter_plan_mode::EnterPlanModeTool;
-    use cf_tools::implementations::grok_build::exit_plan_mode::ExitPlanModeTool;
+    use cf_tools::implementations::qidi_build::enter_plan_mode::EnterPlanModeTool;
+    use cf_tools::implementations::qidi_build::exit_plan_mode::ExitPlanModeTool;
     use cf_tools::registry::types::ToolConfig;
     let (gateway_tx, mut gateway_rx) =
         tokio::sync::mpsc::unbounded_channel::<cf_acp_lib::AcpClientMessage>();

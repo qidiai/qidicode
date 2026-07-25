@@ -35,7 +35,7 @@ use std::sync::OnceLock;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use cf_acp_lib::AcpAgentGatewaySender as GatewaySender;
-use cf_tools::implementations::grok_build::task::types::*;
+use cf_tools::implementations::qidi_build::task::types::*;
 use cf_workspace::file_system::AsyncFileSystem;
 use cf_hunk_tracker::HunkTrackerHandle;
 mod coordinator_lifecycle;
@@ -205,7 +205,7 @@ pub(crate) struct SubagentSpawnContext {
     /// Parent's scheduler handle. When `Some`, the subagent reuses the
     /// parent's scheduler actor so scheduled tasks survive subagent exit.
     pub parent_scheduler_handle:
-        Option<cf_tools::implementations::grok_build::scheduler::types::SchedulerHandle>,
+        Option<cf_tools::implementations::qidi_build::scheduler::types::SchedulerHandle>,
     /// Parent's session environment variables (.envrc + color settings).
     /// Shared so the child inherits the same env without re-loading.
     pub session_env: Arc<HashMap<String, String>>,
@@ -215,14 +215,14 @@ pub(crate) struct SubagentSpawnContext {
     /// Resolved sampling config for web_search.
     pub web_search_sampling_config: Option<cf_sampler::SamplerConfig>,
     /// Resolved config for web fetch.
-    pub web_fetch_config: cf_tools::implementations::grok_build::web_fetch::WebFetchConfig,
+    pub web_fetch_config: cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig,
     /// Image generation config (parent-inherited).
-    pub image_gen_config: cf_tools::implementations::grok_build::image_gen::ImageGenConfig,
+    pub image_gen_config: cf_tools::implementations::qidi_build::image_gen::ImageGenConfig,
     /// Resolved config for video generation.
-    pub video_gen_config: cf_tools::implementations::grok_build::video_gen::VideoGenConfig,
+    pub video_gen_config: cf_tools::implementations::qidi_build::video_gen::VideoGenConfig,
     /// Resolved config for the deploy service.
     pub app_builder_deployer_config:
-        cf_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig,
+        cf_tools::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig,
     /// Whether the write_file tool is enabled.
     pub write_file_enabled: bool,
     /// Whether goal mode (`/goal`) is enabled.
@@ -571,6 +571,10 @@ pub(crate) struct SubagentCoordinator {
     /// [`crate::agent::activity::AgentActivity::is_busy`] to defer leader
     /// auto-update shutdown while subagents are in flight.
     running_gauge: Arc<std::sync::atomic::AtomicUsize>,
+    /// Maximum number of concurrent subagents (pending + active).
+    /// Prevents resource exhaustion via unlimited subagent spawning.
+    /// Default: 10. Override via `QIDI_MAX_CONCURRENT_SUBAGENTS` env var.
+    max_concurrent: usize,
     /// subagent_id → live blocking-query reply slots. Registered together
     /// with `block_waited` so the completion handler can verify at decision
     /// time that a waiter is actually able to receive the result (a
@@ -1680,7 +1684,7 @@ pub(crate) fn subagent_harness_flavor_is_representable(_agent_type: &str) -> boo
 /// agent definition.
 ///
 /// The harness flavor (alternate vs cf-tools) normally follows the PARENT
-/// agent: `GrokBuildOrchestrator` parents give children
+/// agent: `QidiBuildOrchestrator` parents give children
 /// the alternate harness; the orchestrator keeps children lean, and other parents
 /// inherit the file-tool override (hashline vs standard). A `/goal` role may
 /// pass `harness_agent_type` to OVERRIDE that flavor regardless of the parent
@@ -1847,16 +1851,28 @@ fn parent_source_cwd(ctx: &SubagentSpawnContext) -> std::path::PathBuf {
 /// Effective permission mode for a spawned subagent. Plugin agents never honor a
 /// non-default mode; under the pin, `bypassPermissions` downgrades to `Default`
 /// so a repo/profile/`--agents` def can't restore auto-approve. Caller logs it.
+///
+/// SECURITY: A subagent's permission mode MUST NEVER exceed the parent's.
+/// If the parent is not in YOLO mode, the subagent cannot use BypassPermissions
+/// even if its AgentDefinition declares it — this prevents privilege escalation
+/// via malicious agent definition files (e.g. `.qidi/agents/*.md`).
 fn resolve_subagent_permission_mode(
     requested: cf_agent::config::PermissionMode,
     is_plugin: bool,
     policy_block: Option<&'static str>,
+    parent_yolo_mode: bool,
 ) -> cf_agent::config::PermissionMode {
     use cf_agent::config::PermissionMode;
     if is_plugin {
         return PermissionMode::Default;
     }
     if policy_block.is_some() && requested == PermissionMode::BypassPermissions {
+        return PermissionMode::Default;
+    }
+    // SECURITY: BypassPermissions is only honored if the parent is already in
+    // YOLO mode. A non-YOLO parent must never spawn a child that auto-approves
+    // all tool calls — that would be a privilege escalation.
+    if requested == PermissionMode::BypassPermissions && !parent_yolo_mode {
         return PermissionMode::Default;
     }
     requested

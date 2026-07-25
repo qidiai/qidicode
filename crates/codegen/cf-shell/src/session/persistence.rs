@@ -754,7 +754,13 @@ fn resumed_session_sandbox_profile_in_root(
     if let Some(id) = session_id.filter(|s| !s.is_empty()) {
         // Direct match by id (across all cwds).
         if let Some(summary) = find_summary_by_session_id_in_root(id, sessions_root) {
-            return summary.sandbox_profile;
+            // SECURITY: Prevent sandbox profile escalation from a tampered
+            // summary.json. If the persisted profile is "off" or less restrictive
+            // than the current runtime configuration, ignore it and let the
+            // caller use the current config/CLI resolution instead.
+            // This blocks an attacker who modifies summary.json to downgrade
+            // "strict" → "off".
+            return sanitize_resumed_sandbox_profile(summary.sandbox_profile.as_deref());
         }
         // A remote id resumes into a local child (fresh id, `parent_session_id`
         // = remote id). Mirror the canonical resume path so the peek doesn't
@@ -763,15 +769,35 @@ fn resumed_session_sandbox_profile_in_root(
             && let Some(child) = find_local_child_for_remote_in_root(id, cwd, sessions_root)
         {
             return find_summary_by_session_id_in_root(&child, sessions_root)
-                .and_then(|s| s.sandbox_profile);
+                .and_then(|s| sanitize_resumed_sandbox_profile(s.sandbox_profile.as_deref()));
         }
         return None;
     }
     if let Some(cwd) = cwd {
         return most_recent_local_summary_for_cwd_in_root(cwd, sessions_root)
-            .and_then(|s| s.sandbox_profile);
+            .and_then(|s| sanitize_resumed_sandbox_profile(s.sandbox_profile.as_deref()));
     }
     None
+}
+
+/// SECURITY: Validate that a resumed sandbox profile is not an escalation.
+///
+/// "off" is never honored from persisted state — an attacker could tamper
+/// summary.json to downgrade from "strict" to "off". Only restrictive
+/// profiles ("workspace", "read-only", "strict") are trusted from disk.
+/// "off" must come from the current CLI/config, not from a persisted file.
+fn sanitize_resumed_sandbox_profile(profile: Option<&str>) -> Option<String> {
+    match profile {
+        Some(p) if p == "off" => {
+            tracing::warn!(
+                "resumed session has sandbox_profile='off' in summary.json — \
+                 ignoring (potential tampering). Using current config instead."
+            );
+            None
+        }
+        Some(p) => Some(p.to_string()),
+        None => None,
+    }
 }
 
 /// Get file path for storing a large prompt.

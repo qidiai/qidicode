@@ -18,7 +18,7 @@ use super::actions::Effect;
 use super::app_view::{AppView, AuthState};
 
 /// Default watch cadence. Overridable via the remote settings
-/// `grok_build_settings.subscription_watch_interval_secs` field.
+/// `qidi_build_settings.subscription_watch_interval_secs` field.
 pub(crate) const SUBSCRIPTION_WATCH_INTERVAL: std::time::Duration =
     std::time::Duration::from_secs(60);
 

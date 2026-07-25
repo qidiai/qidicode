@@ -22,7 +22,7 @@ impl RoleCapability {
     /// `can_execute` for terminal/bash).
     fn is_satisfied(
         self,
-        summary: &cf_tools::implementations::grok_build::task::types::SubagentTypeSummary,
+        summary: &cf_tools::implementations::qidi_build::task::types::SubagentTypeSummary,
     ) -> bool {
         match self {
             Self::Skeptic => summary.can_read && summary.can_search,
@@ -42,7 +42,7 @@ pub(crate) struct PanelResolveCache {
     /// result for the role's `general-purpose` toolset on that harness).
     describe: std::collections::HashMap<
         String,
-        cf_tools::implementations::grok_build::task::types::SubagentDescribeOutcome,
+        cf_tools::implementations::qidi_build::task::types::SubagentDescribeOutcome,
     >,
 }
 
@@ -57,7 +57,7 @@ fn role_tool_names_from(
     cache: &PanelResolveCache,
     inherit: &crate::session::goal_role_tools::RoleToolNames,
 ) -> crate::session::goal_role_tools::RoleToolNames {
-    use cf_tools::implementations::grok_build::task::types::SubagentDescribeOutcome;
+    use cf_tools::implementations::qidi_build::task::types::SubagentDescribeOutcome;
     // `override_.agent_type` is the committed harness; the cache is keyed on it.
     match override_.agent_type.as_deref() {
         Some(harness) => match cache.describe.get(harness) {
@@ -115,9 +115,9 @@ impl SessionActor {
         &self,
         current_tokens: i64,
         purpose: DrainPurpose,
-        extra: Vec<cf_tools::implementations::grok_build::update_goal::UpdateGoalEnvelope>,
+        extra: Vec<cf_tools::implementations::qidi_build::update_goal::UpdateGoalEnvelope>,
     ) {
-        use cf_tools::implementations::grok_build::update_goal::{
+        use cf_tools::implementations::qidi_build::update_goal::{
             RejectReason, UpdateGoalAck,
         };
         // The `update_goal` tool and its `GoalUpdateHandle` are always
@@ -652,10 +652,10 @@ impl SessionActor {
         attempt: u32,
         outcome: crate::session::goal_classifier::GoalClassifierOutcome,
         notify: &crate::session::goal_orchestrator::GoalNotifySender,
-    ) -> cf_tools::implementations::grok_build::update_goal::UpdateGoalAck {
+    ) -> cf_tools::implementations::qidi_build::update_goal::UpdateGoalAck {
         use crate::session::goal_classifier::GoalClassifierOutcome;
         use crate::session::goal_tracker::GoalClassifierVerdict;
-        use cf_tools::implementations::grok_build::update_goal::UpdateGoalAck;
+        use cf_tools::implementations::qidi_build::update_goal::UpdateGoalAck;
 
         let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
         let (tokens_used, finished_marginal) = self.goal_tokens(current_tokens);
@@ -1311,7 +1311,7 @@ impl SessionActor {
         choice: &crate::agent::config::GoalRoleModelChoice,
         capability: RoleCapability,
         event_tx: &tokio::sync::mpsc::UnboundedSender<
-            cf_tools::implementations::grok_build::task::types::SubagentEvent,
+            cf_tools::implementations::qidi_build::task::types::SubagentEvent,
         >,
     ) -> (
         crate::session::goal_planner::RoleSpawnOverride,
@@ -1384,17 +1384,17 @@ impl SessionActor {
         pair: &crate::util::config::GoalRoleModel,
         capability: RoleCapability,
         event_tx: &tokio::sync::mpsc::UnboundedSender<
-            cf_tools::implementations::grok_build::task::types::SubagentEvent,
+            cf_tools::implementations::qidi_build::task::types::SubagentEvent,
         >,
         available_models: &indexmap::IndexMap<String, crate::agent::config::ModelEntry>,
         cache: &mut PanelResolveCache,
     ) -> crate::session::goal_planner::RoleSpawnOverride {
         use crate::session::events::{Event, GoalRoleModelFailOpenReason as Reason};
         use crate::session::goal_planner::RoleSpawnOverride;
-        use cf_tools::implementations::grok_build::task::backend::{
+        use cf_tools::implementations::qidi_build::task::backend::{
             ChannelBackend, SubagentBackend,
         };
-        use cf_tools::implementations::grok_build::task::types::SubagentDescribeOutcome;
+        use cf_tools::implementations::qidi_build::task::types::SubagentDescribeOutcome;
 
         let fail_open = |reason: Reason| {
             self.emit_event(Event::GoalRoleModelFailOpen {
@@ -2355,7 +2355,7 @@ impl SessionActor {
 #[cfg(test)]
 mod role_capability_tests {
     use super::RoleCapability;
-    use cf_tools::implementations::grok_build::task::types::SubagentTypeSummary;
+    use cf_tools::implementations::qidi_build::task::types::SubagentTypeSummary;
 
     fn summary(can_read: bool, can_search: bool, can_execute: bool) -> SubagentTypeSummary {
         SubagentTypeSummary {
@@ -2386,7 +2386,7 @@ mod role_tool_names_tests {
     use super::{PanelResolveCache, role_tool_names_from};
     use crate::session::goal_planner::RoleSpawnOverride;
     use crate::session::goal_role_tools::RoleToolNames;
-    use cf_tools::implementations::grok_build::task::types::{
+    use cf_tools::implementations::qidi_build::task::types::{
         SubagentDescribeOutcome, SubagentTypeSummary,
     };
     use cf_tools::types::tool::ToolKind;

@@ -145,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn grok_build_order_recent_before_summary() {
+    fn qidi_build_order_recent_before_summary() {
         let recent = vec![MockItem::Recent("a1".into()), MockItem::Recent("t1".into())];
         let out = assemble_compacted_history(parts(recent));
         // [sys, prefix, agents_md, query, a1, t1, summary, reminder]

@@ -5214,7 +5214,7 @@ fn dashboard_permission_followup_rejects_with_message() {
 fn dashboard_question_answer_sends_and_clears() {
     use crate::views::prompt_widget::StashedPrompt;
     use crate::views::question_view::QuestionViewState;
-    use cf_tools::implementations::grok_build::ask_user_question::{
+    use cf_tools::implementations::qidi_build::ask_user_question::{
         AskUserQuestionMode, Question, QuestionOption,
     };
 
@@ -5263,7 +5263,7 @@ fn dashboard_question_answer_walks_multiple_questions() {
     use crate::views::dashboard::peek::{PeekPanelState, compute_peek_fields};
     use crate::views::prompt_widget::StashedPrompt;
     use crate::views::question_view::QuestionViewState;
-    use cf_tools::implementations::grok_build::ask_user_question::{
+    use cf_tools::implementations::qidi_build::ask_user_question::{
         AskUserQuestionMode, Question, QuestionOption,
     };
 

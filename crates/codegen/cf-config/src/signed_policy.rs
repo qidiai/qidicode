@@ -89,6 +89,21 @@ pub enum SigError {
 pub fn verification_active() -> bool {
     with_embedded_keys(|keys| !keys.is_empty())
 }
+
+/// Log a visible warning when signature verification is inactive.
+/// Called once at startup so users/CI see that managed-policy integrity
+/// relies on the on-disk cache marker only, not Ed25519 signatures.
+pub fn warn_if_verification_inactive() {
+    if !verification_active() {
+        tracing::warn!(
+            "MANAGED POLICY WARNING: Ed25519 signature verification is INACTIVE \
+             (no trusted public keys embedded). Managed-policy integrity relies \
+             on the on-disk cache marker only. To enable signature verification, \
+             populate EMBEDDED_DEPLOYMENT_CONFIG_PUBKEYS with a real 32-byte \
+             Ed25519 public key."
+        );
+    }
+}
 /// Whether `key_id` names a trusted key. Only PICKS among served envelopes;
 /// verification re-selects the key from the signed bytes, so a lying hint can at
 /// most cause a verification failure.

@@ -855,7 +855,7 @@ impl WorkspaceConfig {
             server_metadata,
             project_lsp_trusted: true,
             require_explicit_toolset: false,
-            confine_fs_to_workspace_root: false,
+            confine_fs_to_workspace_root: true,
             status_config,
         }
     }

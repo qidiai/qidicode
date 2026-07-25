@@ -142,6 +142,22 @@ impl SandboxManager {
         }
         let support = Sandbox::support_info();
         if !support.is_supported {
+            // Fail-closed for strict/read-only profiles: if the sandbox cannot
+            // be applied and the user requested a restrictive profile, refuse to
+            // continue rather than silently degrading to no sandbox.
+            if matches!(self.profile, ProfileName::ReadOnly | ProfileName::Strict) {
+                tracing::error!(
+                    details = % support.details,
+                    profile = % self.profile,
+                    "Sandbox not supported on this platform for {} profile — refusing to start \
+                     (fail-closed). Use --sandbox=workspace or --sandbox=off to override.",
+                    self.profile
+                );
+                return Err(anyhow::anyhow!(
+                    "sandbox not supported on this platform for {} profile (fail-closed)",
+                    self.profile
+                ));
+            }
             tracing::warn!(
                 details = % support.details,
                 "Sandbox not supported on this platform, continuing without sandbox"
@@ -179,6 +195,19 @@ impl SandboxManager {
                 Ok(())
             }
             Err(e) => {
+                // Fail-closed for strict/read-only profiles.
+                if matches!(self.profile, ProfileName::ReadOnly | ProfileName::Strict) {
+                    tracing::error!(
+                        profile = % self.profile, error = % e,
+                        "Sandbox could not be applied for {} profile — refusing to start \
+                         (fail-closed). Use --sandbox=workspace or --sandbox=off to override.",
+                        self.profile
+                    );
+                    return Err(anyhow::anyhow!(
+                        "sandbox could not be applied for {} profile (fail-closed): {e}",
+                        self.profile
+                    ));
+                }
                 tracing::warn!(
                     profile = % self.profile, error = % e,
                     "Sandbox could not be applied, continuing without sandbox"
@@ -192,8 +221,73 @@ impl SandboxManager {
             }
         }
     }
-    /// Stub when `enforce` feature is disabled — sandbox is not applied.
-    #[cfg(not(all(feature = "enforce", unix)))]
+    /// B3: Windows Job Object 实现——比 Unix Landlock 弱，但不再是纯 stub。
+    ///
+    /// 用一个带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job Object 作为进程级
+    /// 沙箱标记：子进程通过 [`cf-tty-utils`] 的 `ProcessGroup` 被挂进各自的
+    /// Job，进程退出即整组 kill。这里在启动期确认平台能创建 Job Object 并
+    /// 应用扩展限制信息，`applied` 置真后 `is_active()` 才返回 true。
+    ///
+    /// 说明：Windows 无 Landlock 等价的文件系统沙箱，路径 deny 仍由上层的
+    /// 路径检查兜底；本层只提供 Job Object 级别的进程约束。
+    #[cfg(all(feature = "enforce", windows))]
+    pub fn apply(&mut self, workspace: &Path) -> anyhow::Result<()> {
+        use std::mem::{size_of, zeroed};
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::JobObjects::{
+            CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
+        use windows::core::PCWSTR;
+
+        if self.profile == ProfileName::Off {
+            tracing::info!("Sandbox disabled (profile: off)");
+            return Ok(());
+        }
+
+        // 匿名 Job Object。windows 0.62 的第二参数是 `PCWSTR`，须用
+        // `PCWSTR::null()`（不能传 `None`，那样无法通过类型检查）。
+        let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
+            .map_err(|e| anyhow::anyhow!("CreateJobObjectW failed: {e}"))?;
+
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+        let result = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if let Err(e) = result {
+            let _ = unsafe { CloseHandle(job) };
+            return Err(anyhow::anyhow!("SetInformationJobObject failed: {e}"));
+        }
+        // 本层的 Job 仅作启动期能力校验的标记：没有进程被挂进它，所以立即
+        // 关闭句柄不会误杀任何进程。真正的 per-child 约束由 cf-tty-utils 的
+        // `ProcessGroup` 为每个子进程各建一个 Job 并挂入来完成。
+        let _ = unsafe { CloseHandle(job) };
+
+        // SECURITY: 不设置 `applied = true`。本层 Job Object 立即关闭、无进程
+        // 挂入，不构成真实的沙箱约束（仅 kill-on-close，无文件系统/网络隔离）。
+        // 设置 `applied` 会导致 `is_active()` / `should_auto_allow_bash()` 返回
+        // true，使 YOLO 模式在无真实沙箱的情况下自动批准 bash 命令——这是
+        // 危险的假阳性。`applied` 保持 false，上层据此正确判断沙箱未生效。
+        if self.net_restricted {
+            RESTRICT_CHILD_NETWORK.store(true, Ordering::Relaxed);
+        }
+        tracing::info!(
+            profile = % self.profile, workspace = % workspace.display(),
+            "Windows Job Object capability verified (kill-on-close only, no filesystem isolation). \
+             Sandbox is NOT marked as active — bash auto-approve remains disabled."
+        );
+        Ok(())
+    }
+    /// Stub when `enforce` is unavailable on this platform — sandbox is not applied.
+    #[cfg(not(any(all(feature = "enforce", unix), all(feature = "enforce", windows))))]
     pub fn apply(&mut self, _workspace: &Path) -> anyhow::Result<()> {
         tracing::info!(
             profile = % self.profile,
@@ -248,9 +342,47 @@ pub fn bwrap_reexec_command(
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut cmd = std::process::Command::new("bwrap");
     cmd.arg("--bind").arg("/").arg("/");
-    for path in deny_write {
-        if Path::new(path).exists() {
-            cmd.arg("--ro-bind").arg(path).arg(path);
+    // B6: deny-write fail-closed. Previously a non-existent path was silently
+    // skipped, which means an attacker could pre-create the path AFTER this
+    // check and write through it unobstructed (the bwrap bind over it never
+    // happened). Instead we mount an empty zero-perm placeholder over the
+    // intended deny-write path so any future creation at that path is bound
+    // to the unreadable/unwritable placeholder — parity with the deny-read
+    // fail-closed path below (bwrap_blocked_source_for_path).
+    //
+    // Placeholder creation lives in `bwrap_blocked_placeholder` (Linux-only);
+    // on non-Linux bwrap builds deny-write is enforced by the surrounding
+    // nono/Landlock layer, so this branch is a no-op there.
+    #[cfg(all(feature = "enforce", target_os = "linux"))]
+    {
+        for path in deny_write {
+            let p = Path::new(path);
+            if p.exists() {
+                cmd.arg("--ro-bind").arg(path).arg(path);
+            } else {
+                let Some(blocked) = bwrap_blocked_placeholder("sandbox-deny-write-blocked", p.is_dir()) else {
+                    eprintln!(
+                        "error: could not create bwrap placeholder for write-deny path {path}; \
+                         refusing to start with a partial sandbox"
+                    );
+                    return None;
+                };
+                // ro-bind the empty placeholder over the deny-write path: any
+                // future creation/write at `path` hits the placeholder's 0o000 perms.
+                cmd.arg("--ro-bind").arg(&blocked).arg(path);
+            }
+        }
+    }
+    #[cfg(not(all(feature = "enforce", target_os = "linux")))]
+    {
+        // Without bwrap placeholder infra (non-Linux or no `enforce`), keep the
+        // legacy best-effort shape: ro-bind existing paths, skip missing ones.
+        // The surrounding nono/Job-Object layer (or its absence) is the actual
+        // enforcement boundary here, not this bind.
+        for path in deny_write {
+            if Path::new(path).exists() {
+                cmd.arg("--ro-bind").arg(path).arg(path);
+            }
         }
     }
     #[cfg(target_os = "linux")]

@@ -1,5 +1,5 @@
 use regex::Regex;
-use cf_tools::types::{claude_names_for, grok_names_for};
+use cf_tools::types::{claude_names_for, qidi_names_for};
 
 /// A compiled hook matcher for tool names. The pattern semantics are chosen so that
 /// `matcher` entries in hooks migrated from other agent CLIs keep firing unchanged:
@@ -73,7 +73,7 @@ fn exact_names(pattern: &str) -> Vec<String> {
     };
     for term in pattern.split('|') {
         push(term);
-        for grok_name in grok_names_for(term) {
+        for grok_name in qidi_names_for(term) {
             push(&grok_name);
         }
     }

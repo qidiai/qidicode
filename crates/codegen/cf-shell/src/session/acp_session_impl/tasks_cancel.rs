@@ -1,4 +1,4 @@
-﻿//! Prompt-task plumbing for `SessionActor` (`AgentTask`, `TaskSlot`,
+//! Prompt-task plumbing for `SessionActor` (`AgentTask`, `TaskSlot`,
 //! `run_task`, turn guards) and the cancel paths.
 
 use super::*;
@@ -191,7 +191,7 @@ impl SessionActor {
 
     fn cancel_subagents_for_prompt_id(&self, parent_prompt_id: &str) {
         if let Some(event_tx) = self.tool_context.subagent_event_tx.clone() {
-            use cf_tools::implementations::grok_build::task::types::{
+            use cf_tools::implementations::qidi_build::task::types::{
                 SubagentCancelRequest, SubagentCancelTarget, SubagentEvent,
             };
             let _ = event_tx.send(SubagentEvent::Cancel(SubagentCancelRequest {
@@ -430,7 +430,7 @@ impl SessionActor {
             .borrow()
             .tool_bridge()
             .update_resource(
-                cf_tools::implementations::grok_build::task::types::CurrentPromptIdResource(
+                cf_tools::implementations::qidi_build::task::types::CurrentPromptIdResource(
                     String::new(),
                 ),
             )

@@ -10,10 +10,16 @@ use crate::visibility::HttpAuth;
 /// Snapshot of the currently effective credentials. Used by callers
 /// that build their own header maps (the OTel OTLP exporter) or that
 /// need the bearer prefix for 401-attribution telemetry.
-#[derive(Clone, Debug, Default)]
+///
+/// SECURITY: `Debug` is hand-written to redact `token` — deriving Debug
+/// would expose the bearer token in logs, panic backtraces, and tracing spans.
+/// `token` is wrapped in `Zeroizing<String>` so it is securely wiped from
+/// memory when dropped (Zeroizing handles zeroization in its own Drop).
+#[derive(Clone, Default)]
 pub struct CredentialSnapshot {
     /// Bearer token. `None` when no auth is configured (CI / `--api-key` headless).
-    pub token: Option<String>,
+    /// Wrapped in `Zeroizing` for secure memory wiping on drop.
+    pub token: Option<zeroize::Zeroizing<String>>,
     /// User identifier matching the bearer token's owner. `None` when no auth
     /// is configured or when the underlying provider has no concept of user
     /// identity (`StaticAuthCredentialProvider`). Read by the OTel layer to
@@ -28,6 +34,26 @@ pub struct CredentialSnapshot {
     pub api_key_id: Option<String>,
     /// Org id from the OIDC `organizationId` claim; `None` for personal / deployment-key auth.
     pub organization_id: Option<String>,
+}
+
+impl CredentialSnapshot {
+    /// Returns the bearer token as a `&str`, or `None` if no token is set.
+    pub fn token_str(&self) -> Option<&str> {
+        self.token.as_deref().map(|s| s.as_str())
+    }
+}
+
+impl std::fmt::Debug for CredentialSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CredentialSnapshot")
+            .field("has_token", &self.token.is_some())
+            .field("user_id", &self.user_id)
+            .field("team_id", &self.team_id)
+            .field("deployment_id", &self.deployment_id)
+            .field("api_key_id", &self.api_key_id)
+            .field("organization_id", &self.organization_id)
+            .finish()
+    }
 }
 
 /// Source of truth for outbound auth on data-collector requests.
@@ -107,7 +133,7 @@ impl HttpAuth for StaticAuthCredentialProvider {
 impl AuthCredentialProvider for StaticAuthCredentialProvider {
     fn snapshot(&self) -> CredentialSnapshot {
         CredentialSnapshot {
-            token: self.bearer.clone(),
+            token: self.bearer.clone().map(zeroize::Zeroizing::new),
             ..Default::default()
         }
     }

@@ -233,6 +233,20 @@ impl cf_computer_hub_sdk::ToolServerHandler for McpToolHandler {
     async fn handle_call(&self, _ctx: ToolCallContext, args: Value) -> ToolStream<TypedToolOutput> {
         let _start = std::time::Instant::now();
         let tool_id = self.tool_id.clone();
+
+        // SECURITY: Validate args against the MCP tool's input_schema before
+        // forwarding to the transport. This prevents malformed/malicious
+        // arguments from reaching the MCP server unchecked.
+        if let Some(ref schema) = self.definition.input_schema {
+            if let Err(e) = validate_args_against_schema(&args, schema) {
+                crate::metrics::mcp_error();
+                let err = ToolError::invalid_arguments(format!("args failed schema validation: {e}"));
+                return Box::pin(futures::stream::once(async move {
+                    cf_tool_runtime::ToolStreamItem::Terminal(Err(err))
+                }));
+            }
+        }
+
         let result = self
             .transport
             .call_tool(self.definition.name.as_str(), args)
@@ -778,4 +792,44 @@ mod tests {
             ToolOutputWire::Text(String::new())
         );
     }
+}
+
+/// SECURITY: Basic validation of tool call arguments against the MCP tool's
+/// input_schema. Checks that required fields are present and that the
+/// argument is an object when a schema is specified.
+///
+/// This is a lightweight check — full JSON Schema validation is delegated
+/// to the MCP server, but this prevents obviously malformed args from
+/// reaching the transport.
+fn validate_args_against_schema(args: &Value, schema: &Value) -> Result<(), String> {
+    // If schema says the input is an object, args must be an object.
+    let schema_type = schema.get("type").and_then(|t| t.as_str());
+    if schema_type == Some("object") {
+        if !args.is_object() {
+            return Err(format!(
+                "expected object but got {}",
+                match args {
+                    Value::Null => "null",
+                    Value::Bool(_) => "bool",
+                    Value::Number(_) => "number",
+                    Value::String(_) => "string",
+                    Value::Array(_) => "array",
+                    Value::Object(_) => "object",
+                }
+            ));
+        }
+        // Check required fields
+        if let Some(required) = schema.get("required").and_then(|r| r.as_array()) {
+            if let Some(obj) = args.as_object() {
+                for req in required {
+                    if let Some(name) = req.as_str() {
+                        if !obj.contains_key(name) {
+                            return Err(format!("missing required field: {name}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }

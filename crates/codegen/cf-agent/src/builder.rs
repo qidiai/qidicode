@@ -55,7 +55,7 @@ pub struct AgentBuilder {
     notification_handle: ToolNotificationHandle,
     owner_session_id: Option<String>,
     parent_scheduler_handle:
-        Option<cf_tools::implementations::grok_build::scheduler::types::SchedulerHandle>,
+        Option<cf_tools::implementations::qidi_build::scheduler::types::SchedulerHandle>,
     /// The agent definition — set via from_definition() or built up
     /// via individual with_*() calls.
     definition: Option<AgentDefinition>,
@@ -91,12 +91,12 @@ pub struct AgentBuilder {
     /// tools for execution by the agentic sampler, instead of being
     /// registered as local Function tools.
     backend_search: bool,
-    web_fetch_config: cf_tools::implementations::grok_build::web_fetch::WebFetchConfig,
+    web_fetch_config: cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig,
     lsp: Option<std::sync::Arc<dyn cf_tools::implementations::lsp::LspBackend>>,
-    image_gen_config: cf_tools::implementations::grok_build::image_gen::ImageGenConfig,
-    video_gen_config: cf_tools::implementations::grok_build::video_gen::VideoGenConfig,
+    image_gen_config: cf_tools::implementations::qidi_build::image_gen::ImageGenConfig,
+    video_gen_config: cf_tools::implementations::qidi_build::video_gen::VideoGenConfig,
     app_builder_deployer_config:
-        cf_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig,
+        cf_tools::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig,
     write_file_enabled: bool,
     subagents_enabled: bool,
     ask_user_question_enabled: bool,
@@ -137,27 +137,27 @@ pub struct AgentBuilder {
 /// Ensure plan mode tools (`enter_plan_mode`, `exit_plan_mode`,
 /// `ask_user_question`) are present in the tool config.
 fn ensure_plan_mode_tools(tool_config: &mut cf_tools::registry::types::ToolServerConfig) {
-    use cf_tools::implementations::grok_build;
+    use cf_tools::implementations::qidi_build;
     let existing: std::collections::HashSet<&str> =
         tool_config.tools.iter().map(|tc| tc.id.as_str()).collect();
-    let missing_enter = !existing.contains("cf_tools:enter_plan_mode");
-    let missing_exit = !existing.contains("cf_tools:exit_plan_mode");
-    let missing_ask = !existing.contains("cf_tools:ask_user_question");
+    let missing_enter = !existing.contains("QidiBuild:enter_plan_mode");
+    let missing_exit = !existing.contains("QidiBuild:exit_plan_mode");
+    let missing_ask = !existing.contains("QidiBuild:ask_user_question");
     drop(existing);
     if missing_enter {
         tool_config
             .tools
-            .push((&grok_build::EnterPlanModeTool).into());
+            .push((&qidi_build::EnterPlanModeTool).into());
     }
     if missing_exit {
         tool_config
             .tools
-            .push((&grok_build::ExitPlanModeTool).into());
+            .push((&qidi_build::ExitPlanModeTool).into());
     }
     if missing_ask {
         tool_config
             .tools
-            .push((&grok_build::AskUserQuestionTool).into());
+            .push((&qidi_build::AskUserQuestionTool).into());
     }
 }
 /// Merge a shell-resolved params map into every matching tool's
@@ -182,11 +182,12 @@ impl AgentBuilder {
         terminal_backend: Arc<dyn TerminalBackend>,
         notification_handle: ToolNotificationHandle,
     ) -> Self {
+        let fs_backend = Arc::new(cf_tools::computer::local::LocalFs::new(&working_directory));
         Self {
             working_directory,
             prompt_working_directory: None,
             terminal_backend,
-            fs_backend: Arc::new(cf_tools::computer::local::LocalFs),
+            fs_backend,
             notification_handle,
             owner_session_id: None,
             parent_scheduler_handle: None,
@@ -405,7 +406,7 @@ impl AgentBuilder {
     /// Share the parent's scheduler handle so scheduled tasks survive subagent exit.
     pub fn with_parent_scheduler_handle(
         mut self,
-        handle: cf_tools::implementations::grok_build::scheduler::types::SchedulerHandle,
+        handle: cf_tools::implementations::qidi_build::scheduler::types::SchedulerHandle,
     ) -> Self {
         self.parent_scheduler_handle = Some(handle);
         self
@@ -439,7 +440,7 @@ impl AgentBuilder {
     /// `QIDI_WEB_FETCH` env var.
     pub fn with_web_fetch_config(
         mut self,
-        config: cf_tools::implementations::grok_build::web_fetch::WebFetchConfig,
+        config: cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig,
     ) -> Self {
         self.web_fetch_config = config;
         self
@@ -459,7 +460,7 @@ impl AgentBuilder {
     /// credentials. When `Disabled` (default), the tool is not registered.
     pub fn with_image_gen_config(
         mut self,
-        config: cf_tools::implementations::grok_build::image_gen::ImageGenConfig,
+        config: cf_tools::implementations::qidi_build::image_gen::ImageGenConfig,
     ) -> Self {
         self.image_gen_config = config;
         self
@@ -473,7 +474,7 @@ impl AgentBuilder {
     /// registered.
     pub fn with_video_gen_config(
         mut self,
-        config: cf_tools::implementations::grok_build::video_gen::VideoGenConfig,
+        config: cf_tools::implementations::qidi_build::video_gen::VideoGenConfig,
     ) -> Self {
         self.video_gen_config = config;
         self
@@ -481,7 +482,7 @@ impl AgentBuilder {
     /// Set the deploy service configuration.
     pub fn with_app_builder_deployer_config(
         mut self,
-        config: cf_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig,
+        config: cf_tools::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig,
     ) -> Self {
         self.app_builder_deployer_config = config;
         self
@@ -533,7 +534,7 @@ impl AgentBuilder {
         self.subagents_enabled = enabled;
         self
     }
-    /// Set public model slugs advertised in the GrokBuild Task description.
+    /// Set public model slugs advertised in the QidiBuild Task description.
     pub fn with_task_model_slugs(mut self, slugs: Vec<String>) -> Self {
         self.task_model_slugs = slugs;
         self
@@ -620,7 +621,7 @@ impl AgentBuilder {
         if let Some(ref def) = self.definition {
             return def.clone();
         }
-        let mut def = AgentDefinition::default_grok_build();
+        let mut def = AgentDefinition::default_qidi_build();
         if let Some(ref name) = self.name {
             def.name = name.clone();
         }
@@ -703,34 +704,34 @@ impl AgentBuilder {
                     .push((&memory::get_tool::MemoryGetImpl).into());
             }
             if self.web_search_config.is_enabled() {
-                use cf_tools::implementations::grok_build;
-                tool_config.tools.push((&grok_build::WebSearchTool).into());
+                use cf_tools::implementations::qidi_build;
+                tool_config.tools.push((&qidi_build::WebSearchTool).into());
             }
             if self.web_fetch_config.is_enabled() {
-                use cf_tools::implementations::grok_build;
-                tool_config.tools.push((&grok_build::WebFetchTool).into());
+                use cf_tools::implementations::qidi_build;
+                tool_config.tools.push((&qidi_build::WebFetchTool).into());
             }
             if self.lsp.is_some() {
                 tool_config
                     .tools
-                    .push((&cf_tools::implementations::grok_build::LspTool).into());
+                    .push((&cf_tools::implementations::qidi_build::LspTool).into());
             }
             if self.image_gen_config.image_gen_enabled() {
                 tool_config
                     .tools
-                    .push((&cf_tools::implementations::grok_build::ImageGenTool).into());
+                    .push((&cf_tools::implementations::qidi_build::ImageGenTool).into());
             }
             if self.image_gen_config.image_edit_enabled() {
                 tool_config
                     .tools
-                    .push((&cf_tools::implementations::grok_build::ImageEditTool).into());
+                    .push((&cf_tools::implementations::qidi_build::ImageEditTool).into());
             }
             if self.video_gen_config.is_enabled() {
                 tool_config
                     .tools
-                    .push((&cf_tools::implementations::grok_build::ImageToVideoTool).into());
+                    .push((&cf_tools::implementations::qidi_build::ImageToVideoTool).into());
                 tool_config.tools.push(
-                    (&cf_tools::implementations::grok_build::ReferenceToVideoTool).into(),
+                    (&cf_tools::implementations::qidi_build::ReferenceToVideoTool).into(),
                 );
             }
             let has_write_tool = tool_config
@@ -745,13 +746,13 @@ impl AgentBuilder {
             ensure_plan_mode_tools(&mut tool_config);
         }
         if self.memory_backend.is_none() {
-            let grok_build_ns = cf_tools::types::tool::ToolNamespace::GrokBuild.to_string();
+            let qidi_build_ns = cf_tools::types::tool::ToolNamespace::QidiBuild.to_string();
             let mem_search_id = format!(
-                "{grok_build_ns}:{}",
+                "{qidi_build_ns}:{}",
                 cf_tools::implementations::memory::MEMORY_SEARCH_TOOL_NAME
             );
             let mem_get_id = format!(
-                "{grok_build_ns}:{}",
+                "{qidi_build_ns}:{}",
                 cf_tools::implementations::memory::MEMORY_GET_TOOL_NAME
             );
             tool_config
@@ -761,13 +762,13 @@ impl AgentBuilder {
         if !self.ask_user_question_enabled {
             let ask_user_id = format!(
                 "{}:ask_user_question",
-                cf_tools::types::tool::ToolNamespace::GrokBuild,
+                cf_tools::types::tool::ToolNamespace::QidiBuild,
             );
             tool_config.tools.retain(|tc| tc.id != ask_user_id);
         }
         let task_tool_id = format!(
             "{}:{}",
-            cf_tools::types::tool::ToolNamespace::GrokBuild,
+            cf_tools::types::tool::ToolNamespace::QidiBuild,
             "task"
         );
         let mut task_stripped = false;
@@ -815,8 +816,8 @@ impl AgentBuilder {
                                 .unwrap_or(true))
                 })
             };
-            if !has_satisfier(ToolNamespace::GrokBuild, "run_terminal_cmd", true)
-                && !has_satisfier(ToolNamespace::GrokBuildConcise, "run_terminal_cmd", true)
+            if !has_satisfier(ToolNamespace::QidiBuild, "run_terminal_cmd", true)
+                && !has_satisfier(ToolNamespace::QidiBuildConcise, "run_terminal_cmd", true)
                 && !has_satisfier(ToolNamespace::OpenCode, "bash", false)
             {
                 let lifecycle = ["get_task_output", "wait_tasks", "kill_task"];
@@ -825,7 +826,7 @@ impl AgentBuilder {
                     .retain(|tc| !lifecycle.contains(&short_tool_name(&tc.id)));
             }
         }
-        if let cf_tools::implementations::grok_build::web_fetch::WebFetchConfig::Enabled {
+        if let cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig::Enabled {
             ref params,
         } = self.web_fetch_config
             && let Ok(params_value) = serde_json::to_value(params)
@@ -1581,61 +1582,61 @@ mod tests {
         let cases: &[PagerFlagCase] = &[
             PagerFlagCase {
                 label: "cf-tools / subagents+ask_user",
-                profile: AgentDefinition::default_grok_build,
+                profile: AgentDefinition::default_qidi_build,
                 subagents: true,
                 ask_user: true,
             },
             PagerFlagCase {
                 label: "cf-tools / subagents / no-ask-user",
-                profile: AgentDefinition::default_grok_build,
+                profile: AgentDefinition::default_qidi_build,
                 subagents: true,
                 ask_user: false,
             },
             PagerFlagCase {
                 label: "cf-tools / no-subagents / ask_user",
-                profile: AgentDefinition::default_grok_build,
+                profile: AgentDefinition::default_qidi_build,
                 subagents: false,
                 ask_user: true,
             },
             PagerFlagCase {
                 label: "cf-tools / no-subagents / no-ask-user",
-                profile: AgentDefinition::default_grok_build,
+                profile: AgentDefinition::default_qidi_build,
                 subagents: false,
                 ask_user: false,
             },
             PagerFlagCase {
                 label: "cf-tools-ask-user / subagents",
-                profile: AgentDefinition::grok_build_ask_user,
+                profile: AgentDefinition::qidi_build_ask_user,
                 subagents: true,
                 ask_user: true,
             },
             PagerFlagCase {
                 label: "cf-tools-ask-user / no-subagents",
-                profile: AgentDefinition::grok_build_ask_user,
+                profile: AgentDefinition::qidi_build_ask_user,
                 subagents: false,
                 ask_user: true,
             },
             PagerFlagCase {
                 label: "cf-tools-plan",
-                profile: AgentDefinition::grok_build_plan,
+                profile: AgentDefinition::qidi_build_plan,
                 subagents: true,
                 ask_user: true,
             },
             PagerFlagCase {
                 label: "cf-tools-plan / no-ask-user",
-                profile: AgentDefinition::grok_build_plan,
+                profile: AgentDefinition::qidi_build_plan,
                 subagents: true,
                 ask_user: false,
             },
             PagerFlagCase {
                 label: "cf-tools-plan-no-subagents",
-                profile: AgentDefinition::grok_build_plan_no_subagents,
+                profile: AgentDefinition::qidi_build_plan_no_subagents,
                 subagents: false,
                 ask_user: true,
             },
             PagerFlagCase {
                 label: "cf-tools-plan-no-subagents / no-ask-user",
-                profile: AgentDefinition::grok_build_plan_no_subagents,
+                profile: AgentDefinition::qidi_build_plan_no_subagents,
                 subagents: false,
                 ask_user: false,
             },
@@ -1684,7 +1685,7 @@ mod tests {
     async fn curated_empty_toolset_fails_agent_build() {
         use cf_tools::computer::local::LocalTerminalBackend;
         use cf_tools::notification::ToolNotificationHandle;
-        let mut profile = crate::config::AgentDefinition::default_grok_build();
+        let mut profile = crate::config::AgentDefinition::default_qidi_build();
         profile.tool_config = Default::default();
         profile.inject_default_tools = false;
         let result = AgentBuilder::new(
@@ -1712,10 +1713,10 @@ mod tests {
     #[tokio::test]
     async fn plan_mode_injected_ask_user_question_receives_params() {
         use cf_tools::computer::local::LocalTerminalBackend;
-        use cf_tools::implementations::grok_build::ask_user_question::AskUserQuestionParams;
+        use cf_tools::implementations::qidi_build::ask_user_question::AskUserQuestionParams;
         use cf_tools::notification::ToolNotificationHandle;
         use cf_tools::types::resources::Params;
-        let profile = crate::config::AgentDefinition::default_grok_build();
+        let profile = crate::config::AgentDefinition::default_qidi_build();
         assert!(
             !profile
                 .tool_config
@@ -1748,7 +1749,7 @@ mod tests {
     async fn build_with_tools(tools: Vec<String>, disallowed: Vec<String>) -> crate::agent::Agent {
         use cf_tools::computer::local::LocalTerminalBackend;
         use cf_tools::notification::ToolNotificationHandle;
-        let mut def = crate::config::AgentDefinition::default_grok_build();
+        let mut def = crate::config::AgentDefinition::default_qidi_build();
         def.tools = tools;
         def.disallowed_tools = disallowed;
         AgentBuilder::new(
@@ -1769,7 +1770,7 @@ mod tests {
     ) -> Vec<String> {
         use cf_tools::computer::local::LocalTerminalBackend;
         use cf_tools::notification::ToolNotificationHandle;
-        let mut def = crate::config::AgentDefinition::default_grok_build();
+        let mut def = crate::config::AgentDefinition::default_qidi_build();
         def.tools = own_tools;
         def.session_tools_allowlist = Some(session_allow);
         let agent = AgentBuilder::new(
@@ -1903,7 +1904,7 @@ mod tests {
         assert_eq!(agent.definition().allowed_subagent_types, None);
         use cf_tools::computer::local::LocalTerminalBackend;
         use cf_tools::notification::ToolNotificationHandle;
-        let mut def = crate::config::AgentDefinition::default_grok_build();
+        let mut def = crate::config::AgentDefinition::default_qidi_build();
         def.disallowed_tools = vec!["Agent".into()];
         let agent = AgentBuilder::new(
             std::env::temp_dir(),
@@ -1919,10 +1920,10 @@ mod tests {
     #[tokio::test]
     async fn spawning_blocked_disables_all_background_bash_modes() {
         use cf_tools::computer::local::LocalTerminalBackend;
-        use cf_tools::implementations::grok_build::bash::BashParams;
+        use cf_tools::implementations::qidi_build::bash::BashParams;
         use cf_tools::notification::ToolNotificationHandle;
         use cf_tools::types::resources::Params;
-        let mut definition = crate::config::AgentDefinition::default_grok_build();
+        let mut definition = crate::config::AgentDefinition::default_qidi_build();
         definition.tools = vec!["run_terminal_cmd".into()];
         let bash_params = serde_json::json!(
             { "max_timeout_secs" : 36_000.0, "auto_background_on_timeout" : true,
@@ -2153,10 +2154,10 @@ mod tests {
     #[tokio::test]
     async fn requested_enabled_web_tools_survive_allowlist() {
         use cf_tools::computer::local::LocalTerminalBackend;
-        use cf_tools::implementations::grok_build::web_fetch::WebFetchConfig;
+        use cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig;
         use cf_tools::implementations::web_search::WebSearchConfig;
         use cf_tools::notification::ToolNotificationHandle;
-        let mut definition = crate::config::AgentDefinition::default_grok_build();
+        let mut definition = crate::config::AgentDefinition::default_qidi_build();
         definition.tools = vec![
             "read_file".into(),
             "grep".into(),
@@ -2306,7 +2307,7 @@ mod tests {
         } else {
             WebSearchConfig::Disabled
         };
-        let mut def = crate::config::AgentDefinition::default_grok_build();
+        let mut def = crate::config::AgentDefinition::default_qidi_build();
         def.disallowed_tools = disallowed_tools.iter().map(|s| s.to_string()).collect();
         AgentBuilder::new(
             std::env::temp_dir(),

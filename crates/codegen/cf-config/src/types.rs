@@ -496,7 +496,7 @@ pub struct RemoteSettings {
     pub dream_check_interval_secs: Option<u64>,
     /// Cadence (seconds) of the pager's free→paid subscription watch.
     /// `0` disables it; the pager clamps and defaults (see its
-    /// `app::subscription` module). Forwarded from the `grok_build_settings`
+    /// `app::subscription` module). Forwarded from the `qidi_build_settings`
     /// remote settings flag via the CCP `/settings` flatten catch-all.
     #[serde(default)]
     pub subscription_watch_interval_secs: Option<u64>,
@@ -541,7 +541,7 @@ pub struct RemoteSettings {
     /// fallback (per-server config, env, and requirements/managed override it).
     #[serde(default)]
     pub mcp_startup_timeout_secs: Option<u64>,
-    /// remote settings `grok_build_settings.max_mcp_output_bytes` — global default
+    /// remote settings `qidi_build_settings.max_mcp_output_bytes` — global default
     /// MCP tool-result inline cap (bytes). Overridden by requirements, env,
     /// and `config.toml [mcp] max_output_bytes`. Built-in default 20_000.
     #[serde(default)]
@@ -558,7 +558,7 @@ pub struct RemoteSettings {
     /// Enable/disable the runtime turn-end TodoGate remotely.
     /// Precedence: CLI `--todo-gate` > this field > built-in default (`false`).
     /// The gate ships disabled; set this to `Some(true)` (via the
-    /// `grok_build_settings` remote settings key) to enable it. See
+    /// `qidi_build_settings` remote settings key) to enable it. See
     /// `session::acp_session::resolve_reminder_policy`.
     #[serde(default)]
     pub todo_gate_enabled: Option<bool>,
@@ -710,7 +710,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub tips: Option<Vec<String>>,
     /// When present, controls the non-Git-repo warning at session start.
-    /// Controlled via remote settings (`non_git_warning` in `grok_build_settings`).
+    /// Controlled via remote settings (`non_git_warning` in `qidi_build_settings`).
     /// Takes precedence over `[features] non_git_warning` in config.toml:
     /// `Some(true)` enables, `Some(false)` acts as a kill-switch, `None` falls back to local config.
     #[serde(default)]
@@ -736,7 +736,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub image_description_model: Option<String>,
     /// Server-side pin for the next-prompt suggestion model (tab-autocomplete
-    /// ghost text), from the `grok_build_settings` remote settings flag. Sits below
+    /// ghost text), from the `qidi_build_settings` remote settings flag. Sits below
     /// env (`QIDI_PROMPT_SUGGESTIONS_MODEL`) and `[models] prompt_suggestion`
     /// in config.toml, above the client hint and the built-in
     /// `cf-tools-0.1` default. The effective model is catalog-guarded: when
@@ -900,7 +900,7 @@ pub struct RemoteSettings {
     /// `"default"`). Used only when no effective TOML permission key is set.
     #[serde(default)]
     pub permission_mode: Option<String>,
-    /// User's subscription tier from remote settings `grok_build_access_gate`.
+    /// User's subscription tier from remote settings `qidi_build_access_gate`.
     /// E.g. "free", "premium", "supergrok", "supergrok_heavy".
     /// Stamped on analytics events + user profile for filtering.
     #[serde(default)]
@@ -916,7 +916,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub session_picker_grouped: Option<bool>,
     /// Whether the user is allowed to use QIDI Code. Set by remote settings
-    /// `grok_build_access_gate` targeting rules. `None` = no server response
+    /// `qidi_build_access_gate` targeting rules. `None` = no server response
     /// yet (client uses own fallback check). `Some(false)` = blocked.
     #[serde(default)]
     pub allow_access: Option<bool>,
@@ -933,7 +933,7 @@ pub struct RemoteSettings {
     pub on_demand_enabled: Option<bool>,
     /// When set to a non-empty URL, the pager's `/usage` command shows a link
     /// to that URL instead of fetching billing data from the backend.
-    /// Server-controlled via the remote settings `grok_build_usage_redirect_url`
+    /// Server-controlled via the remote settings `qidi_build_usage_redirect_url`
     /// feature flag (target it at personal-team users). `None`/empty keeps the
     /// default behaviour of fetching usage from the backend.
     #[serde(default)]
@@ -945,8 +945,8 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub suggestions_ai_enabled: Option<bool>,
     /// Global auto-compact threshold percent (0-100) from remote settings
-    /// `grok_build_settings`. Per-model override on `ModelInfo`
-    /// (`grok_build_models`) takes precedence; user config and env var
+    /// `qidi_build_settings`. Per-model override on `ModelInfo`
+    /// (`qidi_build_models`) takes precedence; user config and env var
     /// further override per the resolver chain.
     #[serde(default)]
     pub auto_compact_threshold_percent: Option<u8>,
@@ -978,7 +978,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub imagine_tools_disabled: Option<Vec<String>>,
     /// remote settings gate for the `grok workspace` CLI command (Computer Hub
-    /// workspace exposure), from `grok_build_settings.workspace_command_enabled`.
+    /// workspace exposure), from `qidi_build_settings.workspace_command_enabled`.
     /// `Some(true)` enables it; `None`/`Some(false)` (the default) keep it off.
     #[serde(default)]
     pub workspace_command_enabled: Option<bool>,

@@ -1,4 +1,4 @@
-﻿//! Modal dialog handling for [`AgentView`]: the `handle_modal_key` /
+//! Modal dialog handling for [`AgentView`]: the `handle_modal_key` /
 //! `handle_modal_mouse` input dispatchers, the command palette / arg picker /
 //! doc picker input handlers, and the active-modal draw dispatch.
 //!
@@ -912,7 +912,7 @@ impl AgentView {
                 // source filter and local-disk delete are dead weight there.
                 let chat_mode = self.app_chat_mode;
                 let config = PickerConfig {
-                    title: Some("Resume session"),
+                    title: Some("Resume session | 恢复会话"),
                     show_search_hint: true,
                     expandable: true,
                     esc_clears_query: false, // Esc returns to palette or closes
@@ -1844,7 +1844,7 @@ impl AgentView {
                 }
                 let compact = self.scrollback.appearance().prompt.compact;
                 let modal_config = ModalWindowConfig {
-                    title: "Resume session",
+                    title: "Resume session | 恢复会话",
                     tabs: None,
                     shortcuts: &session_shortcuts,
                     sizing: ModalSizing {

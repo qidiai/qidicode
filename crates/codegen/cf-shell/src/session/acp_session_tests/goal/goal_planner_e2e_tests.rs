@@ -1,4 +1,4 @@
-﻿//! Integration coverage for the planner trigger inside
+//! Integration coverage for the planner trigger inside
 //! `setup_goal` and the session-load reconciliation hook
 //! `maybe_reconcile_active_goal_without_plan`. Uses the same
 //! single-thread + LocalSet pattern as the verification-stage e2e suite.
@@ -9,7 +9,7 @@ use serial_test::serial;
 use std::sync::Arc as StdArc;
 use std::sync::atomic::{AtomicUsize, Ordering as SeqOrd};
 use tempfile::TempDir;
-use cf_tools::implementations::grok_build::task::types::{SubagentEvent, SubagentResult};
+use cf_tools::implementations::qidi_build::task::types::{SubagentEvent, SubagentResult};
 
 /// Spawn behaviour knobs for the planner-coordinator stub.
 enum SpawnBehaviour {

@@ -1,7 +1,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 use cf_sampler::SamplerConfig;
-use cf_tools::implementations::grok_build;
+use cf_tools::implementations::qidi_build;
 use cf_tools::registry::types::ToolConfig;
 
 /// Production cf-tools foreground command-timeout ceiling (seconds). The
@@ -126,7 +126,7 @@ impl WebFetchToolConfig {
         remote_proxy: Option<&str>,
         remote_domains: Option<&[String]>,
         context_window_tokens: Option<u64>,
-    ) -> cf_tools::implementations::grok_build::web_fetch::WebFetchParams {
+    ) -> cf_tools::implementations::qidi_build::web_fetch::WebFetchParams {
         use crate::agent::config::env_string;
 
         let proxy_endpoint = self
@@ -142,7 +142,7 @@ impl WebFetchToolConfig {
             .cloned()
             .or_else(|| remote_domains.map(|d| d.to_vec()));
 
-        cf_tools::implementations::grok_build::web_fetch::WebFetchParams {
+        cf_tools::implementations::qidi_build::web_fetch::WebFetchParams {
             proxy_endpoint,
             allowed_domains,
             context_window_tokens,
@@ -340,8 +340,8 @@ impl HashlineSchemeConfig {
 
 /// Which set of read/edit/search tools to use for file operations.
 ///
-/// Selects between the standard `GrokBuild` toolset (`read_file`,
-/// `search_replace`, `grep`) and the anchor-based `GrokBuildHashline`
+/// Selects between the standard `QidiBuild` toolset (`read_file`,
+/// `search_replace`, `grep`) and the anchor-based `QidiBuildHashline`
 /// toolset (`hashline_read`, `hashline_edit`, `hashline_grep`).
 /// The two are mutually exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -365,9 +365,9 @@ impl FileToolset {
     ) -> Result<Vec<ToolConfig>, String> {
         match self {
             Self::Standard => Ok(vec![
-                ToolConfig::for_tool::<grok_build::ReadFileTool>(),
-                ToolConfig::for_tool::<grok_build::SearchReplaceTool>(),
-                ToolConfig::for_tool::<grok_build::GrepTool>(),
+                ToolConfig::for_tool::<qidi_build::ReadFileTool>(),
+                ToolConfig::for_tool::<qidi_build::SearchReplaceTool>(),
+                ToolConfig::for_tool::<qidi_build::GrepTool>(),
             ]),
             Self::Hashline => {
                 hashline_config.validate()?;

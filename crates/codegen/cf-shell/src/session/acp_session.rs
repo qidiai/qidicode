@@ -72,7 +72,7 @@ use cf_sampler::SamplerConfig as SamplingConfig;
 use cf_sampling_types::truncate_bytes;
 use cf_tools::computer::local::LocalTerminalBackend;
 use cf_tools::implementations::BashToolInput;
-use cf_tools::implementations::grok_build::web_fetch::WebFetchConfig;
+use cf_tools::implementations::qidi_build::web_fetch::WebFetchConfig;
 use cf_tools::types::ToolInput;
 use cf_tools::types::compat::CompatConfig;
 use cf_tools::types::output::{
@@ -785,7 +785,7 @@ pub(crate) struct SessionActor {
     pub(crate) goal_update_rx: std::cell::RefCell<
         Option<
             tokio::sync::mpsc::UnboundedReceiver<
-                cf_tools::implementations::grok_build::update_goal::UpdateGoalEnvelope,
+                cf_tools::implementations::qidi_build::update_goal::UpdateGoalEnvelope,
             >,
         >,
     >,
@@ -794,7 +794,7 @@ pub(crate) struct SessionActor {
     /// empty ToolBridge. The `rx` half is owned by the drainer task (see
     /// `goal_update_rx`).
     pub(crate) goal_update_tx: tokio::sync::mpsc::UnboundedSender<
-        cf_tools::implementations::grok_build::update_goal::UpdateGoalEnvelope,
+        cf_tools::implementations::qidi_build::update_goal::UpdateGoalEnvelope,
     >,
     /// Resolved master kill-switch for the verification stage (the
     /// adversarial skeptic panel). `false` short-circuits
@@ -860,7 +860,7 @@ pub(crate) struct SessionActor {
     /// time; only the input is parked here for the TurnEnd drain to
     /// run through the verification stage.
     pub(crate) pending_classifier_completions: parking_lot::Mutex<
-        VecDeque<cf_tools::implementations::grok_build::update_goal::UpdateGoalInput>,
+        VecDeque<cf_tools::implementations::qidi_build::update_goal::UpdateGoalInput>,
     >,
     /// Per-session re-entry guard for the verification stage. Set with
     /// `compare_exchange(false, true)` at fire-entry and cleared on
@@ -1171,7 +1171,7 @@ impl SessionActor {
             memory: self.memory.is_enabled() && memory_read_registered,
             memory_configured: self.memory.backend_params.is_some(),
             scheduler: tool_names.iter().any(|n| {
-                n == cf_tools::implementations::grok_build::SCHEDULER_CREATE_TOOL_NAME
+                n == cf_tools::implementations::qidi_build::SCHEDULER_CREATE_TOOL_NAME
             }),
             hooks: self.hook_registry.borrow().is_some(),
             plugins: self.plugin_registry.borrow().is_some(),
@@ -1266,12 +1266,35 @@ const SYSTEM_PROMPT_FILENAME: &str = "system_prompt.txt";
 /// the content is identical, so the two writers can never produce a torn file.
 fn persist_chat_history_jsonl_sync(session_info: &SessionInfo, conversation: &[ConversationItem]) {
     let dir = crate::session::persistence::session_dir(session_info);
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        tracing::warn!(
-            session_id = % session_info.id.0, ? e,
-            "persist_chat_history_jsonl_sync: failed to create session dir"
-        );
-        return;
+    // SECURITY: Create session directory with 0o700 permissions to prevent
+    // world-readable conversation data (may contain sensitive tool outputs).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true).mode(0o700);
+        if let Err(e) = builder.create(&dir) {
+            // Directory may already exist — try to ensure permissions are set.
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+            // If create failed for a reason other than AlreadyExists, warn.
+            if !dir.exists() {
+                tracing::warn!(
+                    session_id = % session_info.id.0, ? e,
+                    "persist_chat_history_jsonl_sync: failed to create session dir"
+                );
+                return;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            tracing::warn!(
+                session_id = % session_info.id.0, ? e,
+                "persist_chat_history_jsonl_sync: failed to create session dir"
+            );
+            return;
+        }
     }
     let final_path = dir.join("chat_history.jsonl");
     let tmp_path = dir.join("chat_history.jsonl.sync.tmp");
@@ -1673,7 +1696,7 @@ mod tool_meta_stamp_tests {
                 let t = tool_meta(early.as_ref()).expect("early ToolCall carries x.ai/tool");
                 assert_eq!(t["name"], "read_file");
                 assert_eq!(t["kind"], "read");
-                assert_eq!(t["namespace"], "grok_build");
+                assert_eq!(t["namespace"], "qidi_build");
                 assert!(t.get("input").is_none(), "identity-only before parse");
                 let refined = refined.expect("refinement ToolCallUpdate emitted");
                 let t = tool_meta(refined.as_ref()).expect("refinement carries x.ai/tool");
