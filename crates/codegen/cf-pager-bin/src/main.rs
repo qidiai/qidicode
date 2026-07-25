@@ -170,7 +170,7 @@ async fn run_setup_command(json: bool) {
         eprintln!("  deployment_key = \"<your-key>\"");
         eprintln!();
         eprintln!(
-            "If you don't have a deployment key, contact your organization's Grok administrator."
+            "If you don't have a deployment key, contact your organization's QIDI Code administrator."
         );
         std::process::exit(1);
     }
@@ -1502,10 +1502,10 @@ fn real_main() -> i32 {
     );
     raise_fd_limit();
     if let Err(e) = cf_config::validate_requirements() {
-        eprintln!("Couldn't start Grok: {e}");
+        eprintln!("Couldn't start QIDI Code: {e}");
         eprintln!();
         eprintln!(
-            "Update Grok to a version the policy allows, or ask your administrator \
+            "Update QIDI Code to a version the policy allows, or ask your administrator \
              to fix the managed requirements."
         );
         std::process::exit(2);
@@ -1521,7 +1521,7 @@ fn real_main() -> i32 {
     if cf_shell::util::config::load_crash_handler_enabled_sync() {
         let crash_dir = cf_shell::util::grok_home::grok_home().join("crash");
         if let Some(report) = cf_crash_handler::check_previous_crash(&crash_dir) {
-            eprintln!("Grok crashed during your last session.");
+            eprintln!("QIDI Code crashed during your last session.");
             eprintln!("  Signal:  {}", report.signal_name);
             eprintln!("  Version: {}", report.app_version);
             eprintln!("  Report:  {}", report.report_path.display());

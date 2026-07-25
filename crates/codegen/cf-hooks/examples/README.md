@@ -1,6 +1,6 @@
 # Hook Examples
 
-Sample hooks for Grok. Copy to `~/.qidi/hooks/` to enable globally, or to `<project>/.grok/hooks/` for project-scoped hooks (requires `/hooks-trust`).
+Sample hooks for QIDI Code. Copy to `~/.qidi/hooks/` to enable globally, or to `<project>/.grok/hooks/` for project-scoped hooks (requires `/hooks-trust`).
 
 ## Available Examples
 
@@ -93,7 +93,7 @@ Hook files use the Claude-compatible JSON format:
 ```
 
 - **Event names:** `SessionStart`, `PreToolUse`, `PostToolUse`, `SessionEnd`
-- **Matcher:** regex on tool name. Claude names like `Bash`, `Read`, `Edit` are auto-expanded to also match Grok names (`run_terminal_cmd`, `read_file`, `search_replace`)
+- **Matcher:** regex on tool name. Claude names like `Bash`, `Read`, `Edit` are auto-expanded to also match QIDI Code names (`run_terminal_cmd`, `read_file`, `search_replace`)
 - **Timeout:** in seconds (default: 5)
 - **Command:** path to script (relative to hook file directory) or inline shell command
 

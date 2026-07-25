@@ -53,11 +53,19 @@ QIDI Code 是 grok-build 的 Rust 分叉，定位为原生 Windows 的 AI 编码
 
 ## 4. 品牌残留清单
 
-**A. 可安全修改的文案（后续 P1 批次）**
-- `cf-pager-bin/src/main.rs` L173、L1505、L1508、L1524：用户可见错误提示中的 "Grok"。
-- `cf-shell/skills/create-skill/SKILL.md` L4/L7/L12："Create a new Grok skill"。
-- `cf-compaction/src/templates/compaction_developer_prompt.txt` 与 `compaction_user_prompt.txt` 首行："as Grok (built by xAI)"（LLM 可见；这两个 .txt 不在 cf-agent 加密管线内，可直接改）。
-- `cf-pager/docs/custom-hooks.md`、`hooks-and-plugins.md`、`cf-hooks/examples/`（README + tool-logger.sh/session-log.sh）：多处 `~/.grok` 路径（代码已迁移 `~/.qidi`，文档未跟上，用户照抄会写错目录）。
+**A. 可安全修改的文案（P1 批次一已完成，2026-07-25，提交见第 7 节）**
+- ~~`cf-pager-bin/src/main.rs` L173、L1505、L1508、L1524：用户可见错误提示中的 "Grok"~~ → 已改为 QIDI Code。
+- ~~`cf-shell/skills/create-skill/SKILL.md`："Create a new Grok skill" 等 5 处文案 + 4 处路径~~ → 文案已改；路径核实为**用户级 `~/.qidi`、项目级 `.grok`**（与代码行为一致，见下方备注）。
+- ~~`cf-compaction/src/templates/compaction_developer_prompt.txt` 与 `compaction_user_prompt.txt`：各 5 处 Grok/xAI 身份（非仅首行）~~ → 已全部改为 QIDI Code（这两个 .txt 不在 cf-agent 加密管线内，直接改即可）。
+- ~~`cf-pager/docs/custom-hooks.md`、`hooks-and-plugins.md`、`cf-hooks/examples/`（README + tool-logger.sh/session-log.sh）：用户级 `~/.grok` 路径~~ → 已改 `~/.qidi`；custom-hooks.md 中 4 个失效示例链接（`xai-grok-hooks` 旧 crate 名 + 错误相对深度）一并修复为 `cf-hooks`。
+
+> **路径口径核实（重要）**：当前代码**用户级目录已迁 `~/.qidi`**（`cf-config/paths.rs` default_grok_home），但**项目级目录仍扫 `.grok/`**（`cf-tools/types/compat.rs:368` skills、`cf-shell/util/hooks.rs:91` hooks、`cf-workspace/project_config.rs:81` config.toml）。文档中项目级 `.grok/` 引用是正确的，未改动；项目级目录是否迁移 `.qidi/`（需兼容期双扫）单列评估。
+
+**A2. 批次一之后新发现的同类残留（下一批处理）**
+- `cf-shell/skills/help/SKILL.md`：多处 `~/.grok/docs`、`~/.grok/config.toml`——但 `cf-shell/bundle.rs:86` 文档解压根目录也仍是 `~/.grok`，文案与运行时行为纠缠，需连同 bundle.rs 一起改。
+- `cf-pager/docs/user-guide/14-headless-mode.md`：`~/.grok` 只读挂载说明。
+- `cf-pager/scripts/install.sh`、`install-enterprise.sh`：`~/.grok/auth.json`、`~/.grok/bin` 等（安装管线，需连同发布流程验证）。
+- `cf-tools/THIRD_PARTY_NOTICES.md`：`~/.grok/vendor/`（需核对 vendor 解压代码实际路径）。
 
 **B. 不动的 API 标识符（改动有兼容风险，单列评估）**
 - `PluginOrigin::ProjectGrok/UserGrok`（serde 序列化兼容）。
@@ -95,7 +103,7 @@ QIDI Code 是 grok-build 的 Rust 分叉，定位为原生 Windows 的 AI 编码
 | 优先级 | 任务 | 说明 |
 |---|---|---|
 | P0 | 建立 origin 远程备份 | 平台与公开性由所有者决定；注意核心资产边界 |
-| P1 | 品牌文案批次清理 | 第 4 节 A 栏全部；compaction 模板直接改（不在加密管线）；docs 的 ~/.grok 路径优先 |
+| P1 | 品牌文案批次清理 | **批次一已完成**（第 4 节 A 栏全部）；批次二 = A2 栏新发现项（help/SKILL.md+bundle.rs、headless 文档、install 脚本、THIRD_PARTY_NOTICES） |
 | P1 | 重跑 `_audit_build.ps1` 刷新基线 | 改用 UTF-8 输出（当前 log 是 UTF-16 乱码），归档新快照 |
 | P2 | 剩余安全项 | LLM truncation 统一策略 → MCP override 收紧 → hooks 审计日志；HMAC/静态加密单独立项设计评审 |
 | P2 | CI 收紧 | test 去 continue-on-error（或独立 allow-fail 报告 job）、加 cargo-deny、加模板加密一致性校验 |

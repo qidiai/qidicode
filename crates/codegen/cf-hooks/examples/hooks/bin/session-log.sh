@@ -12,7 +12,7 @@ SESSION=$(echo "$INPUT" | grep -o '"sessionId":"[^"]*"' | sed 's/"sessionId":"//
 CWD=$(echo "$INPUT" | grep -o '"cwd":"[^"]*"' | sed 's/"cwd":"//;s/"$//')
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-LOG_FILE="${HOME}/.grok/session-audit.log"
+LOG_FILE="${HOME}/.qidi/session-audit.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
 echo "{\"timestamp\":\"${TIMESTAMP}\",\"event\":\"${EVENT}\",\"session\":\"${SESSION}\",\"cwd\":\"${CWD}\"}" >> "$LOG_FILE"
