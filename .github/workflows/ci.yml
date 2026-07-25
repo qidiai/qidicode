@@ -39,16 +39,8 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Configure rsproxy mirror
-        run: |
-          mkdir -p ~/.cargo
-          cat > ~/.cargo/config.toml << 'EOF'
-          [source.crates-io]
-          replace-with = "rsproxy-sparse"
-
-          [source.rsproxy-sparse]
-          registry = "sparse+https://rsproxy.cn/index/"
-          EOF
+      # rsproxy mirror comes from the committed .cargo/config.toml; no extra setup step
+      # (a heredoc-based step here previously broke on windows-latest PowerShell).
 
       - name: Check formatting
         run: cargo fmt --check
@@ -85,16 +77,7 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Configure rsproxy mirror
-        run: |
-          mkdir -p ~/.cargo
-          cat > ~/.cargo/config.toml << 'EOF'
-          [source.crates-io]
-          replace-with = "rsproxy-sparse"
-
-          [source.rsproxy-sparse]
-          registry = "sparse+https://rsproxy.cn/index/"
-          EOF
+      # rsproxy mirror comes from the committed .cargo/config.toml; no extra setup step
 
       - name: Run tests
         run: cargo test --workspace --no-fail-fast
