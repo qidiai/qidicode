@@ -1736,6 +1736,7 @@ dependencies = [
  "reqwest-middleware 0.4.2",
  "tokio",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]
@@ -1760,6 +1761,7 @@ name = "cf-circuit-breaker"
 version = "0.1.0"
 dependencies = [
  "log",
+ "tracing",
 ]
 
 [[package]]
@@ -2169,6 +2171,7 @@ dependencies = [
  "url",
  "webbrowser",
  "which",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -2594,6 +2597,7 @@ dependencies = [
  "serial_test",
  "toml",
  "tracing",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -2679,6 +2683,7 @@ dependencies = [
  "cf-sampler",
  "cf-sampling-types",
  "cf-sandbox",
+ "cf-secrets",
  "cf-shared",
  "cf-shell-base",
  "cf-shell-session-support",
@@ -2772,6 +2777,7 @@ dependencies = [
  "walkdir",
  "webbrowser",
  "windows 0.62.2",
+ "zeroize",
  "zstd",
 ]
 
@@ -2903,6 +2909,7 @@ dependencies = [
  "url",
  "uuid",
  "whoami",
+ "zeroize",
 ]
 
 [[package]]
@@ -3025,7 +3032,7 @@ dependencies = [
  "parking_lot",
  "pdf_oxide",
  "pulldown-cmark",
- "quick-xml 0.38.4",
+ "quick-xml 0.41.0",
  "regex",
  "reqwest 0.12.28",
  "schemars 1.2.1",
@@ -3235,6 +3242,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "windows 0.62.2",
+ "zeroize",
  "zstd",
 ]
 
@@ -9702,15 +9710,6 @@ name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
-
-[[package]]
-name = "quick-xml"
-version = "0.38.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b66c2058c55a409d601666cffe35f04333cf1013010882cec174a7467cd4e21c"
-dependencies = [
- "memchr",
-]
 
 [[package]]
 name = "quick-xml"

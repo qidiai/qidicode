@@ -14,7 +14,7 @@ QIDI Code 是一个基于 Rust 构建的终端 AI 编码工具，支持多模型
 - **MCP 协议**：支持 Model Context Protocol，可扩展外部工具
 - **会话管理**：会话持久化、恢复、导出 Markdown
 - **记忆系统**：跨会话记忆，支持 `.md` 笔记
-- **沙箱执行**：可选的进程沙箱（Unix Landlock / Windows Job Object）
+- **沙箱执行**：可选的进程沙箱。Unix 用 Landlock/Seatbelt（内核级文件/网络限制）；Windows 用 Job Object（约束较 Unix 弱，主要提供进程组 kill-on-close，无等价的文件系统 deny）；部分构建平台可能降级为 stub
 - **可配置**：分层配置（requirements > managed > user > project），TOML 格式
 
 ## 📦 安装
@@ -112,6 +112,13 @@ qidi mcp                      # 管理 MCP 服务器配置
 qidi plugin                   # 管理插件
 qidi memory                   # 管理跨会话记忆
 ```
+
+### 自动批准（YOLO）与沙箱
+
+`--yolo`（等价 `--always-approve`）让 agent 自动批准工具调用，适合 CI 等无人值守场景。
+
+- **全开 YOLO 请配合沙箱**：`qidi -p "..." --sandbox=readonly --yolo`。全开 YOLO 且沙箱未激活时无任何 OS 层防护，应显式确认风险后再用。
+- **工具白名单收敛风险**：权限层支持 YOLO 工具白名单（`cf-workspace` 的 [`YoloMode`](crates/codegen/cf-workspace/src/permission/yolo.rs)），仅放行选定工具（如 `read_file`、`grep`）自动批准，其余照常审批；无沙箱时优先用白名单而非全开。
 
 ## 🏗️ 项目结构
 

@@ -1,11 +1,13 @@
 # Contributing
 
-This repository does **not** accept external pull requests or unsolicited
-patches.
+This repository is a fork of the grok-build project, renamed and adapted as
+QIDI Code. The public tree is published for source transparency and local
+builds under the terms of the Apache License, Version 2.0 (see [`LICENSE`](LICENSE)).
 
-SpaceXAI develops this software internally. The public tree is published for
-source transparency and local builds under the terms of the Apache License,
-Version 2.0 (see [`LICENSE`](LICENSE)).
+## External contributions
+
+External pull requests are **not** accepted at this time. For feature requests
+or bug reports, open a GitHub issue.
 
 ## Security reports
 
@@ -15,5 +17,4 @@ Please report security issues through the process described in
 ## Licensing of this source
 
 By downloading or using this source, you agree that your use is governed by
-the Apache License, Version 2.0. No contributor license agreement is offered
-because external contributions are not accepted.
+the Apache License, Version 2.0.

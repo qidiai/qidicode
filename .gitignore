@@ -5,9 +5,16 @@ bin/protoc*.exe
 bin/protoc-*.zip
 bin/protoc-*.tar.gz
 reference/
-apps/agent-hackathon/node_modules/
-apps/agent-hackathon/dist/
-apps/agent-hackathon/.next/
-apps/agent-hackathon/build/
 *.phase3
 *.bak.phase3
+
+# External tool caches & local run artifacts (not part of the codebase)
+.hologram/
+hologram_graph.json
+hologram_graph_files.json
+mem-log/
+.codely/
+.codely-cli/
+_audit_*.ps1
+_audit_check.log
+CODELY.md
