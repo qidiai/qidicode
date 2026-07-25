@@ -152,7 +152,7 @@ pub struct ToolIdentity {
 ///   "version": 1,
 ///   "name": "read_file",
 ///   "kind": "read",
-///   "namespace": "grok_build",
+///   "namespace": "qidi_build",
 ///   "label": "Read",
 ///   "read_only": true,
 ///   "input": { "path": "..." }
@@ -245,7 +245,7 @@ mod tests {
     fn identity(kind: ToolKind) -> ToolIdentity {
         ToolIdentity {
             tool_kind: kind,
-            namespace: ToolNamespace::GrokBuild,
+            namespace: ToolNamespace::QidiBuild,
             presentation_name: kind.presentation_name(),
             read_only: kind.is_read_only(),
         }
@@ -264,9 +264,9 @@ mod tests {
         use strum::IntoEnumIterator;
         fn wire_and_pascal(ns: ToolNamespace) -> (&'static str, &'static str) {
             match ns {
-                ToolNamespace::GrokBuild => ("grok_build", "GrokBuild"),
-                ToolNamespace::GrokBuildConcise => ("grok_build_concise", "GrokBuildConcise"),
-                ToolNamespace::GrokBuildHashline => ("grok_build_hashline", "GrokBuildHashline"),
+                ToolNamespace::QidiBuild => ("qidi_build", "QidiBuild"),
+                ToolNamespace::QidiBuildConcise => ("qidi_build_concise", "QidiBuildConcise"),
+                ToolNamespace::QidiBuildHashline => ("qidi_build_hashline", "QidiBuildHashline"),
                 ToolNamespace::Codex => ("codex", "Codex"),
                 ToolNamespace::OpenCode => ("opencode", "OpenCode"),
                 ToolNamespace::MCP => ("mcp", "MCP"),
@@ -317,7 +317,7 @@ mod tests {
         assert_eq!(t["version"], serde_json::json!(TOOL_META_VERSION));
         assert_eq!(t["name"], "read_file");
         assert_eq!(t["kind"], "read");
-        assert_eq!(t["namespace"], "grok_build");
+        assert_eq!(t["namespace"], "qidi_build");
         assert_eq!(t["label"], "Read");
         assert_eq!(t["read_only"], true);
         assert_eq!(t["input"]["path"], "/a");

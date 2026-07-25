@@ -1,4 +1,4 @@
-﻿//! `search_tool` — discover MCP tools via BM25 keyword search.
+//! `search_tool` — discover MCP tools via BM25 keyword search.
 
 pub mod types;
 
@@ -213,7 +213,7 @@ impl crate::types::tool_metadata::ToolMetadata for SearchTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::QidiBuild
     }
 
     fn description_template(&self) -> &str {

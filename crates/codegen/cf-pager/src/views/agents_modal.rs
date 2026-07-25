@@ -211,12 +211,12 @@ pub struct AgentsModalState {
     pub persona_expanded: std::collections::HashSet<usize>,
 }
 /// Built-in agent names that should be shown to the user.
-/// Skips internal variants (GrokBuildConcise, GrokBuildPlan,
-/// GrokBuildPlanNoSubagents, GrokBuildAskUser, Codex, Opencode,
-/// CursorExtended, GrokBuildOrchestrator).
+/// Skips internal variants (QidiBuildConcise, QidiBuildPlan,
+/// QidiBuildPlanNoSubagents, QidiBuildAskUser, Codex, Opencode,
+/// CursorExtended, QidiBuildOrchestrator).
 fn user_visible_builtins() -> &'static [BuiltinAgentName] {
     &[
-        BuiltinAgentName::GrokBuild,
+        BuiltinAgentName::QidiBuild,
         BuiltinAgentName::GeneralPurpose,
         BuiltinAgentName::Explore,
         BuiltinAgentName::Plan,

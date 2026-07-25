@@ -1,4 +1,4 @@
-﻿//! `glob` tool — OpenCode architecture (`Tool` trait).
+//! `glob` tool — OpenCode architecture (`Tool` trait).
 //!
 //! File pattern matching using ripgrep's `--files` mode with glob filters.
 //! Returns matching file paths sorted by modification time (most recent first),
@@ -10,7 +10,7 @@ use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-use crate::implementations::grok_build::grep::ripgrep::rg_path;
+use crate::implementations::qidi_build::grep::ripgrep::rg_path;
 use crate::types::output::ToolOutput;
 #[allow(unused_imports)]
 use crate::types::resources::{

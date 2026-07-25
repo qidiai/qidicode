@@ -1,4 +1,4 @@
-﻿//! `memory_get` tool — new architecture (`Tool` trait).
+//! `memory_get` tool — new architecture (`Tool` trait).
 
 use std::sync::Arc;
 
@@ -39,7 +39,7 @@ impl crate::types::tool_metadata::ToolMetadata for MemoryGetImpl {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::QidiBuild
     }
 
     fn description_template(&self) -> &str {

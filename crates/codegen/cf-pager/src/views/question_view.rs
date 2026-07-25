@@ -1,4 +1,4 @@
-﻿//! Question view state and helpers.
+//! Question view state and helpers.
 //!
 //! When the agent calls `AskUserQuestion`, the pager takes over the prompt
 //! area and shows a structured question UI. This module contains:
@@ -18,7 +18,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use cf_acp_lib::AcpResult;
 use cf_markdown::StreamingMarkdownRenderer;
-pub use cf_tools::implementations::grok_build::ask_user_question::{
+pub use cf_tools::implementations::qidi_build::ask_user_question::{
     AskUserQuestionMode, Question, QuestionOption,
 };
 
@@ -827,11 +827,11 @@ impl QuestionViewState {
     /// - Notes included when freeform text is non-empty and selected.
     pub fn build_accepted_response(
         &self,
-    ) -> cf_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse
+    ) -> cf_tools::implementations::qidi_build::ask_user_question::AskUserQuestionExtResponse
     {
         use indexmap::IndexMap;
         use std::collections::HashMap;
-        use cf_tools::implementations::grok_build::ask_user_question::{
+        use cf_tools::implementations::qidi_build::ask_user_question::{
             AskUserQuestionExtResponse, QuestionAnnotation,
         };
 
@@ -914,7 +914,7 @@ impl QuestionViewState {
     /// double-send.
     pub fn send_ext_response(
         &mut self,
-        response: cf_tools::implementations::grok_build::ask_user_question::AskUserQuestionExtResponse,
+        response: cf_tools::implementations::qidi_build::ask_user_question::AskUserQuestionExtResponse,
     ) -> bool {
         let Some(tx) = self.response_tx.take() else {
             return false;

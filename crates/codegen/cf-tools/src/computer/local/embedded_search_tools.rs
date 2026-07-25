@@ -47,7 +47,7 @@ const UGREP_DEFAULT_ARGS: &[&str] = &[
 
 // Binaries embedded by build.rs when `QIDI_TOOLS_BUNDLE_{BFS,UGREP}_PATH` is set
 // (release pipeline). Self-extracted to `~/.qidi/vendor` on first use, mirroring
-// the ripgrep bundling in `grok_build::grep::ripgrep`.
+// the ripgrep bundling in `qidi_build::grep::ripgrep`.
 #[cfg(bundle_bfs)]
 const BFS_BYTES: &[u8] = include_bytes!(concat!(
     env!("OUT_DIR"),

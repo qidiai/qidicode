@@ -1,15 +1,15 @@
-﻿//! OpenCode `todowrite` tool — full-replace task list management.
+//! OpenCode `todowrite` tool — full-replace task list management.
 //!
 //! Follows the opencode convention: every call sends the **complete** todo list
 //! (full-replace semantics, no merge). Items carry `content`, `status`, and
 //! `priority` — no caller-supplied IDs.
 //!
 //! State is stored as `State<TodoState>` in Resources, shared with the
-//! grok_build todo infrastructure.
+//! qidi_build todo infrastructure.
 
 use std::fmt::Write;
 
-use crate::implementations::grok_build::todo::{TodoItem, TodoPriority, TodoState, TodoStatus};
+use crate::implementations::qidi_build::todo::{TodoItem, TodoPriority, TodoState, TodoStatus};
 use crate::types::output::{TodoWriteOutput, TodoWriteSuccess};
 use crate::types::requirements::{Expr, ToolRequirement};
 #[allow(unused_imports)]

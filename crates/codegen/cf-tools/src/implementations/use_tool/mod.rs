@@ -1,4 +1,4 @@
-﻿//! `use_tool` — dispatch to a discovered MCP tool.
+//! `use_tool` — dispatch to a discovered MCP tool.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -58,7 +58,7 @@ impl Default for UseToolParams {
     }
 }
 
-crate::register_resource!("grok_build", "UseTool", UseToolParams);
+crate::register_resource!("qidi_build", "UseTool", UseToolParams);
 
 /// Meta tool that dispatches calls to MCP tools discovered via `search_tool`.
 ///
@@ -275,7 +275,7 @@ impl crate::types::tool_metadata::ToolMetadata for UseTool {
     }
 
     fn tool_namespace(&self) -> ToolNamespace {
-        ToolNamespace::GrokBuild
+        ToolNamespace::QidiBuild
     }
 
     fn description_template(&self) -> &str {

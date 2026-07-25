@@ -1,4 +1,4 @@
-﻿//! Modal dialogs and the [`ActiveModal`] enum.
+//! Modal dialogs and the [`ActiveModal`] enum.
 //!
 //! [`ActiveModal`] wraps concrete modal instances for storage on
 //! `AgentView`. Picker-based variants (`CommandPalette`, `ArgPicker`,
@@ -394,7 +394,7 @@ pub fn default_palette_entries(sharing_enabled: bool) -> Vec<PaletteEntry> {
             command: PaletteCommand::Home,
         },
         PaletteEntry {
-            label: "Resume Session".into(),
+            label: "Resume session | 恢复会话".into(),
             shortcut: "/resume".into(),
             command: PaletteCommand::SlashCommand("/resume".into()),
         },
@@ -625,7 +625,7 @@ impl ActiveModal {
                 }
             }
             ActiveModal::CommandPalette { .. } => "Commands",
-            ActiveModal::SessionPicker { .. } => "Resume session",
+            ActiveModal::SessionPicker { .. } => "Resume session | 恢复会话",
             ActiveModal::ArgPicker {
                 command,
                 args_query,

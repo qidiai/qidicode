@@ -2,13 +2,13 @@
 //! Replaced with plain Rust types for workspace compilation.
 
 /// The tool name for the UPDATE_GOAL slash command.
-pub const UPDATE_GOAL_TOOL_NAME: &str = "grok_build:UpdateGoal";
+pub const UPDATE_GOAL_TOOL_NAME: &str = "qidi_build:UpdateGoal";
 
 /// The tool name for the CREATE_TASK slash command.
-pub const CREATE_TASK_TOOL_NAME: &str = "grok_build:CreateTask";
+pub const CREATE_TASK_TOOL_NAME: &str = "qidi_build:CreateTask";
 
 /// The tool name for the COMPLETE_TASK slash command.
-pub const COMPLETE_TASK_TOOL_NAME: &str = "grok_build:CompleteTask";
+pub const COMPLETE_TASK_TOOL_NAME: &str = "qidi_build:CompleteTask";
 
 /// A slash command configuration.
 #[derive(Debug, Clone)]
@@ -29,7 +29,7 @@ impl SlashCommandConfig {
 }
 
 /// Image generation tool name.
-pub const IMAGE_GEN_TOOL_NAME: &str = "grok_build:ImageGen";
+pub const IMAGE_GEN_TOOL_NAME: &str = "qidi_build:ImageGen";
 
 /// Imagine command name.
 pub const IMAGINE_COMMAND_NAME: &str = "/imagine";
@@ -41,7 +41,7 @@ pub fn imagine_instruction() -> String { "Generate an image from a text descript
 pub fn imagine_usage_message() -> String { "Usage: /imagine <description>".to_string() }
 
 /// Image to video tool name.
-pub const IMAGE_TO_VIDEO_TOOL_NAME: &str = "grok_build:ImageToVideo";
+pub const IMAGE_TO_VIDEO_TOOL_NAME: &str = "qidi_build:ImageToVideo";
 
 /// Imagine video command name.
 pub const IMAGINE_VIDEO_COMMAND_NAME: &str = "/imagine-video";
@@ -53,9 +53,9 @@ pub fn imagine_video_instruction() -> String { "Generate a video from an image."
 pub fn imagine_video_usage_message() -> String { "Usage: /imagine-video <image_url> <description>".to_string() }
 
 /// Loop scheduler tool name.
-pub const SCHEDULER_CREATE_TOOL_NAME: &str = "grok_build:SchedulerCreate";
+pub const SCHEDULER_CREATE_TOOL_NAME: &str = "qidi_build:SchedulerCreate";
 
-pub const LOOP_SCHEDULE_TOOL_NAME: &str = "grok_build:LoopSchedule";
+pub const LOOP_SCHEDULE_TOOL_NAME: &str = "qidi_build:LoopSchedule";
 
 /// Loop usage message.
 pub fn loop_usage_message() -> String { "Usage: /loop <command> <interval>".to_string() }

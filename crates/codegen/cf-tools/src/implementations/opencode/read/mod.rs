@@ -1,4 +1,4 @@
-﻿//! OpenCode `read` tool — reads files, directories, images, and PDFs.
+//! OpenCode `read` tool — reads files, directories, images, and PDFs.
 //!
 //! Follows the opencode parameter naming conventions (`filePath`, `offset`,
 //! `limit`) and wraps output in XML tags (`<path>`, `<type>`, `<content>`).
@@ -216,7 +216,7 @@ impl cf_tool_runtime::Tool for ReadTool {
         // compression — raw bytes (truncated or non-endpoint formats)
         // must never reach the conversation.
         if let Ok(meta) =
-            crate::implementations::grok_build::read_file::bytes_to_metadata(&file_bytes)
+            crate::implementations::qidi_build::read_file::bytes_to_metadata(&file_bytes)
             && meta.is_image()
         {
             return Ok(crate::implementations::read_file::image::image_read_output(
@@ -508,7 +508,7 @@ mod tests {
     fn test_resources(cwd: &std::path::Path) -> Resources {
         let mut resources = Resources::new();
         resources.insert(Cwd(cwd.to_path_buf()));
-        resources.insert(FileSystem(Arc::new(LocalFs)));
+        resources.insert(FileSystem(Arc::new(LocalFs::unconfined())));
         resources.insert(NotificationHandle(ToolNotificationHandle::noop()));
         resources
     }

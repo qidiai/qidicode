@@ -21,18 +21,18 @@ pub fn claude_names_for(_version: &str) -> Vec<String> {
     CLAUDE_NAMES.iter().map(|s| s.to_string()).collect()
 }
 
-/// For grok model names
+/// For QIDI model names
 pub const QIDI_NAMES: &[&str] = &[
     "grok-2-latest",
     "grok-2-vision-latest",
 ];
 
-pub fn grok_names_for(_version: &str) -> Vec<String> {
+pub fn qidi_names_for(_version: &str) -> Vec<String> {
     QIDI_NAMES.iter().map(|s| s.to_string()).collect()
 }
 /// The toolset a tool belongs to.
 ///
-/// Serializes to snake_case (`grok_build`, `mcp`, …) for the
+/// Serializes to snake_case (`qidi_build`, `mcp`, …) for the
 /// canonical tool `_meta` wire contract. PascalCase aliases are accepted on
 /// deserialize so legacy persisted/manifest values still parse. The
 /// `Display` impl remains PascalCase for existing qualified id strings
@@ -51,12 +51,12 @@ pub fn grok_names_for(_version: &str) -> Vec<String> {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ToolNamespace {
-    #[serde(alias = "GrokBuild")]
-    GrokBuild,
-    #[serde(alias = "GrokBuildConcise")]
-    GrokBuildConcise,
-    #[serde(alias = "GrokBuildHashline")]
-    GrokBuildHashline,
+    #[serde(alias = "QidiBuild", alias = "QidiBuild")]
+    QidiBuild,
+    #[serde(alias = "QidiBuildConcise", alias = "QidiBuildConcise")]
+    QidiBuildConcise,
+    #[serde(alias = "QidiBuildHashline", alias = "QidiBuildHashline")]
+    QidiBuildHashline,
     #[serde(alias = "Codex")]
     Codex,
     #[serde(rename = "opencode", alias = "OpenCode", alias = "open_code")]

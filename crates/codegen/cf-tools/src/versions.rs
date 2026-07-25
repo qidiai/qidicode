@@ -587,7 +587,7 @@ mod tests {
 
     #[test]
     fn concise_namespace_not_managed() {
-        // GrokBuildConcise tools should NOT be version-managed.
+        // QidiBuildConcise tools should NOT be version-managed.
         assert!(!is_version_managed("cf_tools:run_terminal_cmd"));
         let v = resolve_version("current", "cf_tools:run_terminal_cmd", None).unwrap();
         assert_eq!(v, None);

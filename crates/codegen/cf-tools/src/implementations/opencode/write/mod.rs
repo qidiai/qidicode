@@ -1,4 +1,4 @@
-﻿//! OpenCode `write` tool — writes entire file contents to disk.
+//! OpenCode `write` tool — writes entire file contents to disk.
 //!
 //! Creates parent directories as needed and emits `FileWritten` notifications.
 
@@ -212,7 +212,7 @@ mod tests {
     fn test_resources(cwd: &std::path::Path) -> Resources {
         let mut resources = Resources::new();
         resources.insert(Cwd(cwd.to_path_buf()));
-        resources.insert(FileSystem(Arc::new(LocalFs)));
+        resources.insert(FileSystem(Arc::new(LocalFs::unconfined())));
         resources.insert(NotificationHandle(ToolNotificationHandle::noop()));
         resources
     }
@@ -436,7 +436,7 @@ mod tests {
     #[tokio::test]
     async fn missing_cwd_resource() {
         let mut resources = Resources::new();
-        resources.insert(FileSystem(Arc::new(LocalFs)));
+        resources.insert(FileSystem(Arc::new(LocalFs::unconfined())));
         resources.insert(NotificationHandle(ToolNotificationHandle::noop()));
         // No Cwd inserted
 

@@ -34,7 +34,7 @@ pub struct SkillOutput {
 }
 
 // Old `SkillToolImpl` + `impl Tool` deleted.
-// New implementation is in `grok_build/skill/`.
+// New implementation is in `qidi_build/skill/`.
 
 /// Build the formatted skill message shown to the model.
 ///
@@ -478,7 +478,7 @@ pub fn extract_skill_body(content: &str) -> String {
 ///
 /// Public entrypoint for the shell crate to load skill content at
 /// prompt-assembly time (the new zero-round-trip path). The private
-/// `load_skill_content` in `grok_build/skill/mod.rs` is a duplicate
+/// `load_skill_content` in `qidi_build/skill/mod.rs` is a duplicate
 /// of this.
 pub async fn load_skill_content(skill: &SkillInfo) -> Result<String, String> {
     let path = std::path::Path::new(&skill.path);

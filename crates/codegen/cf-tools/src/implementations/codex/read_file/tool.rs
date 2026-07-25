@@ -284,7 +284,7 @@ mod tests {
     fn test_resources(cwd: &std::path::Path) -> Resources {
         let mut resources = Resources::new();
         resources.insert(Cwd(cwd.to_path_buf()));
-        resources.insert(FileSystem(Arc::new(LocalFs)));
+        resources.insert(FileSystem(Arc::new(LocalFs::unconfined())));
         resources.insert(NotificationHandle(ToolNotificationHandle::noop()));
         resources
     }

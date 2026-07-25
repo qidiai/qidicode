@@ -34,7 +34,7 @@ pub use config_validation::{
     ToolConfigEntryError, ToolConfigEntryErrorKind, parse_params_json, validate_name_override,
 };
 pub use slash_commands::UPDATE_GOAL_TOOL_NAME;
-pub use tool::{ToolNamespace, ToolKind, claude_names_for, grok_names_for, kind_for};
+pub use tool::{ToolNamespace, ToolKind, claude_names_for, qidi_names_for, kind_for};
 pub use tool_io::ToolInput;
 pub use tool_io::MCPToolInput;
 pub use output::ToolOutput;

@@ -39,7 +39,7 @@ pub trait ToolMetadata: Send + Sync {
     /// default `is_read_only()` derivation.
     fn kind(&self) -> ToolKind;
 
-    /// Namespace grouping (GrokBuild, Cursor, OpenCode, ...).
+    /// Namespace grouping (QidiBuild, Cursor, OpenCode, ...).
     /// Used to build the fully-qualified tool ID at registration time
     /// (e.g., `"cf_tools:grep"`).
     fn tool_namespace(&self) -> ToolNamespace;

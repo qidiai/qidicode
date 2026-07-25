@@ -1,4 +1,4 @@
-﻿//! Cursor project-rule reminders attached after successful file reads.
+//! Cursor project-rule reminders attached after successful file reads.
 
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
@@ -440,7 +440,7 @@ mod tests {
 
     use super::*;
     use crate::computer::local::LocalFs;
-    use crate::implementations::grok_build::read_file::{
+    use crate::implementations::qidi_build::read_file::{
         ReadFileInput, ReadFileParams, ReadFileTool as GrokReadFileTool,
     };
     use crate::notification::types::ToolNotificationHandle;
@@ -454,7 +454,7 @@ mod tests {
     fn resources(root: &Path) -> SharedResources {
         let mut resources = Resources::new();
         resources.insert(Cwd(root.to_path_buf()));
-        resources.insert(FileSystem(Arc::new(LocalFs)));
+        resources.insert(FileSystem(Arc::new(LocalFs::unconfined())));
         resources.insert(NotificationHandle(ToolNotificationHandle::noop()));
         resources.insert(TemplateRenderer::new(
             [(ToolKind::Search, "grep".to_owned())]
@@ -468,7 +468,7 @@ mod tests {
     fn resources_with_grok_rules_on_read(root: &Path) -> SharedResources {
         let mut resources = Resources::new();
         resources.insert(Cwd(root.to_path_buf()));
-        resources.insert(FileSystem(Arc::new(LocalFs)));
+        resources.insert(FileSystem(Arc::new(LocalFs::unconfined())));
         resources.insert(NotificationHandle(ToolNotificationHandle::noop()));
         resources.insert(TemplateRenderer::new(
             [(ToolKind::Search, "grep".to_owned())]

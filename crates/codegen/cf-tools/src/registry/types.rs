@@ -1,7 +1,7 @@
 use crate::{
     computer::types::{AsyncFileSystem, TerminalBackend},
     implementations::{
-        codex, grok_build, grok_build_concise, grok_build_hashline, opencode,
+        codex, qidi_build, qidi_build_concise, qidi_build_hashline, opencode,
         skills::types::SkillInfo,
     },
     notification::ToolNotificationHandle,
@@ -24,6 +24,41 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
+
+/// Reserved built-in tool names that MCP tools must not shadow.
+/// MCP tools are always qualified as `server__tool`, so a bare
+/// builtin name in the MCP namespace is a shadowing attempt.
+const RESERVED_BUILTIN_TOOL_NAMES: &[&str] = &[
+    "bash",
+    "read_file",
+    "write_file",
+    "edit",
+    "list_dir",
+    "grep",
+    "glob",
+    "search_replace",
+    "run_terminal_cmd",
+    "task",
+    "task_output",
+    "kill_task",
+    "todo",
+    "enter_plan_mode",
+    "exit_plan_mode",
+    "update_goal",
+    "ask_user",
+    "image_gen",
+    "video_gen",
+    "image_edit",
+    "web_search",
+    "web_fetch",
+    "monitor",
+    "lsp",
+    "skill",
+    "use_tool",
+    "memory_search",
+    "memory_get",
+    "search_tool",
+];
 /// Process-global registry of external "tool packs" — functions that
 /// contribute additional tool registrations into every
 /// [`ToolRegistryBuilder::new`].
@@ -48,6 +83,20 @@ fn tool_packs() -> &'static Mutex<Vec<ToolPack>> {
 /// twice registers its tools twice).
 pub fn register_tool_pack(pack: ToolPack) {
     tool_packs().lock().push(pack);
+}
+
+/// SECURITY: Wrap tool output content in `<tool_output>` tags to help the LLM
+/// distinguish between trusted system instructions and potentially untrusted
+/// data from tool results (file contents, command output, web pages).
+/// This mitigates indirect prompt injection by making the content boundary
+/// explicit to the model.
+fn format_tool_output_for_prompt(content: &str) -> String {
+    // Don't wrap short error messages or empty content — only wrap content
+    // that could plausibly contain injection payloads (longer than ~50 chars).
+    if content.len() < 50 {
+        return content.to_string();
+    }
+    format!("<tool_output>\n{content}\n</tool_output>")
 }
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolConfig {
@@ -237,7 +286,7 @@ pub struct SessionContext {
     /// scheduler actor instead of spawning its own, so scheduled tasks survive
     /// subagent exit.
     pub parent_scheduler_handle:
-        Option<crate::implementations::grok_build::scheduler::types::SchedulerHandle>,
+        Option<crate::implementations::qidi_build::scheduler::types::SchedulerHandle>,
     /// Available skills for the Skill tool and description templates.
     pub skills: Vec<SkillInfo>,
     /// File path for persisting Resources state across restarts.
@@ -258,7 +307,7 @@ pub struct SessionContext {
     /// Optional web fetch configuration. When `Enabled`, a `WebFetchClient`
     /// is created and injected into `Resources` so the `web_fetch` tool can
     /// fetch URLs. When `Disabled` (default), the tool is not registered.
-    pub web_fetch_config: crate::implementations::grok_build::web_fetch::WebFetchConfig,
+    pub web_fetch_config: crate::implementations::qidi_build::web_fetch::WebFetchConfig,
     /// Optional shared LSP handle — created once by the caller (shell),
     /// passed to every session. Same pattern as `fs` and `backend`.
     /// When `Some`, inserted into `Resources` so `LspTool` can use it.
@@ -267,17 +316,17 @@ pub struct SessionContext {
     /// is created and injected into `Resources` so the `image_gen` tool can
     /// call the xAI Imagine API. When `Disabled` (default), the tool is not
     /// registered and image generation is unavailable.
-    pub image_gen_config: crate::implementations::grok_build::image_gen::ImageGenConfig,
+    pub image_gen_config: crate::implementations::qidi_build::image_gen::ImageGenConfig,
     /// Optional video generation configuration. When `Enabled`, a `VideoGenClient`
     /// is created and injected into `Resources` so the `video_gen` tool can
     /// call the xAI Video Generation API. When `Disabled` (default), the tool is not
     /// registered and video generation is unavailable.
-    pub video_gen_config: crate::implementations::grok_build::video_gen::VideoGenConfig,
+    pub video_gen_config: crate::implementations::qidi_build::video_gen::VideoGenConfig,
     /// Optional deploy service configuration. When enabled, the
     /// `deploy_app` tool connects to the service at call time using the shared
     /// API key provider.
     pub app_builder_deployer_config:
-        crate::implementations::grok_build::deploy_app::AppBuilderDeployerConfig,
+        crate::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig,
     /// Dynamic API key provider for tool HTTP clients.
     /// When set, clients resolve the API key per-request from this provider
     /// instead of using the key baked into their config at construction time.
@@ -660,39 +709,39 @@ impl ToolRegistryBuilder {
             reminders: Vec::new(),
             shared_local_registry: None,
         };
-        b.register_with_params::<grok_build::BashTool, grok_build::bash::BashParams>();
-        b.register_with_params::<grok_build::ReadFileTool, grok_build::read_file::ReadFileParams>();
+        b.register_with_params::<qidi_build::BashTool, qidi_build::bash::BashParams>();
+        b.register_with_params::<qidi_build::ReadFileTool, qidi_build::read_file::ReadFileParams>();
         b.register_with_params::<
-                grok_build::SearchReplaceTool,
-                grok_build::search_replace::SearchReplaceParams,
+                qidi_build::SearchReplaceTool,
+                qidi_build::search_replace::SearchReplaceParams,
             >();
-        b.register_with_params::<grok_build::ListDirTool, grok_build::list_dir::ListDirParams>();
-        b.register_with_params::<grok_build::GrepTool, grok_build::grep::GrepParams>();
-        b.register::<grok_build::KillTaskTool>();
-        b.register::<grok_build::KillTerminalCommandTool>();
-        b.register::<grok_build::TodoWriteTool>();
-        b.register::<grok_build::UpdateGoalTool>();
-        b.register::<grok_build::TaskOutputTool>();
-        b.register::<grok_build::GetTerminalCommandOutputTool>();
-        b.register::<grok_build::WaitTasksTool>();
-        b.register::<grok_build::TaskTool>();
-        b.register::<grok_build::WebSearchTool>();
-        b.register_with_params::<grok_build::WebFetchTool, grok_build::web_fetch::WebFetchParams>();
-        b.register::<grok_build::LspTool>();
-        b.register::<grok_build::ImageGenTool>();
-        b.register::<grok_build::ImageEditTool>();
-        b.register::<grok_build::ImageToVideoTool>();
-        b.register::<grok_build::ReferenceToVideoTool>();
-        b.register::<grok_build::EnterPlanModeTool>();
-        b.register::<grok_build::ExitPlanModeTool>();
+        b.register_with_params::<qidi_build::ListDirTool, qidi_build::list_dir::ListDirParams>();
+        b.register_with_params::<qidi_build::GrepTool, qidi_build::grep::GrepParams>();
+        b.register::<qidi_build::KillTaskTool>();
+        b.register::<qidi_build::KillTerminalCommandTool>();
+        b.register::<qidi_build::TodoWriteTool>();
+        b.register::<qidi_build::UpdateGoalTool>();
+        b.register::<qidi_build::TaskOutputTool>();
+        b.register::<qidi_build::GetTerminalCommandOutputTool>();
+        b.register::<qidi_build::WaitTasksTool>();
+        b.register::<qidi_build::TaskTool>();
+        b.register::<qidi_build::WebSearchTool>();
+        b.register_with_params::<qidi_build::WebFetchTool, qidi_build::web_fetch::WebFetchParams>();
+        b.register::<qidi_build::LspTool>();
+        b.register::<qidi_build::ImageGenTool>();
+        b.register::<qidi_build::ImageEditTool>();
+        b.register::<qidi_build::ImageToVideoTool>();
+        b.register::<qidi_build::ReferenceToVideoTool>();
+        b.register::<qidi_build::EnterPlanModeTool>();
+        b.register::<qidi_build::ExitPlanModeTool>();
         b.register_with_params::<
-                grok_build::AskUserQuestionTool,
-                grok_build::ask_user_question::AskUserQuestionParams,
+                qidi_build::AskUserQuestionTool,
+                qidi_build::ask_user_question::AskUserQuestionParams,
             >();
-        b.register::<grok_build::MonitorTool>();
-        b.register::<grok_build::SchedulerCreateTool>();
-        b.register::<grok_build::SchedulerDeleteTool>();
-        b.register::<grok_build::SchedulerListTool>();
+        b.register::<qidi_build::MonitorTool>();
+        b.register::<qidi_build::SchedulerCreateTool>();
+        b.register::<qidi_build::SchedulerDeleteTool>();
+        b.register::<qidi_build::SchedulerListTool>();
         b.register::<codex::apply_patch::ApplyPatchTool>();
         b.register::<codex::list_dir::CodexListDirTool>();
         b.register::<codex::grep_files::CodexGrepFilesTool>();
@@ -713,28 +762,28 @@ impl ToolRegistryBuilder {
                 crate::implementations::use_tool::UseToolParams,
             >();
         b.register_with_params::<
-                grok_build_concise::ReadFileConciseTool,
-                grok_build::read_file::ReadFileParams,
+                qidi_build_concise::ReadFileConciseTool,
+                qidi_build::read_file::ReadFileParams,
             >();
         b.register_with_params::<
-                grok_build_concise::SearchReplaceConciseTool,
-                grok_build::search_replace::SearchReplaceParams,
+                qidi_build_concise::SearchReplaceConciseTool,
+                qidi_build::search_replace::SearchReplaceParams,
             >();
         b.register_with_params::<
-                grok_build_concise::BashConciseTool,
-                grok_build::bash::BashParams,
+                qidi_build_concise::BashConciseTool,
+                qidi_build::bash::BashParams,
             >();
         b.register_with_params::<
-                grok_build_hashline::HashlineReadTool,
-                grok_build_hashline::config::HashlineSchemeParams,
+                qidi_build_hashline::HashlineReadTool,
+                qidi_build_hashline::config::HashlineSchemeParams,
             >();
         b.register_with_params::<
-                grok_build_hashline::HashlineEditTool,
-                grok_build_hashline::config::HashlineSchemeParams,
+                qidi_build_hashline::HashlineEditTool,
+                qidi_build_hashline::config::HashlineSchemeParams,
             >();
         b.register_with_params::<
-                grok_build_hashline::HashlineGrepTool,
-                grok_build_hashline::config::HashlineSchemeParams,
+                qidi_build_hashline::HashlineGrepTool,
+                qidi_build_hashline::config::HashlineSchemeParams,
             >();
         b.register_reminder(crate::reminders::LspDiagnosticsReminder);
         b.register_reminder(crate::reminders::TaskCompletionReminder);
@@ -1004,7 +1053,7 @@ impl ToolRegistryBuilder {
             resources.insert(lsp);
         }
         if ctx.image_gen_config.has_credentials() {
-            match crate::implementations::grok_build::image_gen::ImageGenClient::new(
+            match crate::implementations::qidi_build::image_gen::ImageGenClient::new(
                 &ctx.image_gen_config,
                 ctx.api_key_provider.clone(),
             ) {
@@ -1018,7 +1067,7 @@ impl ToolRegistryBuilder {
             }
         }
         if ctx.video_gen_config.is_enabled() {
-            match crate::implementations::grok_build::video_gen::VideoGenClient::new(
+            match crate::implementations::qidi_build::video_gen::VideoGenClient::new(
                 &ctx.video_gen_config,
                 ctx.api_key_provider.clone(),
             ) {
@@ -1031,10 +1080,10 @@ impl ToolRegistryBuilder {
                 }
             }
         }
-        if let crate::implementations::grok_build::web_fetch::WebFetchConfig::Enabled { params } =
+        if let crate::implementations::qidi_build::web_fetch::WebFetchConfig::Enabled { params } =
             &ctx.web_fetch_config
         {
-            match crate::implementations::grok_build::web_fetch::WebFetchClient::new(params) {
+            match crate::implementations::qidi_build::web_fetch::WebFetchClient::new(params) {
                 Ok(client) => {
                     resources.insert(client);
                 }
@@ -1043,7 +1092,7 @@ impl ToolRegistryBuilder {
                 }
             }
         }
-        let concise_ns = crate::types::tool::ToolNamespace::GrokBuildConcise.to_string();
+        let concise_ns = crate::types::tool::ToolNamespace::QidiBuildConcise.to_string();
         let has_concise_tools = config.tools.iter().any(|tc| {
             self.tools
                 .get(&tc.id)
@@ -1053,14 +1102,14 @@ impl ToolRegistryBuilder {
             resources.insert(crate::types::resources::SystemRemindersEnabled(false));
         }
         resources.register_state::<crate::reminders::task_completion::ReportedTaskCompletions>();
-        resources.register_state::<crate::implementations::grok_build::todo::TodoState>();
+        resources.register_state::<crate::implementations::qidi_build::todo::TodoState>();
         resources.register_state::<crate::types::resources::WebCitationCounter>();
         resources
             .register_state::<
                 crate::implementations::cursor_rules_on_read::CursorRulesOnReadTracker,
             >();
         resources
-            .register_state::<crate::implementations::grok_build::scheduler::types::SchedulerState>(
+            .register_state::<crate::implementations::qidi_build::scheduler::types::SchedulerState>(
             );
         for entry in self.tools.values() {
             (entry.register_params)(&mut resources);
@@ -1175,7 +1224,7 @@ impl ToolRegistryBuilder {
                 let (scheduler_cmd_tx, scheduler_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
                 let cancel_token = tokio_util::sync::CancellationToken::new();
                 resources.insert(
-                    crate::implementations::grok_build::scheduler::types::SchedulerHandle(
+                    crate::implementations::qidi_build::scheduler::types::SchedulerHandle(
                         scheduler_cmd_tx,
                     ),
                 );
@@ -1183,7 +1232,7 @@ impl ToolRegistryBuilder {
             };
         let shared_resources = resources.into_shared();
         if let (Some(cmd_rx), Some(cancel_token)) = (scheduler_cmd_rx, &scheduler_cancel_token) {
-            let actor = crate::implementations::grok_build::scheduler::actor::SchedulerActor {
+            let actor = crate::implementations::qidi_build::scheduler::actor::SchedulerActor {
                 resources: shared_resources.clone(),
                 notification_handle: scheduler_notification_handle,
                 cmd_rx,
@@ -1609,6 +1658,11 @@ impl FinalizedToolset {
             Vec::new()
         };
         let prompt_text = output.to_prompt_format();
+        // SECURITY: Wrap tool output in untrusted-content tags to help the LLM
+        // distinguish between system instructions and potentially untrusted data
+        // from tool results (file contents, command output, web pages). This
+        // mitigates indirect prompt injection by making the boundary explicit.
+        let prompt_text = format_tool_output_for_prompt(&prompt_text);
         let prompt_text = crate::reminders::format_with_reminders(
             prompt_text,
             reminders,
@@ -1675,6 +1729,14 @@ impl FinalizedToolset {
         if tools.iter().any(|t| t.client_name == name) {
             return Err(cf_tool_runtime::ToolError::invalid_arguments(format!(
                 "Tool already registered: {name}"
+            )));
+        }
+        // Security: reject MCP tool names that shadow built-in tools.
+        // Built-in tool names never contain the MCP delimiter "__";
+        // if an MCP tool name matches a known builtin, reject it.
+        if RESERVED_BUILTIN_TOOL_NAMES.iter().any(|&builtin| builtin == name) {
+            return Err(cf_tool_runtime::ToolError::invalid_arguments(format!(
+                "MCP tool name '{name}' shadows a reserved built-in tool name"
             )));
         }
         let description = tool.description_template().to_string();
@@ -1847,33 +1909,33 @@ fn explain_requirement_failure(
                 .with_category("requirements")
         }
         "cf_tools:get_task_output" => {
-            let has_grok_build_bash = has_tool_with_bool_param(
+            let has_qidi_build_bash = has_tool_with_bool_param(
                 proposed,
-                "GrokBuild",
+                "QidiBuild",
                 "run_terminal_cmd",
                 "enabled_background",
                 true,
             );
-            let has_grok_build_concise_bash = has_tool_with_bool_param(
+            let has_qidi_build_concise_bash = has_tool_with_bool_param(
                 proposed,
-                "GrokBuildConcise",
+                "QidiBuildConcise",
                 "run_terminal_cmd",
                 "enabled_background",
                 true,
             );
             let has_opencode_bash = has_tool(proposed, "OpenCode", "bash");
-            let has_task = has_tool(proposed, "GrokBuild", "task");
+            let has_task = has_tool(proposed, "QidiBuild", "task");
             let mut notes = vec![];
-            if has_tool(proposed, "GrokBuild", "run_terminal_cmd")
-                && !has_grok_build_bash
+            if has_tool(proposed, "QidiBuild", "run_terminal_cmd")
+                && !has_qidi_build_bash
             {
                 notes
                     .push(
                         "cf_tools:run_terminal_cmd is present but enabled_background=false",
                     );
             }
-            if has_tool(proposed, "GrokBuildConcise", "run_terminal_cmd")
-                && !has_grok_build_concise_bash
+            if has_tool(proposed, "QidiBuildConcise", "run_terminal_cmd")
+                && !has_qidi_build_concise_bash
             {
                 notes
                     .push(
@@ -1882,7 +1944,7 @@ fn explain_requirement_failure(
             }
             let mut message = "get_task_output requires a background-capable bash tool (cf_tools:run_terminal_cmd or cf_tools:run_terminal_cmd with enabled_background=true), OpenCode:bash, or cf_tools:task"
                 .to_string();
-            let has_provider = has_grok_build_bash || has_grok_build_concise_bash
+            let has_provider = has_qidi_build_bash || has_qidi_build_concise_bash
                 || has_opencode_bash || has_task;
             if !has_provider && !notes.is_empty() {
                 message.push_str(&format!("; {}", notes.join("; ")));
@@ -2006,14 +2068,14 @@ mod tests {
             memory_backend: None,
             web_search_config: crate::implementations::web_search::WebSearchConfig::default(),
             web_fetch_config:
-                crate::implementations::grok_build::web_fetch::WebFetchConfig::default(),
+                crate::implementations::qidi_build::web_fetch::WebFetchConfig::default(),
             lsp: None,
             image_gen_config:
-                crate::implementations::grok_build::image_gen::ImageGenConfig::default(),
+                crate::implementations::qidi_build::image_gen::ImageGenConfig::default(),
             video_gen_config:
-                crate::implementations::grok_build::video_gen::VideoGenConfig::default(),
+                crate::implementations::qidi_build::video_gen::VideoGenConfig::default(),
             app_builder_deployer_config:
-                crate::implementations::grok_build::deploy_app::AppBuilderDeployerConfig::default(),
+                crate::implementations::qidi_build::deploy_app::AppBuilderDeployerConfig::default(),
             api_key_provider: None,
             auth_provider: None,
             attribution_callback: None,
@@ -2026,7 +2088,7 @@ mod tests {
     /// Before the fix, the `kind_params` builder used `if map.is_empty()` to
     /// seed identity param-name mappings only from the **first** tool of each
     /// kind. When `codex:apply_patch` (`ToolKind::Edit`, input: `{ patch }`)
-    /// appeared before `grok_build:search_replace` (`ToolKind::Edit`, input:
+    /// appeared before `qidi_build:search_replace` (`ToolKind::Edit`, input:
     /// `{ file_path, old_string, new_string, replace_all }`), the renderer's
     /// context had `params.edit = { "patch": "patch" }` — missing
     /// `replace_all`. At runtime, the template `${{ params.edit.replace_all }}`
@@ -2151,13 +2213,13 @@ mod tests {
             "rendered description must not contain raw template placeholders"
         );
     }
-    /// Smoke test: finalize the full GrokBuild toolset and verify every
+    /// Smoke test: finalize the full QidiBuild toolset and verify every
     /// tool description is fully rendered -- no unresolved MiniJinja vars,
     /// no stale `{max_*}` placeholders, no empty tool-name references from
     /// missing conditional guards.
     #[tokio::test]
     async fn full_toolset_descriptions_render_cleanly() {
-        use crate::implementations::grok_build::{
+        use crate::implementations::qidi_build::{
             DEPLOY_APP_TOOL_NAME, IMAGE_GEN_TOOL_NAME, IMAGE_TO_VIDEO_TOOL_NAME,
             REFERENCE_TO_VIDEO_TOOL_NAME, SCHEDULER_CREATE_TOOL_NAME, SCHEDULER_DELETE_TOOL_NAME,
         };
@@ -2502,7 +2564,7 @@ mod tests {
             other => panic!("Expected SearchReplace(NoMatchesFound), got: {other:?}"),
         }
     }
-    /// Verify GrokBuildConcise tools can be finalized and produce concise output.
+    /// Verify QidiBuildConcise tools can be finalized and produce concise output.
     #[tokio::test]
     async fn test_concise_namespace_tools() {
         use crate::types::output::{ReadFileOutput, ToolOutput};
@@ -2543,9 +2605,9 @@ mod tests {
                     behavior_version: None,
                     kind: None,
                 },
-                ToolConfig::for_tool::<grok_build::GrepTool>(),
-                ToolConfig::for_tool::<grok_build::KillTaskTool>(),
-                ToolConfig::for_tool::<grok_build::TaskOutputTool>(),
+                ToolConfig::for_tool::<qidi_build::GrepTool>(),
+                ToolConfig::for_tool::<qidi_build::KillTaskTool>(),
+                ToolConfig::for_tool::<qidi_build::TaskOutputTool>(),
                 ToolConfig {
                     id: "cf_tools:list_dir".to_string(),
                     params: None,
@@ -2984,7 +3046,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
-            tools: vec![ToolConfig::for_tool::<grok_build::ReadFileTool>()],
+            tools: vec![ToolConfig::for_tool::<qidi_build::ReadFileTool>()],
             behavior_preset: None,
         };
         let ctx = test_session_context(&tmp);
@@ -3017,7 +3079,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
-            tools: vec![ToolConfig::for_tool::<grok_build::ReadFileTool>()],
+            tools: vec![ToolConfig::for_tool::<qidi_build::ReadFileTool>()],
             behavior_preset: None,
         };
         let ctx = test_session_context(&tmp);
@@ -3131,7 +3193,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
-            tools: vec![ToolConfig::for_tool::<grok_build::ReadFileTool>()],
+            tools: vec![ToolConfig::for_tool::<qidi_build::ReadFileTool>()],
             behavior_preset: None,
         };
         let ctx = test_session_context(&tmp);
@@ -3159,8 +3221,8 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![
-                ToolConfig::for_tool::<grok_build::ReadFileTool>(),
-                ToolConfig::for_tool::<grok_build::GrepTool>(),
+                ToolConfig::for_tool::<qidi_build::ReadFileTool>(),
+                ToolConfig::for_tool::<qidi_build::GrepTool>(),
             ],
             behavior_preset: None,
         };
@@ -4034,8 +4096,8 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![
-                ToolConfig::for_tool::<grok_build::EnterPlanModeTool>(),
-                ToolConfig::for_tool::<grok_build::ExitPlanModeTool>(),
+                ToolConfig::for_tool::<qidi_build::EnterPlanModeTool>(),
+                ToolConfig::for_tool::<qidi_build::ExitPlanModeTool>(),
             ],
             behavior_preset: None,
         };
@@ -4086,9 +4148,9 @@ mod tests {
                     behavior_version: None,
                     kind: None,
                 },
-                ToolConfig::for_tool::<grok_build_hashline::HashlineEditTool>(),
-                ToolConfig::for_tool::<grok_build_hashline::HashlineGrepTool>(),
-                ToolConfig::for_tool::<grok_build::ListDirTool>(),
+                ToolConfig::for_tool::<qidi_build_hashline::HashlineEditTool>(),
+                ToolConfig::for_tool::<qidi_build_hashline::HashlineGrepTool>(),
+                ToolConfig::for_tool::<qidi_build::ListDirTool>(),
             ],
             behavior_preset: None,
         };
@@ -4126,18 +4188,18 @@ mod tests {
             kind: None,
         }
     }
-    async fn grok_build_bridge(tmp: &TempDir) -> crate::bridge::ToolBridge {
+    async fn qidi_build_bridge(tmp: &TempDir) -> crate::bridge::ToolBridge {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![
-                ToolConfig::for_tool::<grok_build::ListDirTool>(),
-                ToolConfig::for_tool::<grok_build::ReadFileTool>(),
-                ToolConfig::for_tool::<grok_build::SearchReplaceTool>(),
+                ToolConfig::for_tool::<qidi_build::ListDirTool>(),
+                ToolConfig::for_tool::<qidi_build::ReadFileTool>(),
+                ToolConfig::for_tool::<qidi_build::SearchReplaceTool>(),
                 bash_config_with_background(),
-                ToolConfig::for_tool::<grok_build::TaskOutputTool>(),
-                ToolConfig::for_tool::<grok_build::KillTaskTool>(),
-                ToolConfig::for_tool::<grok_build::GrepTool>(),
-                ToolConfig::for_tool::<grok_build::TodoWriteTool>(),
+                ToolConfig::for_tool::<qidi_build::TaskOutputTool>(),
+                ToolConfig::for_tool::<qidi_build::KillTaskTool>(),
+                ToolConfig::for_tool::<qidi_build::GrepTool>(),
+                ToolConfig::for_tool::<qidi_build::TodoWriteTool>(),
             ],
             behavior_preset: None,
         };
@@ -4150,7 +4212,7 @@ mod tests {
     async fn hub_dispatch_list_dir() {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("hello.txt"), "world").unwrap();
-        let bridge = grok_build_bridge(&tmp).await;
+        let bridge = qidi_build_bridge(&tmp).await;
         let result = bridge
             .call(
                 "list_dir",
@@ -4176,7 +4238,7 @@ mod tests {
         let args = serde_json::json!(
             { "target_directory" : test_dir.to_str().unwrap() }
         );
-        let hub_bridge = grok_build_bridge(&tmp).await;
+        let hub_bridge = qidi_build_bridge(&tmp).await;
         let hub_result = hub_bridge
             .call("list_dir", args.clone(), "hub-call")
             .await
@@ -4190,7 +4252,7 @@ mod tests {
         );
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
-            tools: vec![ToolConfig::for_tool::<grok_build::ListDirTool>()],
+            tools: vec![ToolConfig::for_tool::<qidi_build::ListDirTool>()],
             behavior_preset: None,
         };
         let legacy_toolset = Arc::new(
@@ -4217,7 +4279,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("editable.txt");
         std::fs::write(&file, "hello world").unwrap();
-        let bridge = grok_build_bridge(&tmp).await;
+        let bridge = qidi_build_bridge(&tmp).await;
         bridge
             .call(
                 "read_file",
@@ -4249,7 +4311,7 @@ mod tests {
     #[tokio::test]
     async fn hub_dispatch_bash() {
         let tmp = TempDir::new().unwrap();
-        let bridge = grok_build_bridge(&tmp).await;
+        let bridge = qidi_build_bridge(&tmp).await;
         let result = bridge
             .call(
                 "run_terminal_cmd",
@@ -4271,7 +4333,7 @@ mod tests {
     #[tokio::test]
     async fn hub_dispatch_invalid_args() {
         let tmp = TempDir::new().unwrap();
-        let bridge = grok_build_bridge(&tmp).await;
+        let bridge = qidi_build_bridge(&tmp).await;
         let result = bridge.call("grep", serde_json::json!({}), "bad-call").await;
         assert!(
             result.is_err(),
@@ -4286,7 +4348,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
-            tools: vec![ToolConfig::for_tool::<grok_build::ListDirTool>()],
+            tools: vec![ToolConfig::for_tool::<qidi_build::ListDirTool>()],
             behavior_preset: None,
         };
         let toolset = builder
@@ -4320,8 +4382,8 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![
-                ToolConfig::for_tool::<grok_build::ListDirTool>(),
-                ToolConfig::for_tool::<grok_build::ReadFileTool>(),
+                ToolConfig::for_tool::<qidi_build::ListDirTool>(),
+                ToolConfig::for_tool::<qidi_build::ReadFileTool>(),
             ],
             behavior_preset: None,
         };

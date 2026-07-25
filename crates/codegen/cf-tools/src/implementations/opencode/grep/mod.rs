@@ -1,4 +1,4 @@
-﻿//! `grep` tool — OpenCode namespace.
+//! `grep` tool — OpenCode namespace.
 //!
 //! Shells out to the ripgrep (`rg`) binary, parses the output, sorts
 //! matches by file modification time (most recent first), caps at 100
@@ -10,7 +10,7 @@ use std::process::Stdio;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-use crate::implementations::grok_build::grep::ripgrep::rg_path;
+use crate::implementations::qidi_build::grep::ripgrep::rg_path;
 use crate::types::output::{GrepFileMatch, GrepLineMatch, GrepSearchOutput};
 use crate::types::requirements::{Expr, ToolRequirement};
 #[allow(unused_imports)]

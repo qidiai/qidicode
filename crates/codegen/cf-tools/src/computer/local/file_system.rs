@@ -4,8 +4,102 @@ use tokio::{fs, time::sleep};
 
 use crate::computer::types::{AsyncFileSystem, ComputerError};
 
-/// Creates a local FS access which allows writing and reading from the local files
-pub struct LocalFs;
+/// Creates a local FS access which allows writing and reading from the local files.
+///
+/// SECURITY: All file operations validate that the resolved path stays within
+/// the workspace root. This is an application-layer defense that complements
+/// (but does not replace) OS-level sandboxing. When the sandbox is active,
+/// both layers must agree; when the sandbox is inactive or unavailable (e.g.
+/// Windows without Landlock), this layer provides the primary boundary.
+pub struct LocalFs {
+    /// Workspace root for path boundary validation. When set, all file
+    /// operations are confined to paths under this root.
+    workspace_root: Option<std::path::PathBuf>,
+}
+
+impl LocalFs {
+    /// Create a `LocalFs` with no workspace confinement — file operations
+    /// work on any path. Used in tests and contexts where confinement is
+    /// enforced by the caller.
+    pub fn unconfined() -> Self {
+        Self { workspace_root: None }
+    }
+
+    /// Create a `LocalFs` that confines all file operations to `workspace_root`.
+    /// Paths are canonicalized and checked against the root before any
+    /// read/write/delete operation.
+    pub fn new(workspace_root: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            workspace_root: Some(workspace_root.into()),
+        }
+    }
+
+    /// Validate that `path` is within the workspace root.
+    /// Returns the canonicalized path on success, or an error if the path
+    /// escapes the workspace boundary.
+    async fn validate_path(&self, path: &Path) -> Result<std::path::PathBuf, ComputerError> {
+        let Some(ref root) = self.workspace_root else {
+            // No confinement configured — allow any path.
+            return Ok(path.to_path_buf());
+        };
+
+        // Canonicalize the root (best-effort; if it fails, use the raw path).
+        #[allow(clippy::disallowed_methods)]
+        let canonical_root = match tokio::fs::canonicalize(root).await {
+            Ok(p) => dunce::simplified(&p).to_path_buf(),
+            Err(_) => root.clone(),
+        };
+
+        // For the target path, try to canonicalize. If the file doesn't exist
+        // yet (write/create path), canonicalize the parent and join.
+        #[allow(clippy::disallowed_methods)]
+        let canonical_path = match tokio::fs::canonicalize(path).await {
+            Ok(p) => dunce::simplified(&p).to_path_buf(),
+            Err(_) => {
+                // File may not exist yet (e.g. write). Canonicalize parent.
+                let parent = path.parent().unwrap_or(Path::new("."));
+                #[allow(clippy::disallowed_methods)]
+                match tokio::fs::canonicalize(parent).await {
+                    Ok(p) => dunce::simplified(&p).join(path.file_name().unwrap_or_default()),
+                    Err(_) => {
+                        // Parent doesn't exist either — fall back to lexically
+                        // joining with the root and checking prefix.
+                        path.to_path_buf()
+                    }
+                }
+            }
+        };
+
+        // Check if the canonicalized path is within the canonical root.
+        if !canonical_path.starts_with(&canonical_root) {
+            tracing::warn!(
+                path = %path.display(),
+                canonical = %canonical_path.display(),
+                root = %canonical_root.display(),
+                "path boundary violation: path resolves outside workspace root"
+            );
+            cf_sandbox::log_violation(
+                &canonical_path.display().to_string(),
+                "path_boundary_check",
+            );
+            return Err(ComputerError::io(format!(
+                "access denied: path '{}' resolves outside the workspace root",
+                path.display()
+            )));
+        }
+
+        Ok(canonical_path)
+    }
+}
+
+// Allow LocalFs to be constructed without arguments in contexts that
+// previously used `LocalFs` as a unit struct. Prefer `LocalFs::unconfined()`
+// or `LocalFs::new(root)` for new code.
+impl Default for LocalFs {
+    fn default() -> Self {
+        Self::unconfined()
+    }
+}
 
 // Keep the window short: these retries absorb brief Windows editor/indexer/AV
 // races without hiding persistent locks, ACL failures, or sandbox denials.
@@ -133,11 +227,12 @@ where
 impl AsyncFileSystem for LocalFs {
     #[tracing::instrument(name = "fs.read_file", skip_all)]
     async fn read_file(&self, path: &Path) -> Result<Vec<u8>, ComputerError> {
-        match fs::read(path).await {
+        let validated_path = self.validate_path(path).await?;
+        match fs::read(&validated_path).await {
             Ok(data) => Ok(data),
             Err(e) => {
                 if is_permission_error(&e) {
-                    cf_sandbox::log_violation(&path.display().to_string(), "read");
+                    cf_sandbox::log_violation(&validated_path.display().to_string(), "read");
                 }
                 Err(e.into())
             }
@@ -146,8 +241,9 @@ impl AsyncFileSystem for LocalFs {
 
     #[tracing::instrument(name = "fs.write_file", skip_all)]
     async fn write_file(&self, path: &Path, data: &[u8]) -> Result<(), ComputerError> {
+        let validated_path = self.validate_path(path).await?;
         // implicitly creates the missing directories if any
-        if let Some(dir) = path.parent()
+        if let Some(dir) = validated_path.parent()
             && let Err(e) = fs::create_dir_all(dir).await
         {
             if is_permission_error(&e) {
@@ -155,9 +251,9 @@ impl AsyncFileSystem for LocalFs {
             }
             return Err(e.into());
         }
-        if let Err(e) = write_file_with_transient_lock_retries(path, data).await {
+        if let Err(e) = write_file_with_transient_lock_retries(&validated_path, data).await {
             if is_permission_error(&e) {
-                cf_sandbox::log_violation(&path.display().to_string(), "write");
+                cf_sandbox::log_violation(&validated_path.display().to_string(), "write");
             }
             return Err(e.into());
         }
@@ -166,9 +262,10 @@ impl AsyncFileSystem for LocalFs {
 
     #[tracing::instrument(name = "fs.delete_file", skip_all)]
     async fn delete_file(&self, path: &Path) -> Result<(), ComputerError> {
-        if let Err(e) = fs::remove_file(path).await {
+        let validated_path = self.validate_path(path).await?;
+        if let Err(e) = fs::remove_file(&validated_path).await {
             if is_permission_error(&e) {
-                cf_sandbox::log_violation(&path.display().to_string(), "delete");
+                cf_sandbox::log_violation(&validated_path.display().to_string(), "delete");
             }
             return Err(e.into());
         }

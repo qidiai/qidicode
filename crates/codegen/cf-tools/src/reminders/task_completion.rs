@@ -13,7 +13,7 @@
 //! A [`ReportedTaskCompletions`] state set tracks which task/subagent IDs
 //! have already been surfaced, preventing duplicate reminders.
 use crate::bridge::ToolBridge;
-use crate::implementations::grok_build::task::types::{
+use crate::implementations::qidi_build::task::types::{
     SubagentCompletionSummary, SubagentCompletionsRequest, SubagentEvent, SubagentEventSender,
 };
 use crate::types::TaskSnapshot;
@@ -82,7 +82,7 @@ impl AutoWakeDeliveredIds {
             .collect()
     }
 }
-crate::register_resource!("grok_build", "AutoWakeDeliveredIds", AutoWakeDeliveredIds);
+crate::register_resource!("qidi_build", "AutoWakeDeliveredIds", AutoWakeDeliveredIds);
 /// Set of task IDs whose completion has already been surfaced as a
 /// `<system-reminder>`.  Persisted via `State<T>` so it survives across
 /// tool calls within a session.
@@ -100,7 +100,7 @@ impl ReportedTaskCompletions {
     }
 }
 crate::register_resource!(
-    "grok_build",
+    "qidi_build",
     "ReportedTaskCompletions",
     ReportedTaskCompletions
 );
@@ -256,7 +256,7 @@ fn split_wrapped_monitor_event(event_text: &str) -> Option<(&str, &str)> {
 /// Buffered `event_text` arrives pre-wrapped (`wrap_monitor_event`); it is
 /// unwrapped via [`split_wrapped_monitor_event`] with verbatim fallback.
 pub fn format_monitor_events(
-    events: &[crate::implementations::grok_build::task::types::MonitorEventNotification],
+    events: &[crate::implementations::qidi_build::task::types::MonitorEventNotification],
     task_output_name: Option<&str>,
 ) -> Option<String> {
     use std::fmt::Write as _;
@@ -270,7 +270,7 @@ pub fn format_monitor_events(
                 None => ("event", event.event_text.as_str()),
             };
             let label =
-                crate::implementations::grok_build::monitor::event::sanitize_monitor_description(
+                crate::implementations::qidi_build::monitor::event::sanitize_monitor_description(
                     label,
                 );
             Some(format!(
@@ -279,7 +279,7 @@ pub fn format_monitor_events(
             ))
         }
         _ => {
-            type Event = crate::implementations::grok_build::task::types::MonitorEventNotification;
+            type Event = crate::implementations::qidi_build::task::types::MonitorEventNotification;
             let mut groups: Vec<(&str, Vec<&Event>)> = Vec::new();
             for event in events {
                 match groups.iter_mut().find(|(id, _)| *id == event.task_id) {
@@ -305,7 +305,7 @@ pub fn format_monitor_events(
                     .map(|(desc, _)| desc)
                     .filter(|d| !d.is_empty())
                     .unwrap_or("event");
-                let description = crate::implementations::grok_build::monitor::event::sanitize_monitor_description(
+                let description = crate::implementations::qidi_build::monitor::event::sanitize_monitor_description(
                     description,
                 );
                 let _ = write!(
@@ -650,12 +650,12 @@ impl Reminder for TaskCompletionReminder {
                 .filter(|t| task_owned_by_session(t, my_owner.as_deref()))
                 .collect();
             let goal_loop_active = res
-                .get::<crate::implementations::grok_build::task::types::GoalLoopActive>()
+                .get::<crate::implementations::qidi_build::task::types::GoalLoopActive>()
                 .is_some_and(|g| g.0);
             let surface_reminders = !goal_loop_active
                 && res
                     .get::<crate::types::resources::Params<
-                        crate::implementations::grok_build::bash::BashParams,
+                        crate::implementations::qidi_build::bash::BashParams,
                     >>()
                     .map(|p| p.0.surface_bg_completion_reminders)
                     .unwrap_or(true);
@@ -725,7 +725,7 @@ impl Reminder for TaskCompletionReminder {
             } else if let Ok(completions) = rx.await {
                 let mut res = resources.lock().await;
                 let goal_loop_active = res
-                    .get::<crate::implementations::grok_build::task::types::GoalLoopActive>()
+                    .get::<crate::implementations::qidi_build::task::types::GoalLoopActive>()
                     .is_some_and(|g| g.0);
                 let task_output_name: Option<String> = res
                     .get::<crate::types::template_renderer::TemplateRenderer>()
@@ -1205,7 +1205,7 @@ mod tests {
         let backend: Arc<dyn TerminalBackend> = Arc::new(MockTerminal { tasks });
         res.insert(Terminal(backend));
         res.register_state::<ReportedTaskCompletions>();
-        let params = crate::implementations::grok_build::bash::BashParams {
+        let params = crate::implementations::qidi_build::bash::BashParams {
             surface_bg_completion_reminders: false,
             ..Default::default()
         };
@@ -1500,7 +1500,7 @@ mod tests {
         });
         res.insert(Terminal(backend));
         res.register_state::<ReportedTaskCompletions>();
-        res.insert(crate::implementations::grok_build::task::types::GoalLoopActive(true));
+        res.insert(crate::implementations::qidi_build::task::types::GoalLoopActive(true));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         res.insert(SubagentEventSender(tx));
         tokio::spawn(async move {
@@ -1521,7 +1521,7 @@ mod tests {
         shared
             .lock()
             .await
-            .insert(crate::implementations::grok_build::task::types::GoalLoopActive(false));
+            .insert(crate::implementations::qidi_build::task::types::GoalLoopActive(false));
         let second = reminder.collect_reminders(shared, &output).await;
         assert!(
             second.is_empty(),
@@ -1698,7 +1698,7 @@ mod tests {
     /// reintroduced.
     #[tokio::test]
     async fn reminder_pipeline_ignores_monitor_event_buffer() {
-        use crate::implementations::grok_build::task::types::{
+        use crate::implementations::qidi_build::task::types::{
             MonitorEventBuffer, MonitorEventNotification,
         };
         use crate::types::resources::Resources;
@@ -1732,7 +1732,7 @@ mod tests {
     /// own + owner-less legacy events; foreign events stay buffered.
     #[test]
     fn drain_owned_partitions_by_session_owner() {
-        use crate::implementations::grok_build::task::types::{
+        use crate::implementations::qidi_build::task::types::{
             MonitorEventBuffer, MonitorEventNotification, drain_owned,
         };
         let shared_buffer = MonitorEventBuffer::default();
@@ -1769,7 +1769,7 @@ mod tests {
     /// empty => `None`.
     #[test]
     fn format_monitor_events_single_vs_batched() {
-        use crate::implementations::grok_build::task::types::MonitorEventNotification;
+        use crate::implementations::qidi_build::task::types::MonitorEventNotification;
         let event = |task: &str, desc: &str, text: &str| MonitorEventNotification {
             task_id: task.to_string(),
             event_text: format!(
@@ -1787,7 +1787,7 @@ mod tests {
             single, "<monitor-event task_id=\"task-0\">\n[alpha] line 0\n</monitor-event>",
             "single event must use the lean monitor-event form"
         );
-        let bare = crate::implementations::grok_build::task::types::MonitorEventNotification {
+        let bare = crate::implementations::qidi_build::task::types::MonitorEventNotification {
             task_id: "task-9".into(),
             event_text: "bare text, no wrapper".into(),
             owner_session_id: None,
@@ -1861,7 +1861,7 @@ mod tests {
     /// writer's shape ever drifts from the parser, this fails loudly.
     #[test]
     fn wrap_monitor_event_round_trips_through_split() {
-        use crate::implementations::grok_build::monitor::event::wrap_monitor_event;
+        use crate::implementations::qidi_build::monitor::event::wrap_monitor_event;
         let wrapped = wrap_monitor_event("plain watcher", "tick 1\ntick 2", "t-1");
         let (desc, inner) = split_wrapped_monitor_event(&wrapped).expect("plain round-trip");
         assert_eq!(desc, "plain watcher");
@@ -1874,7 +1874,7 @@ mod tests {
     /// End-to-end multibyte safety through the formatter (single + batch).
     #[test]
     fn format_monitor_events_handles_multibyte_content() {
-        use crate::implementations::grok_build::task::types::MonitorEventNotification;
+        use crate::implementations::qidi_build::task::types::MonitorEventNotification;
         let event = |task: &str, desc: &str, text: &str| MonitorEventNotification {
             task_id: task.to_string(),
             event_text: format!(

@@ -1950,7 +1950,7 @@ impl LocalTerminalActor {
                         .map(|m| m.len())
                         .unwrap_or(0);
                     tokio::spawn(async move {
-                        crate::implementations::grok_build::monitor::tool::run_monitor_pipeline(
+                        crate::implementations::qidi_build::monitor::tool::run_monitor_pipeline(
                             &pipeline_task_id,
                             &pipeline_description,
                             pipeline_terminal,

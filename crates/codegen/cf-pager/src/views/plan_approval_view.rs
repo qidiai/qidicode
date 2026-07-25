@@ -1,7 +1,7 @@
-﻿use agent_client_protocol as acp;
+use agent_client_protocol as acp;
 use cf_acp_lib::AcpResult;
 
-pub use cf_tools::implementations::grok_build::exit_plan_mode::{
+pub use cf_tools::implementations::qidi_build::exit_plan_mode::{
     ExitPlanModeExtRequest, ExitPlanModeExtResponse,
 };
 

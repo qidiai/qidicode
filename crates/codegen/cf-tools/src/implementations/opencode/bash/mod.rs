@@ -1,4 +1,4 @@
-﻿//! `bash` tool — OpenCode namespace.
+//! `bash` tool — OpenCode namespace.
 //!
 //! Executes shell commands in a persistent terminal session with optional
 //! timeout and working directory override. Delegates to the shared
@@ -1089,7 +1089,7 @@ mod tests {
 
     // ─── Description template shell-awareness parity tests ───
     //
-    // Same shape as grok_build/bash: the opencode tool inherits the same
+    // Same shape as qidi_build/bash: the opencode tool inherits the same
     // Unix-utility guidance and must branch on PowerShell/cmd.
 
     mod description_shell_branches {

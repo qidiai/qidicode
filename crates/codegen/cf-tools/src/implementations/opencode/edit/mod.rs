@@ -1,4 +1,4 @@
-﻿//! `edit` tool — OpenCode namespace.
+//! `edit` tool — OpenCode namespace.
 //!
 //! Performs exact string replacements in files with support for:
 //! - Exact string replacement (find/replace)
@@ -19,8 +19,8 @@
 use std::sync::Arc;
 
 use crate::computer::types::AsyncFileSystem;
-use crate::implementations::grok_build::search_replace::CONTEXT_LINES;
-use crate::implementations::grok_build::search_replace::helpers::{
+use crate::implementations::qidi_build::search_replace::CONTEXT_LINES;
+use crate::implementations::qidi_build::search_replace::helpers::{
     build_edit_details, render_snippet, replace_using_positions,
 };
 use crate::notification::types::FileWritten;
@@ -467,8 +467,8 @@ async fn handle_replacement(
 }
 
 // Note: `replace_at_positions`, `render_snippet`, and `build_edit_details`
-// are imported from `grok_build::search_replace::helpers` — shared across
-// both the grok_build and opencode edit tools.
+// are imported from `qidi_build::search_replace::helpers` — shared across
+// both the qidi_build and opencode edit tools.
 
 // ───────────────────────────────────────────────────────────────────────────
 // Tests
@@ -490,7 +490,7 @@ mod tests {
 
         let mut resources = Resources::new();
         resources.insert(Cwd(cwd.to_path_buf()));
-        resources.insert(FileSystem(Arc::new(LocalFs)));
+        resources.insert(FileSystem(Arc::new(LocalFs::unconfined())));
         resources.insert(NotificationHandle(ToolNotificationHandle::noop()));
 
         let edit_params = std::collections::HashMap::from([
@@ -759,7 +759,7 @@ mod tests {
         let tool = EditTool;
         let mut resources = Resources::new();
         resources.insert(Cwd(tmp.path().to_path_buf()));
-        resources.insert(FileSystem(Arc::new(LocalFs)));
+        resources.insert(FileSystem(Arc::new(LocalFs::unconfined())));
         resources.insert(NotificationHandle(ToolNotificationHandle::noop()));
         resources.insert(TemplateRenderer::new(
             std::collections::HashMap::from([(ToolKind::Read, "file_reader".to_string())]),

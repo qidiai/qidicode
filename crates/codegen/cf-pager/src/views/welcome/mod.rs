@@ -419,14 +419,14 @@ pub(super) fn render_version_badge(
         } = &mode
     {
         spans.push(Span::styled(
-            format!("Tier: {tier}"),
+            format!("Tier: {tier} | 等级: {tier}"),
             Style::default().fg(theme.gray),
         ));
         spans.push(sep.clone());
     }
     if show_api_key && is_api_key_auth {
         spans.push(Span::styled(
-            "Logged in with API key",
+            "Logged in with API key (API密钥登录)",
             Style::default().fg(theme.gray),
         ));
         spans.push(sep);
@@ -446,7 +446,7 @@ pub(super) fn render_version_badge(
                 Style::default().fg(theme.gray),
             ));
             spans.push(Span::styled(
-                " Beta",
+                " Beta | 测试版",
                 Style::default()
                     .fg(theme.text_primary)
                     .add_modifier(Modifier::BOLD),
@@ -454,7 +454,7 @@ pub(super) fn render_version_badge(
         }
         VersionBadgeMode::HeroFooter => {
             let channel_display = if channel.is_empty() {
-                "Beta"
+                "Beta | 测试版"
             } else {
                 channel.trim()
             };
@@ -1724,15 +1724,15 @@ fn render_welcome_done(
             // 3 cells of this row as dismiss instead of open. Keyboard:
             // ctrl-shift-i. The key string is right-aligned by render_menu,
             // so [x] sits at the very end of the row.
-            items.push((key_i_with_x, "Import Claude settings"));
+            items.push((key_i_with_x, "Import Claude settings | 导入Claude设置"));
         }
-        items.push((key_w, "New worktree"));
-        items.push((key_s, "Resume session"));
+        items.push((key_w, "New worktree | 新建工作区"));
+        items.push((key_s, "Resume session | 恢复会话"));
         // "Changelog" above Quit; no shortcut — opened by click (row or block).
         if show_changelog_action {
-            items.push(("", "Changelog"));
+            items.push(("", "Changelog | 更新日志"));
         }
-        items.push((key_q, "Quit"));
+        items.push((key_q, "Quit | 退出"));
         owned_menu = items;
         owned_menu.as_slice()
     };
