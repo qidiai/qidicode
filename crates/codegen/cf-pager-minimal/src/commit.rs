@@ -1016,7 +1016,10 @@ mod tests {
                 text.push_str(buf[(x, y)].symbol());
             }
         }
-        assert!(text.contains("src/main.rs"), "rendered text: {text:?}");
+        // The renderer emits the platform separator, so build the expected
+        // relative path with `MAIN_SEPARATOR` (Windows renders `src\main.rs`).
+        let rel = format!("src{}main.rs", std::path::MAIN_SEPARATOR);
+        assert!(text.contains(&rel), "rendered text: {text:?}");
         assert!(
             !text.contains("/alternate/worktree"),
             "session prefix should be elided: {text:?}"

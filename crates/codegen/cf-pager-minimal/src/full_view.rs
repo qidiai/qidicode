@@ -385,7 +385,10 @@ mod tests {
             &mut out,
         );
 
-        assert!(out.contains("src/main.rs"), "transcript: {out:?}");
+        // The renderer emits the platform separator, so build the expected
+        // relative path with `MAIN_SEPARATOR` (Windows renders `src\main.rs`).
+        let rel = format!("src{}main.rs", std::path::MAIN_SEPARATOR);
+        assert!(out.contains(&rel), "transcript: {out:?}");
         assert!(
             !out.contains("/alternate/worktree"),
             "session prefix should be elided: {out:?}"

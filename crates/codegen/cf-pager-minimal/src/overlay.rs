@@ -849,9 +849,12 @@ mod tests {
                     .unwrap_or_default()
             })
             .collect();
+        // The dot comes from `glyphs::filled_dot()`, which falls back from
+        // `●` to `•` on legacy ConHost — compare against the same source.
+        let dot = format!("({})", cf_pager::glyphs::filled_dot());
         assert!(
-            row_text.contains('z') && row_text.contains("(\u{25cf})"),
-            "editor row must keep the freeform-row `z (\u{25cf})` prefix, got {row_text:?}"
+            row_text.contains('z') && row_text.contains(&dot),
+            "editor row must keep the freeform-row `z {dot}` prefix, got {row_text:?}"
         );
         assert!(
             row_text.contains("line one"),

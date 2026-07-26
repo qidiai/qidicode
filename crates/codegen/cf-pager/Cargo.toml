@@ -251,3 +251,9 @@ default-bazel = [
 jemalloc = []
 sandbox-enforce = ["cf-sandbox/enforce"]
 release-dist = []
+# Exposes the test-only `minimal_api` helpers (view-model constructors and
+# setters at the bottom of `minimal/api.rs`) to sibling crates' test builds
+# under cargo, where a dependency is never compiled with `cfg(test)`.
+# `cf-pager-minimal` enables this from its dev-dependencies only; production
+# builds never turn it on.
+test-helpers = ["cf-pager-render/test-helpers"]

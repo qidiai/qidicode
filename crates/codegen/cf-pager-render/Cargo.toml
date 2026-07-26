@@ -108,3 +108,7 @@ tempfile = { workspace = true }
 # leaving cargo's `default` (and thus cargo production builds) without them.
 # The helpers are inert unless their mock setters are called.
 default-bazel = []
+# Exposes the test-only theme-cache helpers (`test_lock`) to sibling crates'
+# test builds under cargo, where a dependency is never compiled with
+# `cfg(test)`. Never enabled by production builds.
+test-helpers = []
