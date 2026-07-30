@@ -523,7 +523,7 @@ fn build_web_fetch_config() -> cf_tools::implementations::qidi_build::web_fetch:
 fn default_web_search_model() -> String {
     std::env::var("QIDI_WEB_SEARCH_MODEL").unwrap_or_else(|_| "grok-4.20-multi-agent".to_string())
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 pub mod test_support {
     use crate::config::SessionContextFactory;
     use std::collections::HashMap;
@@ -567,7 +567,7 @@ pub mod test_support {
             std::fs::create_dir_all(&session_root).expect("create session root");
             SessionContext {
                 backend,
-                fs: Arc::new(LocalFs),
+                fs: Arc::new(LocalFs::unconfined()),
                 cwd,
                 session_folder: session_root.clone(),
                 session_env,

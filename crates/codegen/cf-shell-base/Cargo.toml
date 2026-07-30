@@ -9,6 +9,9 @@ description = "Foundation modules for the grok shell crate family: environment p
 # CI default set: builds a single shared rlib per crate, so downstream test
 # targets need the test-only helper surface compiled in.
 default-bazel = []
+# Compiles this crate's test-only helper surface (and cf-env's) into the normal
+# rlib so downstream crates' test targets can reach it across crate boundaries.
+test-helpers = ["cf-env/test-helpers"]
 
 [dependencies]
 anyhow = { workspace = true }

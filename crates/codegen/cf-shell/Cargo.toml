@@ -186,8 +186,14 @@ windows = { workspace = true }
 criterion = { workspace = true }
 filetime = { workspace = true }
 tempfile = { workspace = true }
-cf-memory= { workspace = true, features = [] }
-cf-workspace= { workspace = true, features = [] }
+cf-memory= { workspace = true, features = ["test-helpers"] }
+cf-workspace= { workspace = true, features = ["test-helpers"] }
+# Cross-crate test helpers: `cfg(test)` does not propagate across crate
+# boundaries, so upstream test-only surfaces (`WorkspaceOps::for_test`,
+# `MemoryStorage::with_paths`, `EnvVarGuard`, CpuProfileManager seams) are
+# gated behind each crate's `test-helpers` feature, enabled here.
+cf-test-support = { workspace = true }
+cf-test-utils = { workspace = true }
 # Feature-unification applies the signing seam to the lib when building tests, so
 # integration tests can inject a throwaway trusted key; production builds exclude
 # dev-deps and compile the seam out.
@@ -201,7 +207,7 @@ semver = { workspace = true }
 serial_test = { workspace = true }
 # Test-only builds expose `env::EnvVarGuard` and the cpu_profile test seams to
 # this crate's test targets.
-cf-shell-base = { workspace = true, features = [] }
+cf-shell-base = { workspace = true, features = ["test-helpers"] }
 # `test-util` enables `#[tokio::test(start_paused = true)]` (paused virtual
 # clock with auto-advance) so interval-driven loop tests in `auth::refresh`
 # can assert exact tick counts deterministically without real-time sleep.

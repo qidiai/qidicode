@@ -120,6 +120,10 @@ path = "src/bin/workspace_server_probe.rs"
 default = ["sandbox-enforce"]
 compression = []
 sandbox-enforce = ["cf-sandbox/enforce"]
+# Compiles test-only helpers (`WorkspaceOps::for_test`, `WorkspaceHandle::for_test`,
+# `session::tool_config::test_support`) into the normal rlib so downstream crates'
+# test targets can reach them across crate boundaries.
+test-helpers = []
 default-bazel = [
     "sandbox-enforce",
     ]

@@ -5,6 +5,9 @@ version = "0.1.0"
 edition.workspace = true
 
 [features]
+# Compiles test-only helpers (`MemoryStorage::with_paths`, `MockEmbeddingProvider`)
+# into the normal rlib so downstream crates' test targets can reach them.
+test-helpers = []
 
 [dependencies]
 cf-telemetry= { path = "../cf-telemetry" }

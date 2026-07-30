@@ -470,7 +470,7 @@ mod tests {
         );
         let provider = ShellAuthCredentialProvider::new(mgr, None, None);
         let snap = provider.snapshot();
-        assert_eq!(snap.token.as_deref(), Some("live-token"));
+        assert_eq!(snap.token.as_deref().map(String::as_str), Some("live-token"));
         assert_eq!(snap.user_id.as_deref(), Some("test-user"));
     }
     /// During the 5-minute pre-refresh buffer window, `auth_manager.current()`
@@ -492,7 +492,7 @@ mod tests {
         let provider = ShellAuthCredentialProvider::new(mgr, None, None);
         let snap = provider.snapshot();
         assert_eq!(
-            snap.token.as_deref(),
+            snap.token.as_deref().map(String::as_str),
             Some("buffer-token"),
             "snapshot should fall back to expired_auth instead of None"
         );
@@ -563,7 +563,7 @@ mod tests {
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(mgr.current().unwrap().key, "fresh");
         assert_eq!(
-            provider.snapshot().token.as_deref(),
+            provider.snapshot().token.as_deref().map(String::as_str),
             Some("fresh"),
             "snapshot must reflect refreshed token for subsequent apply() calls"
         );
@@ -637,12 +637,12 @@ mod tests {
         );
         crate::auth::storage::write_auth_json(&auth_path, &store).unwrap();
         let provider = OtelAuthCredentialProvider::new(mgr);
-        assert_eq!(provider.snapshot().token.as_deref(), Some("initial-token"));
+        assert_eq!(provider.snapshot().token.as_deref().map(String::as_str), Some("initial-token"));
         let mut store = crate::auth::read_auth_json(&auth_path).unwrap();
         store.insert(scope, make_auth("rotated-token", ChronoDuration::hours(1)));
         crate::auth::storage::write_auth_json(&auth_path, &store).unwrap();
         assert_eq!(
-            provider.snapshot().token.as_deref(),
+            provider.snapshot().token.as_deref().map(String::as_str),
             Some("rotated-token"),
             "must pick up sibling-rotated tokens from disk"
         );
@@ -665,13 +665,13 @@ mod tests {
         );
         provider.set_live(live_mgr.clone());
         assert_eq!(
-            provider.snapshot().token.as_deref(),
+            provider.snapshot().token.as_deref().map(String::as_str),
             Some("live-token"),
             "must read from live AuthManager after set_live()"
         );
         live_mgr.hot_swap(make_auth("rotated-live", ChronoDuration::hours(1)));
         assert_eq!(
-            provider.snapshot().token.as_deref(),
+            provider.snapshot().token.as_deref().map(String::as_str),
             Some("rotated-live"),
             "must see rotated token from live manager"
         );
@@ -732,7 +732,7 @@ mod tests {
         provider.set_deployment_key("enterprise-key".to_string());
         let snap = provider.snapshot();
         assert_eq!(
-            snap.token.as_deref(),
+            snap.token.as_deref().map(String::as_str),
             Some("enterprise-key"),
             "deployment key must be sent when no OIDC token exists"
         );
@@ -749,7 +749,7 @@ mod tests {
         provider.set_deployment_key("deployment-key-123".to_string());
         let snap = provider.snapshot();
         assert_eq!(
-            snap.token.as_deref(),
+            snap.token.as_deref().map(String::as_str),
             Some("deployment-key-123"),
             "deployment key must win over OIDC token"
         );
@@ -835,7 +835,7 @@ mod tests {
         let provider =
             ShellAuthCredentialProvider::new(mgr, Some("deployment-key-12345".to_string()), None);
         let snap = provider.snapshot();
-        assert_eq!(snap.token.as_deref(), Some("deployment-key-12345"));
+        assert_eq!(snap.token.as_deref().map(String::as_str), Some("deployment-key-12345"));
         assert!(snap.user_id.is_none());
     }
 }

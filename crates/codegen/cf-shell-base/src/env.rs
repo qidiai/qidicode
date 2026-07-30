@@ -11,7 +11,7 @@
 //!   per-session gateway bridge actor and routes prompts through
 //!   it. Unset → falls back to [`QidiBuildEnvironment::gateway_ws_url`] for
 //!   sessions created in gateway mode; otherwise local-mode (unchanged).
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 pub use cf_env::EnvVarGuard;
 pub use cf_env::{
     QidiBuildEnvironment, PROD_ASSET_SERVER_URL, PROD_CLI_CHAT_PROXY_BASE_URL, PROD_GATEWAY_WS_URL,

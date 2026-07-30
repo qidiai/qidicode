@@ -1513,7 +1513,7 @@ impl WorkspaceOps {
         }
     }
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-helpers"))]
 impl WorkspaceOps {
     /// Test variant backed by a temp dir.
     ///

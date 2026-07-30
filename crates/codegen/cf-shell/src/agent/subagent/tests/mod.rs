@@ -43,19 +43,19 @@ fn subagent_bypass_permission_mode_gated_by_policy_pin() {
     use cf_agent::config::PermissionMode;
     const PIN: &str = cf_workspace::permission::resolution::YOLO_PIN_REASON_REQUIREMENTS;
     assert_eq!(
-        resolve_subagent_permission_mode(PermissionMode::BypassPermissions, false, None),
+        resolve_subagent_permission_mode(PermissionMode::BypassPermissions, false, None, true),
         PermissionMode::BypassPermissions,
     );
     assert_eq!(
         resolve_subagent_permission_mode(PermissionMode::BypassPermissions, false,
-        Some(PIN)), PermissionMode::Default,
+        Some(PIN), true), PermissionMode::Default,
     );
     assert_eq!(
-        resolve_subagent_permission_mode(PermissionMode::Plan, false, Some(PIN)),
+        resolve_subagent_permission_mode(PermissionMode::Plan, false, Some(PIN), true),
         PermissionMode::Plan,
     );
     assert_eq!(
-        resolve_subagent_permission_mode(PermissionMode::BypassPermissions, true, None),
+        resolve_subagent_permission_mode(PermissionMode::BypassPermissions, true, None, false),
         PermissionMode::Default,
     );
 }
@@ -3117,6 +3117,7 @@ fn test_model_entry(model_id: &str) -> crate::agent::config::ModelEntry {
         api_key: None,
         env_key: None,
         api_base_url: None,
+        fallback_models: Vec::new(),
     }
 }
 fn byok_model_entry(model_id: &str) -> crate::agent::config::ModelEntry {

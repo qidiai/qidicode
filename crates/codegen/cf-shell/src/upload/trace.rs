@@ -1795,7 +1795,7 @@ mod tests {
             .proxy_credentials()
             .expect("proxy_credentials should be Some for Proxy upload_method");
         assert_eq!(
-            provider.snapshot().token.as_deref(),
+            provider.snapshot().token.as_deref().map(String::as_str),
             Some("initial-token"),
             "snapshot should reflect AuthManager.current(), not the stale base_config token"
         );
@@ -1809,7 +1809,7 @@ mod tests {
         std::fs::write(dir.path().join("auth.json"), &auth_json).unwrap();
         auth_manager.force_reload_from_disk();
         assert_eq!(
-            provider.snapshot().token.as_deref(),
+            provider.snapshot().token.as_deref().map(String::as_str),
             Some("refreshed-token")
         );
         let config = resolver.resolve();
@@ -1874,7 +1874,7 @@ mod tests {
             .proxy_credentials()
             .expect("proxy_credentials should be Some for Proxy upload_method");
         assert_eq!(
-            provider.snapshot().token.as_deref(),
+            provider.snapshot().token.as_deref().map(String::as_str),
             Some("fresh-from-chat-flow"),
             "snapshot should pick up disk-refreshed token, not stale base_config"
         );

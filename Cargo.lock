@@ -2691,6 +2691,8 @@ dependencies = [
  "cf-subagent-resolution",
  "cf-system-power",
  "cf-telemetry",
+ "cf-test-support",
+ "cf-test-utils",
  "cf-token-estimation",
  "cf-tool-protocol",
  "cf-tool-runtime",

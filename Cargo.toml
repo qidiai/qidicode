@@ -317,6 +317,7 @@ zstd = "0.13"
 # workspace-local crates
 ptyctl = { path = "crates/codegen/ptyctl" }
 cf-test-support = { path = "crates/codegen/cf-test-support" }
+cf-test-utils = { path = "crates/common/cf-test-utils" }
 
 cf-secrets = { path = "crates/codegen/cf-secrets" }
 cf-mixpanel = { path = "crates/codegen/cf-mixpanel" }
