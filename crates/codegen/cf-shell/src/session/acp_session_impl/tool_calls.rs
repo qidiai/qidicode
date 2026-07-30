@@ -1225,6 +1225,41 @@ impl SessionActor {
             PlanFileRead::Present(s) => Some(s.clone()),
             PlanFileRead::Absent | PlanFileRead::Unreadable => None,
         };
+        // Self-heal: a first `exit_plan_mode` with an empty/missing plan file is
+        // bounced back to the model with a nudge to write the plan, rather than
+        // surfacing an empty approval dialog the user has to dismiss. The budget
+        // is one-shot per planning session (`take_empty_exit_retry`), so a model
+        // that still exits empty falls through to the normal human approval below.
+        if is_exit_plan_mode
+            && plan_content.is_none()
+            && self.plan_mode.lock().take_empty_exit_retry()
+        {
+            tracing::info!(
+                tool_call_id = % tool_call_id,
+                "[exit_plan_mode] empty plan on first attempt — bouncing back to write the plan"
+            );
+            let message = format!(
+                "You called exit_plan_mode but the plan file at {} is empty. \
+                 Write your plan to that file (it is the only file you can edit in \
+                 plan mode), then call exit_plan_mode again. If this request \
+                 genuinely needs no plan, call exit_plan_mode once more to hand off \
+                 to the user.",
+                plan_file_path.display()
+            );
+            let tool_update = acp::ToolCallUpdate::new(
+                tool_call_id.clone(),
+                acp::ToolCallUpdateFields::new()
+                    .status(Some(acp::ToolCallStatus::Completed))
+                    .content(Some(vec![acp::ToolCallContent::from(
+                        acp::ContentBlock::Text(acp::TextContent::new(message.clone())),
+                    )])),
+            );
+            self.send_update(acp::SessionUpdate::ToolCallUpdate(tool_update), None)
+                .await;
+            let tool_chat = ConversationItem::tool_result(call.id.clone(), message);
+            self.chat_state_handle.push_tool_result(tool_chat);
+            return Ok(Err(ToolLoop::Continue));
+        }
         if should_intercept_exit_plan_approval(
             is_exit_plan_mode,
             is_cursor_switch_to_agent,

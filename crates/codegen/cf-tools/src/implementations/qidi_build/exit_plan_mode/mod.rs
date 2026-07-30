@@ -65,7 +65,7 @@ impl crate::types::tool_metadata::ToolMetadata for ExitPlanModeTool {
     fn description_template(&self) -> &str {
         r#"Exit plan mode and present your plan to the user.
 
-Use this after you have finished writing your plan to the plan file in plan mode."#
+Call this ONLY after you have written your plan to the plan file. Exiting with an empty plan file sends you back to continue planning on the first attempt — it does not hand off to the user."#
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {

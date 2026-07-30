@@ -77,6 +77,14 @@ pub struct PlanModeTracker {
     /// Lives inside the session directory:
     /// `~/.qidi/sessions/<cwd>/<session_id>/plan.md`
     plan_file_path: PathBuf,
+    /// One-shot self-heal budget: when the model calls `exit_plan_mode` with an
+    /// empty/missing plan file, the first such attempt is bounced back with a
+    /// nudge to write the plan instead of surfacing the empty approval UI to the
+    /// user. Set to `true` once that bounce has been spent; the next empty exit
+    /// falls through to the normal human approval. Reset to `false` whenever a
+    /// fresh planning session activates. Transient (not persisted): after a
+    /// restart an empty exit surfaces to the user immediately, which is safe.
+    empty_exit_retry_consumed: bool,
 }
 /// A buffered mid-turn activation reminder plus the state needed to roll the
 /// activation back if it is withdrawn before delivery.
@@ -116,6 +124,7 @@ impl PlanModeTracker {
             awaiting_plan_approval: false,
             pending_activation: None,
             plan_file_path: session_dir.join("plan.md"),
+            empty_exit_retry_consumed: false,
         }
     }
     /// Restore a tracker from a persisted snapshot.
@@ -144,6 +153,7 @@ impl PlanModeTracker {
             awaiting_plan_approval: snapshot.awaiting_plan_approval,
             pending_activation: None,
             plan_file_path: session_dir.join("plan.md"),
+            empty_exit_retry_consumed: false,
         }
     }
     /// Mark that the client is waiting on plan approval (`exit_plan_mode` parked).
@@ -210,6 +220,7 @@ impl PlanModeTracker {
             PlanModeState::ExitPending => {
                 self.state = PlanModeState::Active;
                 self.pending_exit_reminder = false;
+                self.empty_exit_retry_consumed = false;
                 true
             }
             _ => false,
@@ -224,6 +235,7 @@ impl PlanModeTracker {
         self.state = PlanModeState::Active;
         self.was_previously_active = true;
         self.reminder_count = 0;
+        self.empty_exit_retry_consumed = false;
         true
     }
     /// Mid-turn toggle: activate immediately and buffer the pre-rendered
@@ -242,6 +254,7 @@ impl PlanModeTracker {
         self.state = PlanModeState::Active;
         self.was_previously_active = true;
         self.reminder_count = 0;
+        self.empty_exit_retry_consumed = false;
         self.pending_activation = Some(PendingActivation {
             text: rendered_reminder,
             prior_was_previously_active,
@@ -268,6 +281,7 @@ impl PlanModeTracker {
         self.was_previously_active = true;
         self.reminder_count = 0;
         self.pending_exit_reminder = false;
+        self.empty_exit_retry_consumed = false;
         true
     }
     /// ExitPlanMode approved (agent-initiated exit).
@@ -338,6 +352,21 @@ impl PlanModeTracker {
     pub fn clear_pending_exit_reminder(&mut self) {
         self.pending_exit_reminder = false;
     }
+    /// Consume the one-shot empty-plan-exit retry budget.
+    ///
+    /// Returns `true` the first time it is called in a planning session (a
+    /// bounce is available: nudge the model to write the plan instead of
+    /// surfacing the empty approval UI). Every subsequent call returns `false`
+    /// until the next activation resets the budget, so a model that keeps
+    /// exiting empty falls through to the normal human approval on attempt two.
+    pub fn take_empty_exit_retry(&mut self) -> bool {
+        if self.empty_exit_retry_consumed {
+            false
+        } else {
+            self.empty_exit_retry_consumed = true;
+            true
+        }
+    }
     /// Called after compaction. Resets reminder counter so next
     /// injection is the full variant.
     pub fn reset_after_compaction(&mut self) {
@@ -374,6 +403,10 @@ ${%- endif %}
 
 You should build your plan by writing to or editing this file. \
 Note that this is the only file you are allowed to edit.
+
+You MUST write your plan to this file before calling \
+${{ tools.by_kind.exit_plan }}. Exiting with an empty plan file will send you \
+back to continue planning, not hand off to the user.
 
 Your turn should only end with either ${{ tools.by_kind.ask_user }} to clarify \
 requirements or ${{ tools.by_kind.exit_plan }} to present your plan to the user."
@@ -976,6 +1009,29 @@ mod tests {
         t.user_exit(false);
         assert_eq!(t.state(), PlanModeState::Inactive);
         assert!(!t.has_pending_exit_reminder());
+    }
+    #[test]
+    fn empty_exit_retry_is_one_shot_then_falls_through() {
+        let mut t = test_tracker();
+        t.enter_pending();
+        t.activate();
+        // First empty exit gets a bounce; second falls through to human approval.
+        assert!(t.take_empty_exit_retry());
+        assert!(!t.take_empty_exit_retry());
+        assert!(!t.take_empty_exit_retry());
+    }
+    #[test]
+    fn empty_exit_retry_resets_on_reactivation() {
+        let mut t = test_tracker();
+        t.enter_pending();
+        t.activate();
+        assert!(t.take_empty_exit_retry());
+        assert!(!t.take_empty_exit_retry());
+        // A fresh planning session restores the one-shot budget.
+        t.deactivate_approved();
+        t.activate_from_tool();
+        assert!(t.take_empty_exit_retry());
+        assert!(!t.take_empty_exit_retry());
     }
     #[test]
     fn complete_deferred_exit_when_not_exit_pending_is_noop() {
