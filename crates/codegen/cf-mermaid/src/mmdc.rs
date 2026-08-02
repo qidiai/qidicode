@@ -152,7 +152,7 @@ fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
+    
 
     /// Write an executable `#!/bin/sh` fake `mmdc` and return (dir-guard, path).
     /// render() invokes `mmdc --input $2 --output $4 --outputFormat svg --theme $8`,

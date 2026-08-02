@@ -184,8 +184,9 @@ fn reap_process_group(_child: &Child) {
 mod tests {
     use super::*;
     use std::process::Stdio;
-    use std::time::Instant;
+    
 
+    #[allow(dead_code)]
     fn detached(mut cmd: Command) -> Command {
         cmd.stdin(Stdio::null())
             .stdout(Stdio::null())

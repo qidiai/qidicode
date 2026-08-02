@@ -5183,7 +5183,7 @@ mod tests {
             tools: Some(vec!["read_file".into()]),
             ..Default::default()
         };
-        let mut cases = vec![(AgentDefinition::default_qidi_build(), true)];
+        let cases = vec![(AgentDefinition::default_qidi_build(), true)];
         for (mut definition, expected_injection) in cases {
             overrides.apply_to_definition(&mut definition);
             assert_eq!(definition.tools, vec!["read_file".to_string()]);

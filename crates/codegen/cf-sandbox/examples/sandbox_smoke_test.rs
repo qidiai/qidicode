@@ -14,8 +14,8 @@
 //! cargo run -p xai-grok-sandbox --example sandbox_smoke_test -- read-only
 //! ```
 
+#[cfg(unix)]
 use std::path::Path;
-use cf_sandbox::{ProfileName, SandboxManager};
 
 // Kernel-enforcement smoke test is unix-only (Landlock/Seatbelt via nono).
 // Windows sandboxing uses Job Objects and is exercised by the unit tests.
@@ -133,6 +133,7 @@ fn main() {
     println!("\n✅ Smoke test complete");
 }
 
+#[cfg(unix)]
 fn test_read(label: &str, path: &Path) {
     if path.is_file() {
         match std::fs::read(path) {
@@ -162,6 +163,7 @@ fn test_read(label: &str, path: &Path) {
     }
 }
 
+#[cfg(unix)]
 fn test_write(label: &str, path: &Path) {
     match std::fs::write(path, b"sandbox-test") {
         Ok(()) => {

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use super::support::*;
 use super::*;
 use cf_tools::reminders::task_completion::consumed_completion_ids;

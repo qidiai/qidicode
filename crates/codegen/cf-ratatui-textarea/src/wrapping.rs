@@ -346,6 +346,7 @@ fn slice_line_spans<'a>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(elided_lifetimes_in_paths)]
     use super::*;
     use itertools::Itertools as _;
     use pretty_assertions::assert_eq;

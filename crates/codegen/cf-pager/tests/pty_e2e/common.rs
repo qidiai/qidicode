@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Shared constants and helpers for PTY e2e tests.
 //!
 //! Individual test modules import via `use super::common::*`.

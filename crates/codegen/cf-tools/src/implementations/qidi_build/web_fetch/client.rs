@@ -1222,7 +1222,7 @@ mod tests {
     fn strip_base64_data_uris_regex(content: &str) -> String {
         let re = regex::Regex::new(r"data:([^;,\s]{1,80});base64,[A-Za-z0-9+/=]+")
             .expect("valid base64 data URI regex");
-        re.replace_all(content, |caps: &regex::Captures| {
+        re.replace_all(content, |caps: &regex::Captures<'_>| {
             let mime = caps.get(1).map_or("unknown", |m| m.as_str());
             format!("[base64 {mime} data removed]")
         })

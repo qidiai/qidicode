@@ -711,6 +711,7 @@ mod tests {
         plan_overwrite: Option<Vec<u8>>,
         /// When `Some`, the spawner replaces `plan_target` with a symlink to
         /// this path, simulating a strategist that plants a symlink.
+        #[allow(dead_code)]
         plan_symlink_to: Option<PathBuf>,
         plan_target: PathBuf,
         last_prompt: Mutex<Option<String>>,

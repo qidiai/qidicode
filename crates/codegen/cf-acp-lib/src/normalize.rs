@@ -69,6 +69,7 @@ pub(crate) fn normalize_json_line(line: Vec<u8>) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(elided_lifetimes_in_paths)]
     use agent_client_protocol::RawIncomingMessage;
 
     use super::*;

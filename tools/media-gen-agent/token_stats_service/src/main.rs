@@ -239,7 +239,7 @@ fn append_record(path: &PathBuf, record: &StatsRecord) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn sanitize_tool_names(mut body: Vec<u8>) -> Vec<u8> {
+fn sanitize_tool_names(body: Vec<u8>) -> Vec<u8> {
     let mut value = match serde_json::from_slice::<serde_json::Value>(&body) {
         Ok(v) => v,
         Err(_) => return body,
@@ -264,7 +264,7 @@ fn sanitize_tool_names(mut body: Vec<u8>) -> Vec<u8> {
     body
 }
 
-fn restore_tool_names(mut body: Vec<u8>) -> Vec<u8> {
+fn restore_tool_names(body: Vec<u8>) -> Vec<u8> {
     let mut value = match serde_json::from_slice::<serde_json::Value>(&body) {
         Ok(v) => v,
         Err(_) => return body,

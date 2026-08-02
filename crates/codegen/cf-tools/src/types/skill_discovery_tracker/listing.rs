@@ -795,7 +795,7 @@ mod tests {
                 display_path: "/p/SKILL.md".to_owned(),
             }
         }
-        fn split(e: &SkillEntry, total: usize) -> (usize, usize) {
+        fn split(e: &SkillEntry<'_>, total: usize) -> (usize, usize) {
             e.proportional_budgets(e.func_desc().len().max(1), total)
         }
 

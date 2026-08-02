@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! End-to-end coverage for the goal-classifier integration in
 //! `drain_goal_updates`. Each test drives an `update_goal(...)`
 //! through a real `SessionActor` against a stub subagent
