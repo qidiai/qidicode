@@ -1,4 +1,4 @@
-﻿//! Dashboard dispatchers: attach, overlays, rows, renames, and permissions.
+//! Dashboard dispatchers: attach, overlays, rows, renames, and permissions.
 
 use super::ctx::{show_welcome, surface_yolo_launch_block_notice};
 use super::dashboard_telemetry::{

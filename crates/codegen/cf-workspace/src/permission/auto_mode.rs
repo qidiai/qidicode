@@ -1,4 +1,4 @@
-﻿//! Auto permission mode: LLM transcript classifier with safe fast-paths.
+//! Auto permission mode: LLM transcript classifier with safe fast-paths.
 //!
 //! Port of common agent auto-permission classifier semantics adapted to Grok's
 //! `AccessKind` permission gate (classifier blocks prompt the user; upstream

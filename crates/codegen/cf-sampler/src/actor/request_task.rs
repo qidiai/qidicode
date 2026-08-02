@@ -4,6 +4,7 @@
 //! consumes a Layer 2 stream from the matching backend transform.
 //! Cancellation is cooperative via `CancellationToken`.
 
+use std::collections::VecDeque;
 use std::pin::pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -24,7 +25,8 @@ use crate::config::{RetryPolicy, SamplerConfig};
 use crate::events::{SamplingErrorInfo, SamplingErrorKind, SamplingEvent};
 use crate::metrics::InferenceLatencyStats;
 use crate::retry::{
-    self as retry_mod, RetryDecision, classify_error, clone_error, resolve_max_retries,
+    self as retry_mod, RetryDecision, classify_error, clone_error, is_failover_error,
+    resolve_failover_max_retries, resolve_max_retries,
 };
 use crate::stream::{stream_chat_completions, stream_messages, stream_responses};
 use crate::types::RequestId;
@@ -90,6 +92,15 @@ pub(crate) async fn run_request_task(
             .unwrap_or(DEFAULT_IDLE_TIMEOUT_SECS),
     );
     let max_retries = resolve_max_retries(config.max_retries.or(Some(retry_policy.max_retries)));
+    let failover_max_retries = resolve_failover_max_retries();
+
+    // Model failover state: fully resolved fallback configs (first_available
+    // order) drained out of the primary config, plus the models already
+    // attempted (cycle guard). Empty for auxiliary requests, which never
+    // populate `fallback_configs`.
+    let mut config = config;
+    let mut fallback_queue: VecDeque<SamplerConfig> = config.fallback_configs.drain(..).collect();
+    let mut tried_models: Vec<String> = vec![config.model.clone()];
 
     // Build the initial client. Configuration errors here are fatal
     // (no point retrying with the same broken config).
@@ -115,6 +126,9 @@ pub(crate) async fn run_request_task(
 
     let mut request = request;
     let mut retry_count: u32 = 0;
+    // Model recorded on `sampling_span`; refreshed after a failover switch
+    // so the span stays honest about which model later attempts hit.
+    let mut span_model = config.model.clone();
     // Doom-loop recovery keeps its own resample budget, independent of the
     // transport/empty budget above.
     let doom_policy = config.doom_loop_recovery;
@@ -122,6 +136,11 @@ pub(crate) async fn run_request_task(
     let mut doom_retry_count: u32 = 0;
 
     loop {
+        if config.model != span_model {
+            sampling_span.record("model", config.model.as_str());
+            sampling_span.record("base_url", config.base_url.as_str());
+            span_model = config.model.clone();
+        }
         if cancel_token.is_cancelled() {
             handle_cancellation(&event_tx, &request_id, &mut completion_tx);
             return request_id;
@@ -197,12 +216,15 @@ pub(crate) async fn run_request_task(
                     &err,
                     &mut retry_count,
                     max_retries,
+                    failover_max_retries,
                     &retry_policy,
                     &event_tx,
                     &request_id,
                     &mut request,
                     &mut client,
-                    &config,
+                    &mut config,
+                    &mut fallback_queue,
+                    &mut tried_models,
                     &mut completion_tx,
                 )
                 .await
@@ -239,12 +261,15 @@ pub(crate) async fn run_request_task(
                     &error,
                     &mut retry_count,
                     max_retries,
+                    failover_max_retries,
                     &retry_policy,
                     &event_tx,
                     &request_id,
                     &mut request,
                     &mut client,
-                    &config,
+                    &mut config,
+                    &mut fallback_queue,
+                    &mut tried_models,
                     &mut completion_tx,
                 )
                 .await
@@ -261,12 +286,15 @@ pub(crate) async fn run_request_task(
                     &error,
                     &mut retry_count,
                     max_retries,
+                    failover_max_retries,
                     &retry_policy,
                     &event_tx,
                     &request_id,
                     &mut request,
                     &mut client,
-                    &config,
+                    &mut config,
+                    &mut fallback_queue,
+                    &mut tried_models,
                     &mut completion_tx,
                 )
                 .await
@@ -288,14 +316,27 @@ async fn apply_retry_decision(
     err: &SamplingError,
     retry_count: &mut u32,
     max_retries: u32,
+    failover_max_retries: u32,
     retry_policy: &RetryPolicy,
     event_tx: &mpsc::UnboundedSender<SamplingEvent>,
     request_id: &RequestId,
     request: &mut ConversationRequest,
     client: &mut SamplingClient,
-    config: &SamplerConfig,
+    config: &mut SamplerConfig,
+    fallback_queue: &mut VecDeque<SamplerConfig>,
+    tried_models: &mut Vec<String>,
     completion_tx: &mut Option<oneshot::Sender<CompletionResult>>,
 ) -> bool {
+    // With a fallback still queued, cap retries on failover-eligible
+    // errors so the switch happens after a couple of attempts instead
+    // of the full budget (minutes of backoff against a dead endpoint).
+    // Never raises the cap, so QIDI_MAX_RETRIES / model config stay a
+    // global upper bound; without fallbacks the budget is unchanged.
+    let max_retries = if !fallback_queue.is_empty() && is_failover_error(err) {
+        max_retries.min(failover_max_retries)
+    } else {
+        max_retries
+    };
     let rate_limit_threshold = if retry_policy.rate_limit_retry_threshold == 0 {
         retry_mod::RATE_LIMIT_RETRY_THRESHOLD
     } else {
@@ -401,11 +442,90 @@ async fn apply_retry_decision(
                 }
                 exhausted_span.in_scope(|| {});
             }
+            // Model failover (first_available): on a failover-eligible
+            // terminal error, switch to the next configured fallback model
+            // instead of failing the request. Auth/4xx errors never reach
+            // here as failover-eligible, and auth errors are EmitToSession
+            // anyway.
+            if try_model_failover(
+                err,
+                retry_count,
+                request,
+                config,
+                client,
+                fallback_queue,
+                tried_models,
+            ) {
+                return true;
+            }
             emit_failed(event_tx, request_id, &fatal_err);
             send_completion(completion_tx, Err(fatal_err));
             false
         }
     }
+}
+
+/// Switch to the next viable fallback config, if any. Returns `true` when
+/// the switch happened (the caller continues the retry loop on the new
+/// model with a fresh retry budget). Skips models already attempted
+/// (cycle guard) and models whose client fails to build. Pops from
+/// `fallback_queue`, so an entry is only ever attempted once per request.
+fn try_model_failover(
+    err: &SamplingError,
+    retry_count: &mut u32,
+    request: &mut ConversationRequest,
+    config: &mut SamplerConfig,
+    client: &mut SamplingClient,
+    fallback_queue: &mut VecDeque<SamplerConfig>,
+    tried_models: &mut Vec<String>,
+) -> bool {
+    if fallback_queue.is_empty() || !is_failover_error(err) {
+        return false;
+    }
+    while let Some(mut next) = fallback_queue.pop_front() {
+        if tried_models.iter().any(|m| m == &next.model) {
+            tracing::warn!(
+                target: crate::sampling_log::TARGET,
+                model = %next.model,
+                "model failover: skipping already-tried fallback model"
+            );
+            continue;
+        }
+        // Single-level expansion: a fallback's own fallbacks are ignored.
+        next.fallback_configs.clear();
+        match SamplingClient::new(next.clone()) {
+            Ok(fresh) => {
+                tracing::warn!(
+                    target: crate::sampling_log::TARGET,
+                    from_model = %config.model,
+                    to_model = %next.model,
+                    reason = %err,
+                    "model failover: switching to fallback model"
+                );
+                tried_models.push(next.model.clone());
+                *retry_count = 0;
+                *config = next;
+                // The per-request model override (when set by the shell)
+                // still names the failed model, and `apply_defaults` never
+                // overwrites an explicit value — retarget it so the request
+                // body routes to the fallback. Re-done on every switch, so
+                // multi-level chains stay correct.
+                request.model = Some(config.model.clone());
+                *client = fresh;
+                return true;
+            }
+            Err(build_err) => {
+                tracing::warn!(
+                    target: crate::sampling_log::TARGET,
+                    model = %next.model,
+                    error = %build_err,
+                    "model failover: failed to build client for fallback model; skipping"
+                );
+                tried_models.push(next.model);
+            }
+        }
+    }
+    false
 }
 
 /// Run a single attempt: build the raw stream, drive it through the
@@ -861,5 +981,107 @@ mod tests {
             SamplingError::EventStreamError(msg) => assert_eq!(msg, "first"),
             other => panic!("expected EventStreamError, got {other:?}"),
         }
+    }
+
+    fn failover_config(model: &str) -> SamplerConfig {
+        SamplerConfig {
+            model: model.to_string(),
+            base_url: format!("http://127.0.0.1:9800/{model}/v1"),
+            ..SamplerConfig::default()
+        }
+    }
+
+    fn bad_gateway() -> SamplingError {
+        SamplingError::Api {
+            status: reqwest::StatusCode::BAD_GATEWAY,
+            message: "upstream dead".to_string(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+        }
+    }
+
+    /// P1 regression: a failover switch must retarget the request's explicit
+    /// model override. `apply_defaults` never overwrites an existing value,
+    /// so a stale override keeps the failed model in the request body and
+    /// the gateway routes to the same dead upstream. Also proves the
+    /// retargeting repeats on every switch of a multi-level chain.
+    #[test]
+    fn failover_retargets_request_model_on_every_switch() {
+        let mut config = failover_config("agnes-2.0-flash");
+        let mut client = SamplingClient::new(config.clone()).expect("client builds");
+        let mut queue: VecDeque<SamplerConfig> =
+            [failover_config("glm-5.2"), failover_config("kimi-k3")].into();
+        let mut tried = vec![config.model.clone()];
+        let mut retry_count = 3;
+        let mut request = ConversationRequest {
+            model: Some("agnes-2.0-flash".to_string()),
+            ..ConversationRequest::default()
+        };
+
+        // First switch: override follows the fallback model.
+        assert!(try_model_failover(
+            &bad_gateway(),
+            &mut retry_count,
+            &mut request,
+            &mut config,
+            &mut client,
+            &mut queue,
+            &mut tried,
+        ));
+        assert_eq!(request.model.as_deref(), Some("glm-5.2"));
+        assert_eq!(config.model, "glm-5.2");
+        assert_eq!(retry_count, 0);
+
+        // Second switch (multi-level chain): retargeted again.
+        assert!(try_model_failover(
+            &bad_gateway(),
+            &mut retry_count,
+            &mut request,
+            &mut config,
+            &mut client,
+            &mut queue,
+            &mut tried,
+        ));
+        assert_eq!(request.model.as_deref(), Some("kimi-k3"));
+        assert_eq!(config.model, "kimi-k3");
+
+        // Chain exhausted: no switch, request left as-is.
+        assert!(!try_model_failover(
+            &bad_gateway(),
+            &mut retry_count,
+            &mut request,
+            &mut config,
+            &mut client,
+            &mut queue,
+            &mut tried,
+        ));
+        assert_eq!(request.model.as_deref(), Some("kimi-k3"));
+    }
+
+    /// A non-transferable error must not switch models nor touch the
+    /// request's model override.
+    #[test]
+    fn failover_ineligible_error_leaves_request_model_alone() {
+        let mut config = failover_config("agnes-2.0-flash");
+        let mut client = SamplingClient::new(config.clone()).expect("client builds");
+        let mut queue: VecDeque<SamplerConfig> = [failover_config("glm-5.2")].into();
+        let mut tried = vec![config.model.clone()];
+        let mut retry_count = 3;
+        let mut request = ConversationRequest {
+            model: Some("agnes-2.0-flash".to_string()),
+            ..ConversationRequest::default()
+        };
+        assert!(!try_model_failover(
+            &SamplingError::Auth("bad key".into()),
+            &mut retry_count,
+            &mut request,
+            &mut config,
+            &mut client,
+            &mut queue,
+            &mut tried,
+        ));
+        assert_eq!(request.model.as_deref(), Some("agnes-2.0-flash"));
+        assert_eq!(retry_count, 3);
     }
 }

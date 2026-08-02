@@ -3226,6 +3226,7 @@ pub fn resolve_model_list(
     }
     apply_global_extra_headers(&mut resolved, &cfg.models);
     apply_global_scalar_defaults(&mut resolved, &cfg.models);
+    apply_env_base_url_overrides(&mut resolved);
     for entry in resolved.values_mut() {
         entry.info.derive_reasoning_effort_fields();
     }
@@ -3590,6 +3591,9 @@ pub struct ConfigModelOverride {
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub api_backend: Option<ApiBackend>,
+    /// Per-model auth scheme override: "bearer" (Authorization) or
+    /// "x_api_key" (x-api-key header).
+    pub auth_scheme: Option<AuthScheme>,
     #[serde(default)]
     pub extra_headers: IndexMap<String, String>,
     pub context_window: Option<u64>,
@@ -3617,6 +3621,12 @@ pub struct ConfigModelOverride {
     pub compaction_at_tokens: Option<CompactionAtTokens>,
     pub show_model_fingerprint: Option<bool>,
     pub stream_tool_calls: Option<bool>,
+    /// Ordered fallback model IDs (first_available). When the primary
+    /// model's retry budget is exhausted on a failover-eligible error
+    /// (connect/timeout/5xx), the sampler switches to these models in
+    /// order, each with its own catalog entry (base_url, credentials,
+    /// api_backend). Empty (the default) disables failover.
+    pub fallback_models: Vec<String>,
 }
 impl ConfigModelOverride {
     pub(crate) fn apply(
@@ -3652,6 +3662,9 @@ impl ConfigModelOverride {
         }
         if let Some(ref v) = self.api_backend {
             entry.info.api_backend = v.clone();
+        }
+        if let Some(v) = self.auth_scheme {
+            entry.info.auth_scheme = v;
         }
         if !self.extra_headers.is_empty() {
             entry.info.extra_headers = self.extra_headers.clone();
@@ -3714,10 +3727,129 @@ impl ConfigModelOverride {
         if self.api_base_url.is_some() {
             entry.api_base_url.clone_from(&self.api_base_url);
         }
+        if !self.fallback_models.is_empty() {
+            entry.fallback_models = self.fallback_models.clone();
+        }
         if self.supported_in_api.is_none() && (self.api_key.is_some() || self.env_key.is_some()) {
             entry.info.supported_in_api = true;
         }
+        if self.base_url.is_some() {
+            entry.info.base_url =
+                normalize_model_base_url(&entry.info.base_url, &entry.info.api_backend);
+        }
         entry
+    }
+}
+/// Normalize a user-supplied model `base_url` (config.toml `[model.<id>]`
+/// override or `QIDI_LLM_BASE_URL_<MODEL>` env override). Trims whitespace
+/// and trailing slashes for every backend; for `chat_completions` a pasted
+/// full endpoint (`…/chat/completions`) is stripped back to its base, and a
+/// bare origin without a path (e.g. `http://127.0.0.1:9800`) gets the
+/// conventional `/v1` appended so both spellings resolve to
+/// `…/v1/chat/completions`. URLs that already carry a custom path are left
+/// untouched (Azure-style endpoints must stay verbatim). Built-in defaults
+/// and remote-prefetched entries never pass through here.
+pub fn normalize_model_base_url(raw: &str, api_backend: &ApiBackend) -> String {
+    let mut url = raw.trim().trim_end_matches('/').to_string();
+    if matches!(api_backend, ApiBackend::ChatCompletions) {
+        if let Some(stripped) = url.strip_suffix("/chat/completions") {
+            url = stripped.trim_end_matches('/').to_string();
+        }
+        let has_path = url
+            .split_once("://")
+            .map(|(_, rest)| rest.contains('/'))
+            .unwrap_or(false);
+        if !url.is_empty() && !has_path {
+            url.push_str("/v1");
+        }
+    }
+    url
+}
+/// Env-var name for a per-model base_url override: the catalog key (or model
+/// slug) uppercased with every non-alphanumeric char mapped to `_`, e.g.
+/// `agnes-2.0-flash` → `QIDI_LLM_BASE_URL_AGNES_2_0_FLASH`.
+pub fn base_url_env_var(model: &str) -> String {
+    let suffix: String = model
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("QIDI_LLM_BASE_URL_{suffix}")
+}
+/// Pure collision scan behind the env-override warning: groups every catalog
+/// entry's env-var candidates (catalog key + routing slug) by env-var name and
+/// returns the names claimed by two or more distinct entries, each paired with
+/// the colliding catalog keys. [`base_url_env_var`] is non-injective
+/// (`agnes-2.0-flash` and `agnes-2-0-flash` both map to
+/// `QIDI_LLM_BASE_URL_AGNES_2_0_FLASH`), so one set variable can silently
+/// override several models; a key and its own routing slug sharing a name is
+/// not a collision. Order follows catalog order for deterministic output.
+pub fn env_base_url_collisions(
+    resolved: &IndexMap<String, ModelEntry>,
+) -> Vec<(String, Vec<String>)> {
+    let mut by_env: IndexMap<String, Vec<String>> = IndexMap::new();
+    for (key, entry) in resolved {
+        let key_var = base_url_env_var(key);
+        let mut vars = vec![key_var];
+        if entry.info.model != *key {
+            let slug_var = base_url_env_var(&entry.info.model);
+            if !vars.contains(&slug_var) {
+                vars.push(slug_var);
+            }
+        }
+        for var in vars {
+            by_env.entry(var).or_default().push(key.clone());
+        }
+    }
+    by_env
+        .into_iter()
+        .filter(|(_, keys)| keys.len() > 1)
+        .collect()
+}
+/// Final layer of [`resolve_model_list`]: `QIDI_LLM_BASE_URL_<MODEL>` env
+/// override. Applied after config overrides so the precedence is
+/// ENV > config.toml > built-in default. Matches on the catalog key first,
+/// then the routing slug. Empty/whitespace values are ignored.
+fn apply_env_base_url_overrides(resolved: &mut IndexMap<String, ModelEntry>) {
+    // Observability only: `base_url_env_var` is non-injective, so warn when a
+    // set variable is about to override more than one model. The override
+    // behavior itself is unchanged (every colliding model still gets the URL).
+    for (env_var, model_keys) in env_base_url_collisions(resolved) {
+        if std::env::var(&env_var).is_ok_and(|v| !v.trim().is_empty()) {
+            tracing::warn!(
+                env_var = % env_var, models = ? model_keys,
+                "base_url env override name collision: one variable overrides multiple models"
+            );
+        }
+    }
+    for (key, entry) in resolved.iter_mut() {
+        let from_env = std::env::var(base_url_env_var(key))
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| {
+                (entry.info.model != *key)
+                    .then(|| {
+                        std::env::var(base_url_env_var(&entry.info.model))
+                            .ok()
+                            .filter(|v| !v.trim().is_empty())
+                    })
+                    .flatten()
+            });
+        if let Some(raw) = from_env {
+            let url = normalize_model_base_url(&raw, &entry.info.api_backend);
+            tracing::debug!(
+                model_key = % key, base_url = % url,
+                "env base_url override applied"
+            );
+            entry.info.base_url = url;
+            // Like a config-override base_url: route every auth path there.
+            entry.api_base_url = None;
+        }
     }
 }
 /// Shared model metadata — the common fields across all model sources.
@@ -3902,6 +4034,12 @@ pub struct ModelEntry {
     pub env_key: Option<EnvKeys>,
     /// When set, `base_url` is used for session auth, `api_base_url` for API-key auth.
     pub api_base_url: Option<String>,
+    /// Ordered fallback model IDs from `[model.<id>] fallback_models`
+    /// (first_available). Resolved against the catalog when the main
+    /// conversation sampling config is built; `serde(default)` keeps
+    /// pre-existing serialized entries deserializable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_models: Vec<String>,
 }
 impl ModelEntry {
     /// Minimal fallback entry for an unknown model slug.
@@ -3913,6 +4051,7 @@ impl ModelEntry {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         }
     }
     pub fn info(&self) -> &ModelInfo {
@@ -3924,6 +4063,7 @@ impl ModelEntry {
             api_key: entry.api_key.clone(),
             env_key: entry.env_key.clone(),
             api_base_url: entry.api_base_url.clone(),
+            fallback_models: Vec::new(),
         }
     }
     /// The model's own (BYOK) credential: a non-empty `api_key`, else the first
@@ -4544,6 +4684,7 @@ pub fn resolve_aux_model_sampling_config(
             api_key: Some(bearer),
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         };
         let credentials = resolve_credentials_enforced(&entry, session_key, disable_api_key_auth);
         let sampler = sampling_config_for_model(
@@ -4668,6 +4809,7 @@ pub fn sampling_config_for_model(
         compaction_at_tokens: info.compaction_at_tokens,
         doom_loop_recovery: None,
         header_injector: None,
+        fallback_configs: Vec::new(),
     }
 }
 /// Fold URL-derived headers into `extra_headers`.
@@ -4723,6 +4865,114 @@ pub fn resolve_model_to_sampling_config(
         None,
     ))
 }
+/// Catalog key for `model_id`: the entry's own key when directly present,
+/// else the key of the first entry whose routing slug matches. Mirrors
+/// [`find_model_by_id`] so the failover planner dedupes on the same
+/// identity the lookup resolves to.
+fn find_model_key_by_id<'a>(
+    models: &'a IndexMap<String, ModelEntry>,
+    model_id: &str,
+) -> Option<&'a str> {
+    if let Some((key, _)) = models.get_key_value(model_id) {
+        return Some(key.as_str());
+    }
+    models
+        .iter()
+        .find(|(_, m)| m.model == model_id)
+        .map(|(key, _)| key.as_str())
+}
+/// Deduped, cycle-free failover plan for a model's `fallback_models` list.
+/// Pure data so the skip logic is testable without a sampler.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct FallbackChainPlan {
+    /// Catalog keys to expand into sampler configs, in first_available order.
+    pub resolved: Vec<String>,
+    /// Configured IDs skipped because they are not in the catalog.
+    pub skipped_missing: Vec<String>,
+    /// Configured IDs skipped because they repeat the primary model or an
+    /// earlier chain entry (cycle guard).
+    pub skipped_duplicate: Vec<String>,
+}
+/// Plan the failover chain for `primary_id`: resolve each configured
+/// fallback ID to its catalog key, drop IDs missing from the catalog, and
+/// drop repeats of the primary or of earlier entries. Single-level by
+/// construction — the plan never follows a fallback's own `fallback_models`.
+pub fn plan_fallback_chain(
+    primary_id: &str,
+    fallback_ids: &[String],
+    models: &IndexMap<String, ModelEntry>,
+) -> FallbackChainPlan {
+    let mut plan = FallbackChainPlan::default();
+    let mut seen: Vec<String> = vec![
+        find_model_key_by_id(models, primary_id)
+            .unwrap_or(primary_id)
+            .to_owned(),
+    ];
+    for id in fallback_ids {
+        match find_model_key_by_id(models, id) {
+            None => plan.skipped_missing.push(id.clone()),
+            Some(key) => {
+                if seen.iter().any(|s| s == key) {
+                    plan.skipped_duplicate.push(id.clone());
+                } else {
+                    seen.push(key.to_owned());
+                    plan.resolved.push(key.to_owned());
+                }
+            }
+        }
+    }
+    plan
+}
+/// Resolve `primary_id`'s configured `fallback_models` into fully-formed
+/// `SamplerConfig`s — each with the fallback model's own catalog entry
+/// (base_url, credentials, api_backend). Missing/duplicate IDs are skipped
+/// with a warning. Only the main conversation path calls this; auxiliary
+/// samplers (summary, web search, image describe) never populate
+/// `fallback_configs`.
+pub fn resolve_fallback_sampler_configs(
+    primary_id: &str,
+    models: &IndexMap<String, ModelEntry>,
+    session_key: Option<&str>,
+    alpha_test_key: Option<String>,
+    client_version: Option<String>,
+) -> Vec<SamplerConfig> {
+    let Some(primary) = find_model_by_id(models, primary_id) else {
+        return Vec::new();
+    };
+    if primary.fallback_models.is_empty() {
+        return Vec::new();
+    }
+    let plan = plan_fallback_chain(primary_id, &primary.fallback_models, models);
+    for id in &plan.skipped_missing {
+        tracing::warn!(
+            primary_model = %primary_id,
+            fallback_model = %id,
+            "fallback model not found in catalog; skipping"
+        );
+    }
+    for id in &plan.skipped_duplicate {
+        tracing::warn!(
+            primary_model = %primary_id,
+            fallback_model = %id,
+            "duplicate fallback model in chain; skipping (cycle guard)"
+        );
+    }
+    plan.resolved
+        .iter()
+        .filter_map(|key| {
+            let entry = models.get(key)?;
+            let credentials = resolve_credentials(entry, session_key);
+            Some(sampling_config_for_model(
+                entry,
+                credentials,
+                alpha_test_key.clone(),
+                client_version.clone(),
+                None,
+                None,
+            ))
+        })
+        .collect()
+}
 fn resolve_hidden_default_web_search_sampling_config(
     model_id: &str,
     session_key: Option<&str>,
@@ -4767,6 +5017,7 @@ fn resolve_hidden_default_web_search_sampling_config(
         api_key: None,
         env_key: None,
         api_base_url: None,
+        fallback_models: Vec::new(),
     };
     let credentials = resolve_credentials_enforced(&entry, session_key, disable_api_key_auth);
     sampling_config_for_model(
@@ -5422,6 +5673,7 @@ reasoning_effort = "low"
             api_key: api_key.map(|s| s.to_string()),
             env_key: env_key.map(EnvKeys::single),
             api_base_url: api_base_url.map(|s| s.to_string()),
+            fallback_models: Vec::new(),
         }
     }
     /// The effective-model RE-support lookup must use the model ACTUALLY used:
@@ -10617,6 +10869,7 @@ default = "grok-4.5"
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         }
     }
     #[test]

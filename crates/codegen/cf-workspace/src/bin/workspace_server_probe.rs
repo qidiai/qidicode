@@ -159,8 +159,8 @@ async fn connect_and_bind(
     // closed: bind with exactly the tools the checks below invoke.
     let metadata = json!({
         "tools": [
-            {"id": "cf_tools:run_terminal_cmd", "name_override": "run_terminal_command"},
-            {"id": "cf_tools:read_file"},
+            {"id": "cf_tools::run_terminal_cmd", "name_override": "run_terminal_command"},
+            {"id": "cf_tools::read_file"},
         ],
     });
     let tools = harness

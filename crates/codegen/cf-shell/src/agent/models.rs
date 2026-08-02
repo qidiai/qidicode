@@ -1389,6 +1389,7 @@ fn build_prefetched_map(
             api_key: None,
             env_key: None,
             api_base_url: m.api_base_url.clone().or(api_base_url_override.clone()),
+            fallback_models: Vec::new(),
         };
         map.insert(key, entry);
     }
@@ -2016,6 +2017,7 @@ mod tests {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         };
         flagged.info.show_model_fingerprint = true;
         mgr.insert_test_entry("fp-model", flagged);
@@ -2028,6 +2030,7 @@ mod tests {
                 api_key: None,
                 env_key: None,
                 api_base_url: None,
+                fallback_models: Vec::new(),
             },
         );
 
@@ -2038,6 +2041,7 @@ mod tests {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         };
         custom.info.show_model_fingerprint = true;
         mgr.insert_test_entry("enterprise-key", custom);
@@ -2208,6 +2212,7 @@ mod tests {
                 api_key: None,
                 env_key: None,
                 api_base_url: None,
+                fallback_models: Vec::new(),
             },
         );
 
@@ -2262,6 +2267,7 @@ mod tests {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         };
         reasoning_entry.info.supports_reasoning_effort = true;
         prefetched.insert("reasoning-model".to_string(), reasoning_entry);
@@ -2284,6 +2290,7 @@ mod tests {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         };
         prefetched.insert("plain-model".to_string(), plain_entry);
 
@@ -2311,6 +2318,7 @@ mod tests {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         };
         no_none.info.supports_reasoning_effort = true;
         no_none.info.reasoning_efforts = vec![ReasoningEffortOption {
@@ -2329,6 +2337,7 @@ mod tests {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         };
         with_none.info.supports_reasoning_effort = true;
         with_none.info.reasoning_efforts = vec![ReasoningEffortOption {
@@ -2435,6 +2444,7 @@ mod tests {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         };
         reasoning_entry.info.supports_reasoning_effort = true;
         prefetched.insert("reasoning-model".to_string(), reasoning_entry);
@@ -2444,6 +2454,7 @@ mod tests {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         };
         prefetched.insert("plain-model".to_string(), plain_entry);
 
@@ -2486,6 +2497,7 @@ mod tests {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         }
     }
 
@@ -3269,6 +3281,7 @@ mod tests {
                 api_key: None,
                 env_key: None,
                 api_base_url: None,
+                fallback_models: Vec::new(),
             },
         );
 
@@ -3296,6 +3309,7 @@ mod tests {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         };
         oauth_only.info.supported_in_api = false;
         catalog.insert("oauth-only".to_string(), oauth_only);
@@ -3305,6 +3319,7 @@ mod tests {
             api_key: None,
             env_key: None,
             api_base_url: None,
+            fallback_models: Vec::new(),
         };
         catalog.insert("public-model".to_string(), public);
 

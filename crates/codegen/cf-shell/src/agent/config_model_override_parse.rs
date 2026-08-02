@@ -510,6 +510,7 @@ mod tests {
             temperature: Some(0.5),
             top_p: Some(0.9),
             api_backend: Some(ApiBackend::Messages),
+            auth_scheme: Some(cf_sampler::AuthScheme::XApiKey),
             extra_headers: [("x-team".to_owned(), "codegen".to_owned())]
                 .into_iter()
                 .collect(),
@@ -536,6 +537,7 @@ mod tests {
             compaction_at_tokens: Some(CompactionAtTokens::Fixed(100_000)),
             show_model_fingerprint: Some(true),
             stream_tool_calls: Some(false),
+            fallback_models: vec!["glm-5.2".to_string()],
         }
     }
 

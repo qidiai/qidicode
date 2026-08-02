@@ -1,4 +1,4 @@
-﻿//! Transcript export, block copying, viewer/modal, and input-log dump dispatchers.
+//! Transcript export, block copying, viewer/modal, and input-log dump dispatchers.
 
 use super::ctx::with_active_agent;
 use super::session::lifecycle::skip_picker_and_create_session;

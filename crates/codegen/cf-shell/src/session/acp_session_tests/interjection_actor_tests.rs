@@ -1,4 +1,4 @@
-﻿//! Mid-turn interjection images: queue-row harvest and the
+//! Mid-turn interjection images: queue-row harvest and the
 //! `drain_pending_interjections` image pipeline.
 use super::support::*;
 use super::*;

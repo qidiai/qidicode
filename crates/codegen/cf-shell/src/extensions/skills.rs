@@ -1,4 +1,4 @@
-﻿use agent_client_protocol as acp;
+use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
 
 use crate::util::config as cli_config;

@@ -1,4 +1,4 @@
-﻿//! Laziness / stop-detector concern for `SessionActor`.
+//! Laziness / stop-detector concern for `SessionActor`.
 
 use super::*;
 

@@ -1396,12 +1396,12 @@ impl AgentDefinition {
         file_tools: Vec<cf_tools::registry::types::ToolConfig>,
     ) {
         const FILE_TOOL_SLOTS: &[[&str; 2]] = &[
-            ["cf_tools:read_file", "cf_tools:hashline_read"],
+            ["cf_tools::read_file", "cf_tools::hashline_read"],
             [
-                "cf_tools:search_replace",
-                "cf_tools:hashline_edit",
+                "cf_tools::search_replace",
+                "cf_tools::hashline_edit",
             ],
-            ["cf_tools:grep", "cf_tools:hashline_grep"],
+            ["cf_tools::grep", "cf_tools::hashline_grep"],
         ];
         for tool in self.tool_config.tools.iter_mut() {
             let Some(slot) = FILE_TOOL_SLOTS
@@ -2267,7 +2267,7 @@ description: Test default tool config
             "promptBody" : "You are a coding assistant." }
         );
         let def = AgentDefinition::from_json(&json).unwrap();
-        let task_tool_id = "cf_tools:task";
+        let task_tool_id = "cf_tools::task";
         assert!(
             def.tool_config.tools.iter().any(|tc| tc.id == task_tool_id),
             "from_json() without toolConfig should include TaskTool in default toolset, \

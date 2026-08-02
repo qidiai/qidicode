@@ -1,4 +1,4 @@
-﻿use crate::app::actions::Effect;
+use crate::app::actions::Effect;
 use crate::app::app_view::{AppView, SessionPickerEntry};
 use crate::app::dispatch::ctx::get_active_agent_mut;
 use crate::app::effects::ConversationsPartial;

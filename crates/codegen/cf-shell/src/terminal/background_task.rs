@@ -1,4 +1,4 @@
-﻿//! Background task registry for tracking long-running commands.
+//! Background task registry for tracking long-running commands.
 //!
 //! This module provides a per-session registry for background tasks that allows
 //! the model to query task status and output after launching commands with

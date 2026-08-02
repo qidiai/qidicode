@@ -54,7 +54,20 @@ impl MvpAgent {
             }
             None => {
                 let mut fallback = primary.clone();
-                fallback.model = slug;
+                if slug == crate::models::default_session_summary_model() {
+                    // Default title slug with no routable credentials (BYOK /
+                    // custom-gateway-only setups): follow the session's primary
+                    // model instead of sending the default slug to the primary
+                    // endpoint, which 404s on gateways that don't serve it.
+                    tracing::debug!(
+                        title_model = %fallback.model,
+                        "session title model follows primary (default aux slug not routable)"
+                    );
+                } else {
+                    // Explicit user-configured summary model: keep honoring it
+                    // on the primary endpoint as before.
+                    fallback.model = slug;
+                }
                 fallback
             }
         };

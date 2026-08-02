@@ -1,4 +1,4 @@
-﻿//! Modal input handlers: agents/persona modals and the extensions modal
+//! Modal input handlers: agents/persona modals and the extensions modal
 //! (hooks, plugins, marketplace, skills, MCP servers) with its actions.
 
 use super::AgentView;

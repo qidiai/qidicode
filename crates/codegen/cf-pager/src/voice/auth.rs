@@ -1,4 +1,4 @@
-﻿//! Bridge the shell's `AuthManager` onto the voice crate's bearer provider.
+//! Bridge the shell's `AuthManager` onto the voice crate's bearer provider.
 //!
 //! voice-api accepts both API keys and OAuth2 tokens directly at `api.x.ai`
 //! and attributes per-user billing for OAuth, so the voice channel just reuses

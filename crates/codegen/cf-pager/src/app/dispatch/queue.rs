@@ -1,4 +1,4 @@
-﻿//! Prompt-queue dispatch: the server-authoritative immediate-send routing
+//! Prompt-queue dispatch: the server-authoritative immediate-send routing
 //! helpers, optimistic queue echoes, the local drip-feed drain
 //! ([`maybe_drain_queue`]), the turn-start shim, and the queue-interject
 //! action arm. Split out of `dispatch.rs` verbatim (pure code motion).

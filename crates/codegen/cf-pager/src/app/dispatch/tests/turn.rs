@@ -1,4 +1,4 @@
-﻿//! Tests for turn cancellation, subagent kills, and cancel preferences.
+//! Tests for turn cancellation, subagent kills, and cancel preferences.
 
 use super::*;
 

@@ -33,7 +33,7 @@ pub mod types;
 // register_resource is now macro_exported, accessible via crate::register_resource!
 
 // Re-export config_validation and slash_commands at crate root for
-// cf_tools_api self-reference compatibility.
+// cf_tools::api self-reference compatibility.
 pub use types::config_validation;
 pub use types::slash_commands;
 

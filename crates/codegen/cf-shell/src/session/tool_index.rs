@@ -1,4 +1,4 @@
-﻿//! Concrete `ToolSearchIndex` implementation using BM25.
+//! Concrete `ToolSearchIndex` implementation using BM25.
 //!
 //! Builds a BM25 index over registered MCP tools and searches it.
 //! The index is rebuilt on each search call (sub-millisecond for tens

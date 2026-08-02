@@ -1,4 +1,4 @@
-﻿//! Session-level fs-watch policy over [`cf_fsnotify`].
+//! Session-level fs-watch policy over [`cf_fsnotify`].
 //!
 //! Mechanism (OS watch, coalesce, refcount) lives in `cf_fsnotify`. This module
 //! decides which consumers exist, fans events through three explicit phases, and

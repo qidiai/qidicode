@@ -1,4 +1,4 @@
-﻿//! Single source of truth for the `sessionUpdate` discriminant strings the
+//! Single source of truth for the `sessionUpdate` discriminant strings the
 //! session-resume replay matchers compare against persisted `updates.jsonl` lines.
 //!
 //! Each value is derived from its enum's serde impl (not a hand-written literal),

@@ -1,4 +1,4 @@
-﻿//! Parse .envrc files and extract environment variables.
+//! Parse .envrc files and extract environment variables.
 //!
 //! This module provides a way to load environment variables from `.envrc` files.
 //! It uses a two-tier approach:

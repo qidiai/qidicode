@@ -162,7 +162,10 @@ windows-sys = { version = "0.59", features = ["Win32_System_Console"] }
 
 [dev-dependencies]
 # Enable the render crate's test-only helpers for the pager's test build.
-cf-pager-render = { path = "../cf-pager-render", features = [] }
+cf-pager-render = { path = "../cf-pager-render", features = ["test-helpers"] }
+# Shared PTY harness for the e2e/pty integration tests (tests/pty_e2e,
+# tests/pty_auto_mode.rs, ...). Dev-only: never linked into the production lib.
+cf-pager-pty-harness = { path = "../cf-pager-pty-harness" }
 pretty_assertions = { workspace = true }
 insta = { workspace = true }
 criterion = { workspace = true }

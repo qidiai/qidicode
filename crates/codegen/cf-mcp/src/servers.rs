@@ -1,4 +1,4 @@
-﻿//! MCP server integration using the official rmcp SDK.
+//! MCP server integration using the official rmcp SDK.
 
 use std::collections::HashMap;
 use std::ffi::OsString;

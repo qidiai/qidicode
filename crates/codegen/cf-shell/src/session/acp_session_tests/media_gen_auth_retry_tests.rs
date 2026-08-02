@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use crate::auth::{AuthManager, AuthMode, GrokAuth, GrokComConfig};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use cf_tools::types::output::{ToolOutput, ToolRunResult};

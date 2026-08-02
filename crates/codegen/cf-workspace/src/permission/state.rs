@@ -1,4 +1,4 @@
-﻿#![allow(dead_code)] // Phase 1 internal helpers
+#![allow(dead_code)] // Phase 1 internal helpers
 
 use crate::permission::types::EditPolicy;
 use serde::{Deserialize, Serialize};

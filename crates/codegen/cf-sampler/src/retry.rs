@@ -14,6 +14,12 @@
 //! **Retried with lower cap** ([`RATE_LIMIT_RETRY_THRESHOLD`] = 2):
 //! - 429 (rate limited) — avoids burning long waits
 //!
+//! **Retried with lower cap** ([`FAILOVER_MAX_RETRIES`] = 2, overridable via
+//! `QIDI_FAILOVER_MAX_RETRIES`):
+//! - failover-eligible errors (see [`is_failover_error`]) when the request
+//!   carries fallback model configs — a healthy fallback is one switch away,
+//!   so don't burn the full budget on a dead endpoint
+//!
 //! **Special handling** (not counted against retry budget):
 //! - 413 / image processing errors → strip images and retry once
 //!
@@ -64,6 +70,30 @@ pub(crate) fn resolve_max_retries_with_env(
 pub fn resolve_max_retries(model_max_retries: Option<u32>) -> u32 {
     let env_override = std::env::var("QIDI_MAX_RETRIES").ok();
     resolve_max_retries_with_env(env_override.as_deref(), model_max_retries)
+}
+
+/// Retry cap applied to failover-eligible errors while a fallback model is
+/// still queued. With the default budget ([`DEFAULT_MAX_RETRIES`] = 15,
+/// ~6 min of backoff) a dead endpoint would delay the switch by minutes;
+/// two attempts are enough to rule out a transient blip. Only consulted
+/// when fallbacks are actually configured, so behaviour without
+/// `fallback_models` is unchanged.
+pub const FAILOVER_MAX_RETRIES: u32 = 2;
+
+/// Resolve the failover retry cap from an optional env override.
+pub(crate) fn resolve_failover_max_retries_with_env(env_override: Option<&str>) -> u32 {
+    env_override
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(FAILOVER_MAX_RETRIES)
+}
+
+/// Resolve the failover retry cap: `QIDI_FAILOVER_MAX_RETRIES` env > default
+/// ([`FAILOVER_MAX_RETRIES`]). The caller clamps the result to the regular
+/// retry budget, so `QIDI_MAX_RETRIES` keeps its global-upper-bound
+/// semantics.
+pub fn resolve_failover_max_retries() -> u32 {
+    let env_override = std::env::var("QIDI_FAILOVER_MAX_RETRIES").ok();
+    resolve_failover_max_retries_with_env(env_override.as_deref())
 }
 
 /// Backoff for doom-loop resamples: near-immediate with a small jitter.
@@ -242,6 +272,39 @@ pub fn classify_error(
 
     // Everything else is fatal.
     RetryDecision::Fatal(clone_error(err))
+}
+
+/// Whether a terminal sampling error is eligible for model failover
+/// (switching to a configured fallback model) once the per-model retry
+/// budget is exhausted.
+///
+/// Eligible: transport-level failures (connect errors, timeouts, `Http`
+/// without a status or with a 5xx status), mid-stream failures
+/// (`EventStreamError`, `StreamError`), per-chunk idle timeouts, and
+/// upstream 5xx API errors (502 from a dead proxy upstream included).
+///
+/// NOT eligible: 4xx API errors (auth 401/403, bad request 400, 404,
+/// 429 rate limits), `Auth` / `InvalidConfiguration` (credential or
+/// config problems follow the model to its fallback anyway),
+/// `Serialization` (deterministic parse failure), `EmptyResponse`,
+/// `MaxTokensTruncation`, and `DoomLoopDetected` (content-shaped, not
+/// endpoint-health-shaped).
+///
+/// Pure: no I/O, no logging.
+pub fn is_failover_error(err: &SamplingError) -> bool {
+    match err {
+        SamplingError::Http(e) => e.status().is_none_or(|s| s.is_server_error()),
+        SamplingError::Api { status, .. } => status.is_server_error(),
+        SamplingError::EventStreamError(_)
+        | SamplingError::StreamError { .. }
+        | SamplingError::IdleTimeout { .. } => true,
+        SamplingError::Auth(_)
+        | SamplingError::InvalidConfiguration(_)
+        | SamplingError::Serialization(_)
+        | SamplingError::EmptyResponse { .. }
+        | SamplingError::MaxTokensTruncation
+        | SamplingError::DoomLoopDetected { .. } => false,
+    }
 }
 
 /// Build a human-readable, telemetry-friendly description of a sampling
@@ -478,6 +541,19 @@ mod tests {
     }
 
     #[test]
+    fn resolve_failover_max_retries_env_default_and_garbage() {
+        assert_eq!(
+            resolve_failover_max_retries_with_env(None),
+            FAILOVER_MAX_RETRIES
+        );
+        assert_eq!(resolve_failover_max_retries_with_env(Some("3")), 3);
+        assert_eq!(
+            resolve_failover_max_retries_with_env(Some("garbage")),
+            FAILOVER_MAX_RETRIES
+        );
+    }
+
+    #[test]
     fn resolve_max_retries_invalid_env_falls_through() {
         assert_eq!(resolve_max_retries_with_env(Some("abc"), Some(4)), 4);
     }
@@ -510,6 +586,61 @@ mod tests {
         // it does not panic and stays in the lowest backoff bucket.
         let backoff = retry_backoff_with_jitter(0);
         assert!(backoff >= Duration::from_millis(1600) && backoff <= Duration::from_millis(2400));
+    }
+
+    #[test]
+    fn failover_eligible_on_5xx_and_transport_errors() {
+        assert!(is_failover_error(&api_err(
+            StatusCode::BAD_GATEWAY,
+            "upstream dead"
+        )));
+        assert!(is_failover_error(&api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "boom"
+        )));
+        assert!(is_failover_error(&api_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "overloaded"
+        )));
+        assert!(is_failover_error(&SamplingError::EventStreamError(
+            "connection reset".into()
+        )));
+        assert!(is_failover_error(&SamplingError::StreamError {
+            error_type: "server_error".into(),
+            message: "mid-stream failure".into(),
+        }));
+        assert!(is_failover_error(&SamplingError::IdleTimeout {
+            elapsed_secs: 300
+        }));
+    }
+
+    #[test]
+    fn failover_not_eligible_on_4xx_and_deterministic_errors() {
+        assert!(!is_failover_error(&api_err(
+            StatusCode::UNAUTHORIZED,
+            "bad key"
+        )));
+        assert!(!is_failover_error(&api_err(StatusCode::FORBIDDEN, "no")));
+        assert!(!is_failover_error(&api_err(
+            StatusCode::BAD_REQUEST,
+            "bad param"
+        )));
+        assert!(!is_failover_error(&api_err(
+            StatusCode::TOO_MANY_REQUESTS,
+            "slow down"
+        )));
+        assert!(!is_failover_error(&SamplingError::Auth("expired".into())));
+        assert!(!is_failover_error(&SamplingError::InvalidConfiguration(
+            "bad config"
+        )));
+        assert!(!is_failover_error(&SamplingError::MaxTokensTruncation));
+        assert!(!is_failover_error(&SamplingError::serialization_message(
+            "parse failure"
+        )));
+        assert!(!is_failover_error(&SamplingError::DoomLoopDetected {
+            triggers: vec!["loop".into()],
+            aborted_at_chunk: None,
+        }));
     }
 
     #[test]

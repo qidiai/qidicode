@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 impl SessionActor {
     // ── Shared hook/plugin operation functions ────────────────────────

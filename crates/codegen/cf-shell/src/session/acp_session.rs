@@ -1668,7 +1668,7 @@ mod tool_meta_stamp_tests {
                 let mut fixture = make_replay_send_update_fixture().await;
                 fixture.actor.agent = std::cell::RefCell::new(
                     test_agent_with_tools(vec![ToolConfig::from_id(
-                        "cf_tools:read_file".to_string(),
+                        "cf_tools::read_file".to_string(),
                     )])
                     .await,
                 );
@@ -1712,7 +1712,7 @@ mod tool_meta_stamp_tests {
                 let mut fixture = make_replay_send_update_fixture().await;
                 fixture.actor.agent = std::cell::RefCell::new(
                     test_agent_with_tools(vec![ToolConfig::from_id(
-                        "cf_tools:read_file".to_string(),
+                        "cf_tools::read_file".to_string(),
                     )])
                     .await,
                 );

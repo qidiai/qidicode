@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use cf_shell::sampling::error::rate_limited_user_message;
 /// Stash a live stop/stop_failure batch under `stash_pid` for the turn marker
 /// to fold. `merge_same_name` merges a same-name repeat instead of standalone.

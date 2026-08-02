@@ -230,7 +230,7 @@ mod tests {
     #[tokio::test]
     async fn exit_with_plan_content() {
         let tmp = TempDir::new().unwrap();
-        let plan_dir = tmp.path().join(".grok");
+        let plan_dir = tmp.path().join(".qidi");
         std::fs::create_dir_all(&plan_dir).unwrap();
         std::fs::write(
             plan_dir.join("plan.md"),
@@ -270,7 +270,7 @@ mod tests {
     #[tokio::test]
     async fn exit_with_empty_plan_file() {
         let tmp = TempDir::new().unwrap();
-        let plan_dir = tmp.path().join(".grok");
+        let plan_dir = tmp.path().join(".qidi");
         std::fs::create_dir_all(&plan_dir).unwrap();
         std::fs::write(plan_dir.join("plan.md"), "   \n  \n").unwrap();
 
@@ -327,7 +327,7 @@ mod tests {
         use crate::notification::types::{ToolNotification, ToolNotificationHandle};
 
         let tmp = TempDir::new().unwrap();
-        let plan_dir = tmp.path().join(".grok");
+        let plan_dir = tmp.path().join(".qidi");
         std::fs::create_dir_all(&plan_dir).unwrap();
         std::fs::write(plan_dir.join("plan.md"), "The plan").unwrap();
 
@@ -376,7 +376,7 @@ mod tests {
     #[tokio::test]
     async fn prompt_format_includes_plan_content() {
         let tmp = TempDir::new().unwrap();
-        let plan_dir = tmp.path().join(".grok");
+        let plan_dir = tmp.path().join(".qidi");
         std::fs::create_dir_all(&plan_dir).unwrap();
         std::fs::write(plan_dir.join("plan.md"), "Step 1\nStep 2").unwrap();
 

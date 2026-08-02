@@ -1,4 +1,4 @@
-﻿// todo: add support for signal handling
+// todo: add support for signal handling
 use std::process::Stdio;
 
 use tokio::io::AsyncReadExt;

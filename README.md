@@ -93,6 +93,30 @@ export XAI_API_KEY="xai-..."
 export GROK_API_KEY="xai-..."  # 旧版别名
 ```
 
+### 自定义模型端点（base_url 覆盖）
+
+在 `~/.qidi/config.toml`（或项目级 `.grok/config.toml`）中通过 `[model.<id>]` 节可以覆盖内置模型的 `base_url`，或新增一个自定义模型条目。典型场景：把 OpenAI 兼容请求指向本机 AI Bridge 反代网关。
+
+```toml
+# 通过 AI Bridge 反代网关使用模型
+[model."agnes-2.0-flash"]
+model = "agnes-2.0-flash"
+base_url = "http://127.0.0.1:9800/v1"
+api_backend = "chat_completions"   # chat_completions | messages | responses
+auth_scheme = "bearer"             # bearer | x_api_key
+env_key = "AI_BRIDGE_TOKEN"        # 网关无 token 时可不设置该环境变量，请求不带 Authorization 头
+context_window = 128000
+fallback_models = ["glm-5.2"]      # 上游 5xx/超时且重试耗尽时按顺序切换到这些模型
+```
+
+说明：
+
+- **同名覆盖 / 新增**：`[model.<id>]` 的 `<id>` 与内置模型同名时覆盖内置默认；新 ID 视为新增模型。
+- **环境变量覆盖**：`QIDI_LLM_BASE_URL_<MODEL大写下划线化>`（如 `QIDI_LLM_BASE_URL_AGNES_2_0_FLASH`）可临时覆盖 base_url，优先级：**ENV > config.toml > 内置默认**。
+- **base_url 归一化**（仅 `chat_completions`）：末尾斜杠自动去除；`http://127.0.0.1:9800` 与 `http://127.0.0.1:9800/v1` 两种写法等价（缺省路径时自动补 `/v1`）；误贴完整端点 `…/v1/chat/completions` 会剥回基址。带自定义路径的 URL（如 Azure 风格）保持原样。
+- **故障转移（fallback_models）**：在 `[model.<id>]` 中配置 `fallback_models = ["glm-5.2"]` 后，主对话请求遇到**可转移失败**（连接错误、超时、HTTP 5xx）且重试耗尽时，按顺序自动切换到列表中的下一个模型（使用该模型自己的 base_url / 凭据），成功即继续；4xx 认证/参数错误不转移。链中不存在的模型 ID 会跳过并告警，重复/成环的条目自动去重，仅展开一层（不递归 fallback 的 fallback）；标题摘要等辅助请求不参与转移。
+- **故障转移重试上限**：配置了 `fallback_models` 时，可转移失败最多重试 **2** 次即切换（可用 `QIDI_FAILOVER_MAX_RETRIES` 调整），避免在坏端点上耗完全部重试预算（默认 15 次、约 6 分钟）；`QIDI_MAX_RETRIES` 仍是全局上限（两者取较小值）。未配置 fallback 时重试行为不变。
+
 ## 📖 命令参考
 
 ```bash

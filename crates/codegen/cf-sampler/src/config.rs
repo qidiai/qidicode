@@ -124,6 +124,16 @@ pub struct SamplerConfig {
     /// Per-request header injector (e.g. OTel traceparent). Called in `post()`.
     #[serde(skip)]
     pub header_injector: Option<SharedHeaderInjector>,
+
+    /// Fully resolved fallback configs (first_available order). When the
+    /// retry budget for this config is exhausted on a failover-eligible
+    /// error (connect/timeout/5xx), the request task switches to the next
+    /// entry instead of failing. Each entry carries its own
+    /// base_url/api_key/api_backend; entries are expanded a single level
+    /// (their own `fallback_configs` are ignored). Empty (the default)
+    /// disables failover, so auxiliary requests are unaffected.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_configs: Vec<SamplerConfig>,
 }
 
 impl Default for SamplerConfig {
@@ -158,6 +168,7 @@ impl Default for SamplerConfig {
             compaction_at_tokens: None,
             doom_loop_recovery: None,
             header_injector: None,
+            fallback_configs: Vec::new(),
         }
     }
 }

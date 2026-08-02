@@ -442,11 +442,11 @@ mod bind_config_tests {
     #[test]
     fn tools_entries_resolve_to_tool_server_config() {
         let v = serde_json::json!(
-            { "preset" : "explore", "tools" : [{ "id" : "cf_tools:grep", "params_json" :
+            { "preset" : "explore", "tools" : [{ "id" : "cf_tools::grep", "params_json" :
             "{\"max_results\":50}", "name_override" : "search", "params_name_overrides" :
             { "pattern" : "query" }, "behavior_version" : "legacy-0.4.10",
             "description_override" : "Search the codebase", }, { "id" :
-            "cf_tools:read_file" },], }
+            "cf_tools::read_file" },], }
         );
         let cfg = WorkspaceBindConfig::from_metadata(&v);
         let ResolvedToolset::Toolset(resolved) = cfg.resolve(&all_known, false) else {
@@ -460,7 +460,7 @@ mod bind_config_tests {
         );
         assert_eq!(toolset.tools.len(), 2);
         let grep = &toolset.tools[0];
-        assert_eq!(grep.id, "cf_tools:grep");
+        assert_eq!(grep.id, "cf_tools::grep");
         assert_eq!(
             grep.params,
             serde_json::json!({ "max_results" : 50 })
@@ -478,7 +478,7 @@ mod bind_config_tests {
             Some("Search the codebase")
         );
         assert_eq!(grep.kind, None);
-        assert_eq!(toolset.tools[1].id, "cf_tools:read_file");
+        assert_eq!(toolset.tools[1].id, "cf_tools::read_file");
     }
     #[test]
     fn explicit_tool_config_wins_over_tools_entries() {

@@ -1,4 +1,4 @@
-﻿//! Format memory search results as `<system-reminder>` content.
+//! Format memory search results as `<system-reminder>` content.
 //!
 //! Used for:
 //! - Session start: inject relevant past context on the first turn

@@ -1,4 +1,4 @@
-﻿//! `grok mcp doctor` -- runtime health check for MCP servers.
+//! `grok mcp doctor` -- runtime health check for MCP servers.
 
 use std::collections::HashMap;
 use std::path::Path;

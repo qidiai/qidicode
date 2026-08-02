@@ -1,4 +1,4 @@
-﻿//! Session/plan-mode concern for `SessionActor` (`handle_session_mode`,
+//! Session/plan-mode concern for `SessionActor` (`handle_session_mode`,
 //! plan-mode reminders and persistence, active-template detection).
 use super::*;
 pub(super) fn prompt_mode_from_session_mode_id(session_mode_id: &acp::SessionModeId) -> PromptMode {

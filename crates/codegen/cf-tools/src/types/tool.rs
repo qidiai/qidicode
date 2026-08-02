@@ -36,7 +36,7 @@ pub fn qidi_names_for(_version: &str) -> Vec<String> {
 /// canonical tool `_meta` wire contract. PascalCase aliases are accepted on
 /// deserialize so legacy persisted/manifest values still parse. The
 /// `Display` impl remains PascalCase for existing qualified id strings
-/// (e.g. `"cf_tools:read_file"`); only the serde form goes on the wire.
+/// (e.g. `"cf_tools::read_file"`); only the serde form goes on the wire.
 #[derive(
     Debug,
     Clone,

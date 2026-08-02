@@ -41,7 +41,7 @@ pub trait ToolMetadata: Send + Sync {
 
     /// Namespace grouping (QidiBuild, Cursor, OpenCode, ...).
     /// Used to build the fully-qualified tool ID at registration time
-    /// (e.g., `"cf_tools:grep"`).
+    /// (e.g., `"cf_tools::grep"`).
     fn tool_namespace(&self) -> ToolNamespace;
 
     /// Raw MiniJinja description template with `${{ tools.by_kind.X }}` and

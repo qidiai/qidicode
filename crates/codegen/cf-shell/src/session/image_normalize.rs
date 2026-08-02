@@ -1,4 +1,4 @@
-﻿//! Re-encode decoded attachments that exceed [`MAX_IMAGE_BYTES`],
+//! Re-encode decoded attachments that exceed [`MAX_IMAGE_BYTES`],
 //! [`MAX_ENCODE_PIXELS`], or [`MAX_ENCODE_SIDE_PX`] to fit the conversation
 //! caps. The primary dimension limit is the v9 pixel-area budget
 //! ([`MAX_ENCODE_PIXELS`]); [`MAX_ENCODE_SIDE_PX`] is a model-agnostic side

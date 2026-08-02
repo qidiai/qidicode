@@ -1,4 +1,4 @@
-﻿//! Layer-3 LazinessDetector pure helpers: classifier prompt/config consts,
+//! Layer-3 LazinessDetector pure helpers: classifier prompt/config consts,
 //! transcript flattening, output parsing, and the decision logic. The
 //! actor-side glue lives in the `laziness` sibling.
 

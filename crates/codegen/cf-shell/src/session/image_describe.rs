@@ -1,4 +1,4 @@
-﻿//! Image processing helpers for sessions with image inputs.
+//! Image processing helpers for sessions with image inputs.
 //!
 //! That harness uses a separate vision endpoint to describe images
 //! rather than passing them inline. When a user message contains image

@@ -39,6 +39,7 @@ fn detector_entry(
         api_key: None,
         env_key: None,
         api_base_url: None,
+        fallback_models: Vec::new(),
     }
 }
 

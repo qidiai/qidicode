@@ -1,4 +1,4 @@
-﻿//! Session display-title helpers shared by the dashboard and other surfaces.
+//! Session display-title helpers shared by the dashboard and other surfaces.
 //!
 //! Title derivation order ([`entry_title`]):
 //! 1. `AgentView::display_name` if set (post-rename),

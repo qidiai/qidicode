@@ -1,4 +1,4 @@
-﻿//! Git-based plugin installation.
+//! Git-based plugin installation.
 //!
 //! Handles cloning repos, copying local directories into the managed
 //! `installed-plugins` snapshot (not live symlinks), discovering plugins within

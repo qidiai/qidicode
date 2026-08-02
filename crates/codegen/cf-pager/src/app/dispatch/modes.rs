@@ -1,4 +1,4 @@
-﻿//! Plan, yolo, auto, and permission mode transitions and toasts.
+//! Plan, yolo, auto, and permission mode transitions and toasts.
 
 use super::ctx::with_active_agent;
 use super::queue::maybe_drain_queue;

@@ -1,4 +1,4 @@
-﻿//! Gitignore integration for AGENTS.md and skills discovery.
+//! Gitignore integration for AGENTS.md and skills discovery.
 
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::path::{Path, PathBuf};

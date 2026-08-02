@@ -1237,7 +1237,7 @@ mod tests {
         assert_eq!(tasks.len(), 1, "the task must survive a reused rebind");
         let read_only = ToolServerConfig {
             tools: vec![tc(
-                "cf_tools:read_file",
+                "cf_tools::read_file",
                 Some(cf_tools::types::tool::ToolKind::Read),
             )],
             behavior_preset: None,

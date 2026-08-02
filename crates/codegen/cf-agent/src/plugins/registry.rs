@@ -1,4 +1,4 @@
-﻿//! In-memory registry of active plugins.
+//! In-memory registry of active plugins.
 //!
 //! The `PluginRegistry` is the single source of truth for which plugins
 //! are loaded in a session.  It is built once during `MvpAgent` initialization

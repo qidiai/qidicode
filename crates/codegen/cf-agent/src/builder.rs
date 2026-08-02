@@ -541,7 +541,7 @@ impl AgentBuilder {
     }
     /// Enable or disable the `ask_user_question` tool.
     ///
-    /// When disabled, `cf_tools:ask_user_question` is stripped from the
+    /// When disabled, `cf_tools::ask_user_question` is stripped from the
     /// agent's tool config after `ensure_plan_mode_tools` injection, so
     /// the model cannot ask the user structured questions regardless of
     /// which built-in profile is in use. Driven by the shell's resolved gate
@@ -832,14 +832,14 @@ impl AgentBuilder {
             && let Ok(params_value) = serde_json::to_value(params)
             && let Some(obj) = params_value.as_object()
         {
-            merge_tool_params(&mut tool_config, &["cf_tools:web_fetch"], obj);
+            merge_tool_params(&mut tool_config, &["cf_tools::web_fetch"], obj);
         }
         if let Some(ref bash_params) = self.bash_params_json {
             merge_tool_params(
                 &mut tool_config,
                 &[
-                    "cf_tools:run_terminal_cmd",
-                    "cf_tools:run_terminal_cmd",
+                    "cf_tools::run_terminal_cmd",
+                    "cf_tools::run_terminal_cmd",
                 ],
                 bash_params,
             );
@@ -847,7 +847,7 @@ impl AgentBuilder {
         if let Some(ref ask_params) = self.ask_user_question_params_json {
             merge_tool_params(
                 &mut tool_config,
-                &["cf_tools:ask_user_question"],
+                &["cf_tools::ask_user_question"],
                 ask_params,
             );
         }
@@ -1722,7 +1722,7 @@ mod tests {
                 .tool_config
                 .tools
                 .iter()
-                .any(|tc| tc.id == "cf_tools:ask_user_question"),
+                .any(|tc| tc.id == "cf_tools::ask_user_question"),
             "test premise: the profile must not pre-declare ask_user_question"
         );
         let mut params = serde_json::Map::new();
@@ -1847,7 +1847,7 @@ mod tests {
         let mut def = crate::config::AgentDefinition::general_purpose();
         assert!(def.session_tools_allowed("read_file"));
         def.session_tools_allowlist = Some(vec!["read_file".into()]);
-        assert!(def.session_tools_allowed("cf_tools:read_file"));
+        assert!(def.session_tools_allowed("cf_tools::read_file"));
         assert!(!def.session_tools_allowed("grep"));
         def.session_tools_denylist = Some(vec!["read_file".into()]);
         assert!(!def.session_tools_allowed("read_file"));

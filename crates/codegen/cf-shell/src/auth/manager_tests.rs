@@ -1,4 +1,4 @@
-﻿//! Unit tests for [`super::manager::AuthManager`]. Extracted from
+//! Unit tests for [`super::manager::AuthManager`]. Extracted from
 //! `manager.rs` so the implementation reads top-to-bottom; wired in
 //! via `#[path = "manager_tests.rs"] mod tests;` in manager.rs.
 

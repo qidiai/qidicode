@@ -1,4 +1,4 @@
-﻿//! Actor-level tests for the `/context` usage categories: populated rows
+//! Actor-level tests for the `/context` usage categories: populated rows
 //! with counts, compat-harness suppression of the MCP row, and parity
 //! between the MCP snapshot and the injected reminder.
 use super::support::*;

@@ -1,4 +1,4 @@
-﻿//! Bounded worktree pool for fast fork setup.
+//! Bounded worktree pool for fast fork setup.
 //!
 //! NOTE: This module is preserved as a future-use building block. Current
 //! production callers are limited to

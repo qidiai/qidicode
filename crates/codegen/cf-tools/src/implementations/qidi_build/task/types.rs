@@ -175,7 +175,7 @@ pub fn prune_orphaned_background_task_tools(config: &mut crate::registry::types:
 
 fn is_background_capable_bash_tool(tc: &crate::registry::types::ToolConfig) -> bool {
     match tc.id.as_str() {
-        "cf_tools:run_terminal_cmd" => tc
+        "cf_tools::run_terminal_cmd" => tc
             .params
             .as_ref()
             .and_then(|params| params.get("enabled_background"))
@@ -916,12 +916,12 @@ mod tests {
     fn read_only_filter_prunes_orphaned_background_task_tools() {
         let mut config = ToolServerConfig {
             tools: vec![
-                tc("cf_tools:run_terminal_cmd", ToolKind::Execute),
-                tc("cf_tools:read_file", ToolKind::Read),
-                tc("cf_tools:list_dir", ToolKind::List),
-                tc("cf_tools:grep", ToolKind::Search),
-                tc("cf_tools:kill_task", ToolKind::KillTaskAction),
-                tc("cf_tools:get_task_output", ToolKind::BackgroundTaskAction),
+                tc("cf_tools::run_terminal_cmd", ToolKind::Execute),
+                tc("cf_tools::read_file", ToolKind::Read),
+                tc("cf_tools::list_dir", ToolKind::List),
+                tc("cf_tools::grep", ToolKind::Search),
+                tc("cf_tools::kill_task", ToolKind::KillTaskAction),
+                tc("cf_tools::get_task_output", ToolKind::BackgroundTaskAction),
             ],
             behavior_preset: None,
         };
@@ -932,9 +932,9 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "cf_tools:read_file",
-                "cf_tools:list_dir",
-                "cf_tools:grep",
+                "cf_tools::read_file",
+                "cf_tools::list_dir",
+                "cf_tools::grep",
             ]
         );
     }
@@ -943,13 +943,13 @@ mod tests {
     fn read_only_filter_keeps_background_task_tools_when_task_tool_remains() {
         let mut config = ToolServerConfig {
             tools: vec![
-                tc("cf_tools:run_terminal_cmd", ToolKind::Execute),
-                tc("cf_tools:read_file", ToolKind::Read),
-                tc("cf_tools:list_dir", ToolKind::List),
-                tc("cf_tools:grep", ToolKind::Search),
-                tc("cf_tools:kill_task", ToolKind::KillTaskAction),
-                tc("cf_tools:get_task_output", ToolKind::BackgroundTaskAction),
-                tc("cf_tools:task", ToolKind::Task),
+                tc("cf_tools::run_terminal_cmd", ToolKind::Execute),
+                tc("cf_tools::read_file", ToolKind::Read),
+                tc("cf_tools::list_dir", ToolKind::List),
+                tc("cf_tools::grep", ToolKind::Search),
+                tc("cf_tools::kill_task", ToolKind::KillTaskAction),
+                tc("cf_tools::get_task_output", ToolKind::BackgroundTaskAction),
+                tc("cf_tools::task", ToolKind::Task),
             ],
             behavior_preset: None,
         };
@@ -960,12 +960,12 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "cf_tools:read_file",
-                "cf_tools:list_dir",
-                "cf_tools:grep",
-                "cf_tools:kill_task",
-                "cf_tools:get_task_output",
-                "cf_tools:task",
+                "cf_tools::read_file",
+                "cf_tools::list_dir",
+                "cf_tools::grep",
+                "cf_tools::kill_task",
+                "cf_tools::get_task_output",
+                "cf_tools::task",
             ]
         );
     }
@@ -989,7 +989,7 @@ mod tests {
 
     #[test]
     fn read_write_filter_keeps_background_capable_bash_when_explicitly_enabled() {
-        let mut bash = tc("cf_tools:run_terminal_cmd", ToolKind::Execute);
+        let mut bash = tc("cf_tools::run_terminal_cmd", ToolKind::Execute);
         bash.params = Some(
             serde_json::json!({ "enabled_background": true })
                 .as_object()

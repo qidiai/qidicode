@@ -612,10 +612,10 @@ pub mod test_support {
     pub fn baseline_config() -> ToolServerConfig {
         ToolServerConfig {
             tools: vec![
-                tc("cf_tools:read_file", Some(ToolKind::Read)),
-                tc("cf_tools:search_replace", Some(ToolKind::Edit)),
-                tc("cf_tools:grep", Some(ToolKind::Search)),
-                tc("cf_tools:list_dir", Some(ToolKind::ListDir)),
+                tc("cf_tools::read_file", Some(ToolKind::Read)),
+                tc("cf_tools::search_replace", Some(ToolKind::Edit)),
+                tc("cf_tools::grep", Some(ToolKind::Search)),
+                tc("cf_tools::list_dir", Some(ToolKind::ListDir)),
             ],
             behavior_preset: None,
         }
@@ -670,12 +670,12 @@ mod tests {
         let factory = factory_for_test();
         let baseline = ToolServerConfig {
             tools: vec![test_support::tc(
-                "cf_tools:read_file",
+                "cf_tools::read_file",
                 Some(ToolKind::Read),
             )],
             behavior_preset: None,
         };
-        let mut mcp_dup = test_support::tc("cf_tools:read_file", Some(ToolKind::Read));
+        let mut mcp_dup = test_support::tc("cf_tools::read_file", Some(ToolKind::Read));
         mcp_dup.name_override = Some("mcp_read".into());
         let snapshot = vec![mcp_dup];
         let (_eff, ts, _backend) = resolve_session_toolset(
@@ -707,14 +707,14 @@ mod tests {
     #[test]
     fn backfill_tool_kinds_fills_known_kindless_ids_only() {
         let kinds = HashMap::from([
-            ("cf_tools:search_replace".to_owned(), ToolKind::Edit),
-            ("cf_tools:read_file".to_owned(), ToolKind::Read),
+            ("cf_tools::search_replace".to_owned(), ToolKind::Edit),
+            ("cf_tools::read_file".to_owned(), ToolKind::Read),
         ]);
         let config = ToolServerConfig {
             tools: vec![
-                test_support::tc("cf_tools:search_replace", None),
+                test_support::tc("cf_tools::search_replace", None),
                 test_support::tc("adhoc.opaque", None),
-                test_support::tc("cf_tools:read_file", Some(ToolKind::Search)),
+                test_support::tc("cf_tools::read_file", Some(ToolKind::Search)),
             ],
             behavior_preset: Some("current".to_owned()),
         };
@@ -727,14 +727,14 @@ mod tests {
                 .expect("tool present")
                 .kind
         };
-        assert_eq!(kind_of("cf_tools:search_replace"), Some(ToolKind::Edit));
+        assert_eq!(kind_of("cf_tools::search_replace"), Some(ToolKind::Edit));
         assert_eq!(
             kind_of("adhoc.opaque"),
             None,
             "ids unknown to the registry stay kind-less"
         );
         assert_eq!(
-            kind_of("cf_tools:read_file"),
+            kind_of("cf_tools::read_file"),
             Some(ToolKind::Search),
             "an explicit kind wins over the registry's"
         );
@@ -750,11 +750,11 @@ mod tests {
         let factory = factory_for_test();
         let baseline = ToolServerConfig {
             tools: vec![
-                test_support::tc("cf_tools:read_file", None),
-                test_support::tc("cf_tools:grep", None),
-                test_support::tc("cf_tools:list_dir", None),
-                test_support::tc("cf_tools:search_replace", None),
-                test_support::tc("cf_tools:run_terminal_cmd", None),
+                test_support::tc("cf_tools::read_file", None),
+                test_support::tc("cf_tools::grep", None),
+                test_support::tc("cf_tools::list_dir", None),
+                test_support::tc("cf_tools::search_replace", None),
+                test_support::tc("cf_tools::run_terminal_cmd", None),
             ],
             behavior_preset: None,
         };
@@ -796,7 +796,7 @@ mod tests {
     fn resolve_session_toolset_mcp_edit_dropped_under_readonly() {
         let baseline = ToolServerConfig {
             tools: vec![test_support::tc(
-                "cf_tools:read_file",
+                "cf_tools::read_file",
                 Some(ToolKind::Read),
             )],
             behavior_preset: None,
@@ -816,7 +816,7 @@ mod tests {
         let factory = factory_for_test();
         let baseline = ToolServerConfig {
             tools: vec![
-                test_support::tc("cf_tools:read_file", Some(ToolKind::Read)),
+                test_support::tc("cf_tools::read_file", Some(ToolKind::Read)),
                 test_support::tc("baseline.opaque", None),
             ],
             behavior_preset: None,
@@ -839,7 +839,7 @@ mod tests {
             "MCP kind: None MUST be dropped under ReadOnly: {kept_ids:?}"
         );
         assert!(
-            kept_ids.contains(&"cf_tools:read_file"),
+            kept_ids.contains(&"cf_tools::read_file"),
             "baseline Read kind must survive ReadOnly: {kept_ids:?}"
         );
         let _ = factory;
@@ -901,7 +901,7 @@ mod tests {
     fn hub_tool_dropped_under_readonly_because_kind_none() {
         let baseline = ToolServerConfig {
             tools: vec![test_support::tc(
-                "cf_tools:read_file",
+                "cf_tools::read_file",
                 Some(ToolKind::Read),
             )],
             behavior_preset: None,
@@ -955,7 +955,7 @@ mod tests {
     fn hub_tool_name_collision_with_baseline_skipped() {
         let baseline = ToolServerConfig {
             tools: vec![test_support::tc(
-                "cf_tools:read_file",
+                "cf_tools::read_file",
                 Some(ToolKind::Read),
             )],
             behavior_preset: None,

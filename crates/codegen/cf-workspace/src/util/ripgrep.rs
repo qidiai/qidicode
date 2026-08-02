@@ -1,4 +1,4 @@
-﻿#![allow(unexpected_cfgs)] // bundle_rg is set by the shell build script; harmless warning in the workspace lib
+#![allow(unexpected_cfgs)] // bundle_rg is set by the shell build script; harmless warning in the workspace lib
 
 use std::path::PathBuf;
 use std::sync::OnceLock;

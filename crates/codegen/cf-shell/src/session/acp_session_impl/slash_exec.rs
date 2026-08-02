@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 impl SessionActor {
     /// Execute a built-in slash command (e.g. `/compact`, `/yolo`).

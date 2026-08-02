@@ -1,4 +1,4 @@
-﻿//! Session title generation via LLM tool call.
+//! Session title generation via LLM tool call.
 
 use crate::sampling::{
     Client as OaiCompatClient, ConversationItem, ConversationRequest, ConversationToolChoice,

@@ -239,6 +239,7 @@ impl ShellToolsetConfig {
             compaction_at_tokens: None,
             doom_loop_recovery: None,
             header_injector: None,
+            fallback_configs: Vec::new(),
         };
         let mut toolset = base.unwrap_or_else(|| Self {
             bash: BashToolConfig::default(),
@@ -382,7 +383,7 @@ impl FileToolset {
                 };
                 Ok(vec![
                     ToolConfig {
-                        id: "cf_tools:hashline_read".to_owned(),
+                        id: "cf_tools::hashline_read".to_owned(),
                         params: params_map.clone(),
                         name_override: None,
                         params_name_overrides: None,
@@ -391,7 +392,7 @@ impl FileToolset {
                         kind: None,
                     },
                     ToolConfig {
-                        id: "cf_tools:hashline_edit".to_owned(),
+                        id: "cf_tools::hashline_edit".to_owned(),
                         params: params_map.clone(),
                         name_override: None,
                         params_name_overrides: None,
@@ -400,7 +401,7 @@ impl FileToolset {
                         kind: None,
                     },
                     ToolConfig {
-                        id: "cf_tools:hashline_grep".to_owned(),
+                        id: "cf_tools::hashline_grep".to_owned(),
                         params: params_map,
                         name_override: None,
                         params_name_overrides: None,
@@ -430,9 +431,9 @@ mod tests {
             .unwrap();
         assert_eq!(configs.len(), 3);
         let ids: Vec<&str> = configs.iter().map(|c| c.id.as_str()).collect();
-        assert!(ids.contains(&"cf_tools:read_file"));
-        assert!(ids.contains(&"cf_tools:search_replace"));
-        assert!(ids.contains(&"cf_tools:grep"));
+        assert!(ids.contains(&"cf_tools::read_file"));
+        assert!(ids.contains(&"cf_tools::search_replace"));
+        assert!(ids.contains(&"cf_tools::grep"));
     }
 
     #[test]
@@ -442,9 +443,9 @@ mod tests {
             .unwrap();
         assert_eq!(configs.len(), 3);
         let ids: Vec<&str> = configs.iter().map(|c| c.id.as_str()).collect();
-        assert!(ids.contains(&"cf_tools:hashline_read"));
-        assert!(ids.contains(&"cf_tools:hashline_edit"));
-        assert!(ids.contains(&"cf_tools:hashline_grep"));
+        assert!(ids.contains(&"cf_tools::hashline_read"));
+        assert!(ids.contains(&"cf_tools::hashline_edit"));
+        assert!(ids.contains(&"cf_tools::hashline_grep"));
     }
 
     /// Plan/explore omit `search_replace` by contract ("no Write/Edit/
@@ -465,7 +466,7 @@ mod tests {
                 !def.tool_config
                     .tools
                     .iter()
-                    .any(|t| t.id == "cf_tools:search_replace"),
+                    .any(|t| t.id == "cf_tools::search_replace"),
                 "{name}: fixture must be read-only before the override"
             );
             def.override_file_tools(file_tools.clone());
@@ -477,13 +478,13 @@ mod tests {
                 .collect();
             // The swap engages (read moves to hashline)...
             assert!(
-                ids.contains(&"cf_tools:hashline_read"),
+                ids.contains(&"cf_tools::hashline_read"),
                 "{name}: {ids:?}"
             );
-            assert!(!ids.contains(&"cf_tools:read_file"), "{name}: {ids:?}");
+            assert!(!ids.contains(&"cf_tools::read_file"), "{name}: {ids:?}");
             // ...but never grants the edit slot.
             assert!(
-                !ids.contains(&"cf_tools:hashline_edit"),
+                !ids.contains(&"cf_tools::hashline_edit"),
                 "{name}: override granted an edit tool to a no-edit toolset: {ids:?}"
             );
         }

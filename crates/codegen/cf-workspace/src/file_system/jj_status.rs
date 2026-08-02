@@ -1,4 +1,4 @@
-﻿//! Compact jj status for the system prompt.
+//! Compact jj status for the system prompt.
 
 use std::fmt::Write;
 use std::path::{Path, PathBuf};

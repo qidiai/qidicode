@@ -1,4 +1,4 @@
-﻿//! Agent — a fully built agent: definition + session context.
+//! Agent — a fully built agent: definition + session context.
 
 use std::sync::Arc;
 

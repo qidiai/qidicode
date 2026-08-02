@@ -1,4 +1,4 @@
-﻿use similar::{ChangeTag, TextDiff};
+use similar::{ChangeTag, TextDiff};
 use cf_tools::types::output::SearchReplaceEditDetail;
 
 #[derive(Debug, Clone)]

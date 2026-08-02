@@ -1,4 +1,4 @@
-﻿//! Async task-result application: routes task results into state.
+//! Async task-result application: routes task results into state.
 use super::auth::{
     ensure_login_method, handle_auth_complete, handle_auth_url_ready, handle_mcp_auth_trigger_done,
 };

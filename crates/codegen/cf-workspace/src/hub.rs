@@ -992,13 +992,13 @@ mod tests {
     fn bg_config() -> ToolServerConfig {
         ToolServerConfig {
             tools: vec![
-                tc("cf_tools:run_terminal_cmd", Some(ToolKind::Execute)),
+                tc("cf_tools::run_terminal_cmd", Some(ToolKind::Execute)),
                 tc(
-                    "cf_tools:get_task_output",
+                    "cf_tools::get_task_output",
                     Some(ToolKind::BackgroundTaskAction),
                 ),
-                tc("cf_tools:kill_task", Some(ToolKind::KillTaskAction)),
-                tc("cf_tools:monitor", Some(ToolKind::Monitor)),
+                tc("cf_tools::kill_task", Some(ToolKind::KillTaskAction)),
+                tc("cf_tools::monitor", Some(ToolKind::Monitor)),
             ],
             behavior_preset: None,
         }

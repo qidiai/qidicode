@@ -1,4 +1,4 @@
-﻿//! Hook dispatch concern for `SessionActor`: run contexts, hook execution
+//! Hook dispatch concern for `SessionActor`: run contexts, hook execution
 //! notifications and telemetry, and turn/tool outcome mapping.
 
 use super::*;

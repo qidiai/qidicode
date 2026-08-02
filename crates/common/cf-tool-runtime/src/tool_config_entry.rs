@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolConfigEntry {
-    /// Fully-qualified tool id, e.g. `cf_tools:grep`.
+    /// Fully-qualified tool id, e.g. `cf_tools::grep`.
     #[serde(default)]
     pub id: String,
     /// Optional JSON string with tool parameters.

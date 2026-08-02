@@ -1,4 +1,4 @@
-﻿//! Codebase Index Manager
+//! Codebase Index Manager
 //!
 //! Manages code graph indexes for code navigation features (go-to-definition, go-to-references).
 //! Indexes are shared across sessions with the same cwd to avoid duplicate work.

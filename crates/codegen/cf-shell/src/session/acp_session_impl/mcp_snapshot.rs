@@ -1,4 +1,4 @@
-﻿//! MCP snapshot concern for `SessionActor`: server-snapshot refresh and
+//! MCP snapshot concern for `SessionActor`: server-snapshot refresh and
 //! reminder scheduling, templated-prefix handshake waits, and tool
 //! re-registration on a rebuilt bridge.
 

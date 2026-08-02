@@ -1,4 +1,4 @@
-﻿//! Sampler-turn pipeline for `SessionActor`: tool definitions, model auth
+//! Sampler-turn pipeline for `SessionActor`: tool definitions, model auth
 //! facts/gates and retry, sampler config reconstruction, sampling-failure
 //! recovery, and per-response usage recording.
 use super::*;
@@ -307,6 +307,23 @@ impl SessionActor {
                 extra_headers.insert("x-compaction-at".to_string(), value.to_string());
             }
         }
+        // Model failover: expand the primary model's configured
+        // `fallback_models` into fully resolved sampler configs (each with
+        // its own catalog base_url/credentials/api_backend). Main
+        // conversation path only — aux samplers (summary, web search,
+        // image describe) never populate `fallback_configs`.
+        let session_key = self
+            .auth_manager
+            .as_ref()
+            .and_then(|am| am.current_or_expired())
+            .map(|a| a.key);
+        let fallback_configs = crate::agent::config::resolve_fallback_sampler_configs(
+            &cfg.model,
+            &self.models_manager.models(),
+            session_key.as_deref(),
+            creds.alpha_test_key.clone(),
+            creds.client_version.clone(),
+        );
         SamplingConfig {
             api_key: creds.api_key,
             base_url: cfg.base_url,
@@ -350,6 +367,7 @@ impl SessionActor {
             compaction_at_tokens: self.compaction_at_tokens.get(),
             doom_loop_recovery: self.doom_loop_recovery,
             header_injector: Some(std::sync::Arc::new(TraceContextInjector)),
+            fallback_configs,
         }
     }
     /// Install auto-mode permission classifier with a live LLM side-query

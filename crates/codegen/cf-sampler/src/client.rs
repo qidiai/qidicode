@@ -802,6 +802,16 @@ impl SamplingClient {
             request.top_p = self.defaults.top_p;
         }
 
+        // Sanitize tool function names: some APIs (e.g., DeepSeek) only allow
+        // ^[a-zA-Z0-9_-]+$ in function names. Replace ":" with "_".
+        if let Some(tools) = request.tools.as_mut() {
+            for tool in tools.iter_mut() {
+                if tool.function.name.contains(':') {
+                    tool.function.name = tool.function.name.replace(':', "_");
+                }
+            }
+        }
+
         Ok(request)
     }
 
@@ -2052,6 +2062,7 @@ mod tests {
             compaction_at_tokens: None,
             doom_loop_recovery: None,
             header_injector: None,
+            fallback_configs: Vec::new(),
         }
     }
 

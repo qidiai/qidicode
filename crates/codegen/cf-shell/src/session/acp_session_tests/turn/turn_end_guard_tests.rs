@@ -1,4 +1,4 @@
-﻿use super::{
+use super::{
     CollectedTodoGateInput, TodoGateDecision, TodoGateInput, TodoGateReason,
     build_todo_gate_reminder, evaluate_todo_gate,
 };
