@@ -17,6 +17,15 @@
 use std::path::Path;
 use cf_sandbox::{ProfileName, SandboxManager};
 
+// Kernel-enforcement smoke test is unix-only (Landlock/Seatbelt via nono).
+// Windows sandboxing uses Job Objects and is exercised by the unit tests.
+#[cfg(not(unix))]
+fn main() {
+    println!("sandbox_smoke_test is unix-only (Landlock/Seatbelt kernel enforcement).");
+    println!("Windows sandboxing uses Job Objects and is covered by unit tests.");
+}
+
+#[cfg(unix)]
 fn main() {
     // Parse profile from args (default: workspace).
     let profile_name = std::env::args()

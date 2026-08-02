@@ -197,7 +197,7 @@ cf-test-utils = { workspace = true }
 # Feature-unification applies the signing seam to the lib when building tests, so
 # integration tests can inject a throwaway trusted key; production builds exclude
 # dev-deps and compile the seam out.
-cf-config= { workspace = true, features = [] }
+cf-config= { workspace = true, features = ["test-helpers"] }
 # Ed25519 signing for the managed-config signature tests.
 ring = { workspace = true }
 tar = { workspace = true }

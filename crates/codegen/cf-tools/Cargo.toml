@@ -100,10 +100,12 @@ libc = { workspace = true }
 windows = { workspace = true }
 
 [dev-dependencies]
+cf-tools = { path = "." }
 dirs = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 wiremock = { workspace = true }
+cf-test-utils = { workspace = true }
 
 [build-dependencies]
 reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }

@@ -669,14 +669,14 @@ impl ToolRegistryBuilder {
         );
     }
     /// Whether this registry knows the fully-qualified tool id
-    /// (`"cf_tools:read_file"`).
+    /// (`"cf_tools::read_file"`).
     pub fn has_tool_id(&self, id: &str) -> bool {
         self.tools.contains_key(id)
     }
     pub fn known_tool_ids(&self) -> std::collections::HashSet<String> {
         self.tools.keys().cloned().collect()
     }
-    /// Fully-qualified tool id (`"cf_tools:read_file"`) → declared
+    /// Fully-qualified tool id (`"cf_tools::read_file"`) → declared
     /// [`ToolKind`], for every registered tool. Lets consumers that receive
     /// kind-less tool configs (e.g. hub `session.bind` wire entries) backfill
     /// the kind from the binary's own registry before capability filtering.
@@ -904,14 +904,14 @@ impl ToolRegistryBuilder {
         }
         {
             let standard_file_ids: &[&str] = &[
-                "cf_tools:read_file",
-                "cf_tools:search_replace",
-                "cf_tools:grep",
+                "cf_tools::read_file",
+                "cf_tools::search_replace",
+                "cf_tools::grep",
             ];
             let hashline_file_ids: &[&str] = &[
-                "cf_tools:hashline_read",
-                "cf_tools:hashline_edit",
-                "cf_tools:hashline_grep",
+                "cf_tools::hashline_read",
+                "cf_tools::hashline_edit",
+                "cf_tools::hashline_grep",
             ];
             let has_standard = config
                 .tools
@@ -1862,16 +1862,16 @@ fn explain_requirement_failure(
 ) -> RequirementError {
     let fq_tool_id = format!("{}:{}", entry.namespace, entry.id);
     match fq_tool_id.as_str() {
-        "cf_tools:run_terminal_cmd" if params
+        "cf_tools::run_terminal_cmd" if params
             .get("enabled_background")
             .and_then(|value| value.as_bool())
             .unwrap_or(true) => {
             let mut missing = vec![];
             if !has_tool_kind(proposed, ToolKind::BackgroundTaskAction) {
-                missing.push("cf_tools:get_task_output");
+                missing.push("cf_tools::get_task_output");
             }
             if !has_tool_kind(proposed, ToolKind::KillTaskAction) {
-                missing.push("cf_tools:kill_task");
+                missing.push("cf_tools::kill_task");
             }
             let message = if missing.is_empty() {
                 "unsatisfied requirements".to_string()
@@ -1889,13 +1889,13 @@ fn explain_requirement_failure(
                 .with_bad_value(serde_json::Value::Bool(true))
                 .with_category("requirements")
         }
-        "cf_tools:task" => {
+        "cf_tools::task" => {
             let mut missing = vec![];
             if !has_tool_kind(proposed, ToolKind::BackgroundTaskAction) {
-                missing.push("cf_tools:get_task_output");
+                missing.push("cf_tools::get_task_output");
             }
             if !has_tool_kind(proposed, ToolKind::KillTaskAction) {
-                missing.push("cf_tools:kill_task");
+                missing.push("cf_tools::kill_task");
             }
             RequirementError::new(
                     fq_tool_id,
@@ -1908,7 +1908,7 @@ fn explain_requirement_failure(
                 .with_expected("include get_task_output and kill_task")
                 .with_category("requirements")
         }
-        "cf_tools:get_task_output" => {
+        "cf_tools::get_task_output" => {
             let has_qidi_build_bash = has_tool_with_bool_param(
                 proposed,
                 "QidiBuild",
@@ -1931,7 +1931,7 @@ fn explain_requirement_failure(
             {
                 notes
                     .push(
-                        "cf_tools:run_terminal_cmd is present but enabled_background=false",
+                        "cf_tools::run_terminal_cmd is present but enabled_background=false",
                     );
             }
             if has_tool(proposed, "QidiBuildConcise", "run_terminal_cmd")
@@ -1939,10 +1939,10 @@ fn explain_requirement_failure(
             {
                 notes
                     .push(
-                        "cf_tools:run_terminal_cmd is present but enabled_background=false",
+                        "cf_tools::run_terminal_cmd is present but enabled_background=false",
                     );
             }
-            let mut message = "get_task_output requires a background-capable bash tool (cf_tools:run_terminal_cmd or cf_tools:run_terminal_cmd with enabled_background=true), OpenCode:bash, or cf_tools:task"
+            let mut message = "get_task_output requires a background-capable bash tool (cf_tools::run_terminal_cmd or cf_tools::run_terminal_cmd with enabled_background=true), OpenCode:bash, or cf_tools::task"
                 .to_string();
             let has_provider = has_qidi_build_bash || has_qidi_build_concise_bash
                 || has_opencode_bash || has_task;
@@ -1952,11 +1952,11 @@ fn explain_requirement_failure(
             RequirementError::new(fq_tool_id, message)
                 .with_field_path("tools")
                 .with_expected(
-                    "include a background-capable bash tool, OpenCode:bash, or cf_tools:task",
+                    "include a background-capable bash tool, OpenCode:bash, or cf_tools::task",
                 )
                 .with_category("requirements")
         }
-        "cf_tools:search_replace" if !params
+        "cf_tools::search_replace" if !params
             .get("skip_read_before_edit")
             .and_then(|value| value.as_bool())
             .unwrap_or(false) && !has_tool_kind(proposed, ToolKind::Read) => {
@@ -1966,27 +1966,27 @@ fn explain_requirement_failure(
                 )
                 .with_field_path("params.skip_read_before_edit")
                 .with_expected(
-                    "set skip_read_before_edit=true or include a Read tool such as cf_tools:read_file",
+                    "set skip_read_before_edit=true or include a Read tool such as cf_tools::read_file",
                 )
                 .with_bad_value(serde_json::Value::Bool(false))
                 .with_category("requirements")
         }
-        "cf_tools:enter_plan_mode" => {
+        "cf_tools::enter_plan_mode" => {
             RequirementError::new(
                     fq_tool_id,
-                    "enter_plan_mode requires cf_tools:exit_plan_mode so plan mode can always be exited",
+                    "enter_plan_mode requires cf_tools::exit_plan_mode so plan mode can always be exited",
                 )
                 .with_field_path("tools")
-                .with_expected("include cf_tools:exit_plan_mode")
+                .with_expected("include cf_tools::exit_plan_mode")
                 .with_category("requirements")
         }
-        "cf_tools:exit_plan_mode" => {
+        "cf_tools::exit_plan_mode" => {
             RequirementError::new(
                     fq_tool_id,
-                    "exit_plan_mode requires cf_tools:enter_plan_mode so plan mode can be entered before exiting",
+                    "exit_plan_mode requires cf_tools::enter_plan_mode so plan mode can be entered before exiting",
                 )
                 .with_field_path("tools")
-                .with_expected("include cf_tools:enter_plan_mode")
+                .with_expected("include cf_tools::enter_plan_mode")
                 .with_category("requirements")
         }
         _ => {
@@ -2056,7 +2056,7 @@ mod tests {
     fn test_session_context(tmp: &TempDir) -> SessionContext {
         SessionContext {
             backend: Arc::new(crate::computer::local::LocalTerminalBackend::new()),
-            fs: Arc::new(crate::computer::local::LocalFs),
+            fs: Arc::new(crate::computer::local::LocalFs::unconfined()),
             cwd: tmp.path().to_path_buf(),
             session_folder: tmp.path().join("session"),
             session_env: Arc::new(HashMap::new()),
@@ -2110,7 +2110,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:search_replace".to_string(),
+                    id: "cf_tools::search_replace".to_string(),
                     params: Some(
                         serde_json::json!({
                 "skip_read_before_edit" : true })
@@ -2169,7 +2169,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:read_file".to_string(),
+                    id: "cf_tools::read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2178,7 +2178,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:search_replace".to_string(),
+                    id: "cf_tools::search_replace".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2300,9 +2300,9 @@ mod tests {
             .finalize(
                 ToolServerConfig {
                     tools: vec![
-                        ToolConfig::from_id("cf_tools:run_terminal_cmd".to_string()),
-                        ToolConfig::from_id("cf_tools:get_task_output".to_string()),
-                        ToolConfig::from_id("cf_tools:kill_task".to_string()),
+                        ToolConfig::from_id("cf_tools::run_terminal_cmd".to_string()),
+                        ToolConfig::from_id("cf_tools::get_task_output".to_string()),
+                        ToolConfig::from_id("cf_tools::kill_task".to_string()),
                     ],
                     behavior_preset: None,
                 },
@@ -2324,9 +2324,9 @@ mod tests {
         use crate::types::tool_io::ToolInput;
         let config = ToolServerConfig {
             tools: vec![
-                ToolConfig::from_id("cf_tools:run_terminal_cmd".to_string()),
-                ToolConfig::from_id("cf_tools:get_task_output".to_string()),
-                ToolConfig::from_id("cf_tools:kill_task".to_string()),
+                ToolConfig::from_id("cf_tools::run_terminal_cmd".to_string()),
+                ToolConfig::from_id("cf_tools::get_task_output".to_string()),
+                ToolConfig::from_id("cf_tools::kill_task".to_string()),
             ],
             behavior_preset: None,
         };
@@ -2367,9 +2367,9 @@ mod tests {
     async fn identity_read_only_honors_per_tool_override() {
         let config = ToolServerConfig {
             tools: vec![
-                ToolConfig::from_id("cf_tools:run_terminal_cmd".to_string()),
-                ToolConfig::from_id("cf_tools:get_task_output".to_string()),
-                ToolConfig::from_id("cf_tools:kill_task".to_string()),
+                ToolConfig::from_id("cf_tools::run_terminal_cmd".to_string()),
+                ToolConfig::from_id("cf_tools::get_task_output".to_string()),
+                ToolConfig::from_id("cf_tools::kill_task".to_string()),
             ],
             behavior_preset: None,
         };
@@ -2392,11 +2392,11 @@ mod tests {
         let parse = |v: serde_json::Value| -> ToolConfig {
             serde_json::from_value(v).expect("ToolConfig deserializes")
         };
-        let known = parse(serde_json::json!({ "id" : "cf_tools:read_file", "kind" : "read" }));
+        let known = parse(serde_json::json!({ "id" : "cf_tools::read_file", "kind" : "read" }));
         assert_eq!(known.kind, Some(ToolKind::Read));
-        let typo = parse(serde_json::json!({ "id" : "cf_tools:read_file", "kind" : "raed" }));
+        let typo = parse(serde_json::json!({ "id" : "cf_tools::read_file", "kind" : "raed" }));
         assert_eq!(typo.kind, Some(ToolKind::Other));
-        let absent = parse(serde_json::json!({ "id" : "cf_tools:read_file" }));
+        let absent = parse(serde_json::json!({ "id" : "cf_tools::read_file" }));
         assert_eq!(absent.kind, None);
     }
     /// End-to-end: a `params_name_overrides` rename of `old_string` must flow
@@ -2408,7 +2408,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:read_file".to_string(),
+                    id: "cf_tools::read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2417,7 +2417,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:search_replace".to_string(),
+                    id: "cf_tools::search_replace".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: Some(std::collections::HashMap::from([(
@@ -2480,7 +2480,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:read_file".to_string(),
+                    id: "cf_tools::read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2489,7 +2489,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:search_replace".to_string(),
+                    id: "cf_tools::search_replace".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2574,7 +2574,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:read_file".to_string(),
+                    id: "cf_tools::read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2583,7 +2583,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:search_replace".to_string(),
+                    id: "cf_tools::search_replace".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2592,7 +2592,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:run_terminal_cmd".to_string(),
+                    id: "cf_tools::run_terminal_cmd".to_string(),
                     params: Some(
                         serde_json::json!({ "enabled_background" : true })
                             .as_object()
@@ -2609,7 +2609,7 @@ mod tests {
                 ToolConfig::for_tool::<qidi_build::KillTaskTool>(),
                 ToolConfig::for_tool::<qidi_build::TaskOutputTool>(),
                 ToolConfig {
-                    id: "cf_tools:list_dir".to_string(),
+                    id: "cf_tools::list_dir".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2653,13 +2653,13 @@ mod tests {
     fn has_tool_id_knows_pinned_tool_config_ids() {
         let builder = ToolRegistryBuilder::new();
         for id in [
-            "cf_tools:run_terminal_cmd",
-            "cf_tools:read_file",
-            "cf_tools:search_replace",
-            "cf_tools:list_dir",
-            "cf_tools:grep",
-            "cf_tools:get_terminal_command_output",
-            "cf_tools:kill_terminal_command",
+            "cf_tools::run_terminal_cmd",
+            "cf_tools::read_file",
+            "cf_tools::search_replace",
+            "cf_tools::list_dir",
+            "cf_tools::grep",
+            "cf_tools::get_terminal_command_output",
+            "cf_tools::kill_terminal_command",
         ] {
             assert!(
                 builder.has_tool_id(id),
@@ -2667,7 +2667,7 @@ mod tests {
             );
         }
         assert!(
-            !builder.has_tool_id("cf_tools:does_not_exist"),
+            !builder.has_tool_id("cf_tools::does_not_exist"),
             "unknown ids must not be reported as known"
         );
         assert!(
@@ -2683,11 +2683,11 @@ mod tests {
     fn known_tool_kinds_maps_pinned_tool_config_ids() {
         let kinds = ToolRegistryBuilder::new().known_tool_kinds();
         for (id, expected) in [
-            ("cf_tools:run_terminal_cmd", ToolKind::Execute),
-            ("cf_tools:read_file", ToolKind::Read),
-            ("cf_tools:search_replace", ToolKind::Edit),
-            ("cf_tools:grep", ToolKind::Search),
-            ("cf_tools:list_dir", ToolKind::List),
+            ("cf_tools::run_terminal_cmd", ToolKind::Execute),
+            ("cf_tools::read_file", ToolKind::Read),
+            ("cf_tools::search_replace", ToolKind::Edit),
+            ("cf_tools::grep", ToolKind::Search),
+            ("cf_tools::list_dir", ToolKind::List),
         ] {
             assert_eq!(
                 kinds.get(id),
@@ -2696,7 +2696,7 @@ mod tests {
             );
         }
         assert!(
-            !kinds.contains_key("cf_tools:does_not_exist"),
+            !kinds.contains_key("cf_tools::does_not_exist"),
             "unknown ids must be absent"
         );
     }
@@ -2704,7 +2704,7 @@ mod tests {
     /// two tools resolve to the same `client_name`.
     ///
     /// Without `name_override`, the client_name defaults to `entry.id`
-    /// (e.g. `"read_file"`). If both `cf_tools:read_file` and
+    /// (e.g. `"read_file"`). If both `cf_tools::read_file` and
     /// `Codex:read_file` are in the config, both would get
     /// `client_name = "read_file"`, making the second unreachable at
     /// dispatch time.
@@ -2714,7 +2714,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:read_file".to_string(),
+                    id: "cf_tools::read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2748,7 +2748,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:run_terminal_cmd".to_string(),
+                id: "cf_tools::run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::from_value(serde_json::json!({ "enabled_background" :
                 "yes" }))
@@ -2765,7 +2765,7 @@ mod tests {
         let errors = builder.validate_config(&config);
         assert_eq!(errors.len(), 1);
         let error = &errors[0];
-        assert_eq!(error.tool, "cf_tools:run_terminal_cmd");
+        assert_eq!(error.tool, "cf_tools::run_terminal_cmd");
         assert_eq!(
             error.field_path.as_deref(),
             Some("params.enabled_background")
@@ -2778,7 +2778,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:hashline_read".to_string(),
+                id: "cf_tools::hashline_read".to_string(),
                 params: Some(
                     serde_json::from_value(serde_json::json!({ "hash_len" : 0 })).unwrap(),
                 ),
@@ -2806,7 +2806,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:read_file".to_string(),
+                    id: "cf_tools::read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -2845,7 +2845,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:read_file".to_string(),
+                    id: "cf_tools::read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3255,7 +3255,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:task".to_string(),
+                id: "cf_tools::task".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3271,9 +3271,9 @@ mod tests {
             "task tool should be rejected without get_task_output and kill_task"
         );
         assert!(
-            errors.iter().any(|e| e.tool == "cf_tools:task"
-                && e.message.contains("cf_tools:get_task_output")
-                && e.message.contains("cf_tools:kill_task")),
+            errors.iter().any(|e| e.tool == "cf_tools::task"
+                && e.message.contains("cf_tools::get_task_output")
+                && e.message.contains("cf_tools::kill_task")),
             "error should mention missing background task tools: {errors:?}",
         );
     }
@@ -3285,7 +3285,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:task".to_string(),
+                    id: "cf_tools::task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3294,7 +3294,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:get_task_output".to_string(),
+                    id: "cf_tools::get_task_output".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3309,7 +3309,7 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|e| e.tool == "cf_tools:task" && e.message.contains("cf_tools:kill_task")),
+                .any(|e| e.tool == "cf_tools::task" && e.message.contains("cf_tools::kill_task")),
             "task tool should be rejected without kill_task: {errors:?}",
         );
     }
@@ -3321,7 +3321,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:task".to_string(),
+                    id: "cf_tools::task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3330,7 +3330,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:kill_task".to_string(),
+                    id: "cf_tools::kill_task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3345,8 +3345,8 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|e| e.tool == "cf_tools:task"
-                    && e.message.contains("cf_tools:get_task_output")),
+                .any(|e| e.tool == "cf_tools::task"
+                    && e.message.contains("cf_tools::get_task_output")),
             "task tool should be rejected without get_task_output: {errors:?}",
         );
     }
@@ -3359,7 +3359,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:task".to_string(),
+                    id: "cf_tools::task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3368,7 +3368,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:get_task_output".to_string(),
+                    id: "cf_tools::get_task_output".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3377,7 +3377,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:kill_task".to_string(),
+                    id: "cf_tools::kill_task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3409,7 +3409,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:run_terminal_cmd".to_string(),
+                id: "cf_tools::run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::json!({ "enabled_background" : false })
                         .as_object()
@@ -3460,7 +3460,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:run_terminal_cmd".to_string(),
+                    id: "cf_tools::run_terminal_cmd".to_string(),
                     params: Some(
                         serde_json::json!({ "enabled_background" : true })
                             .as_object()
@@ -3474,7 +3474,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:get_task_output".to_string(),
+                    id: "cf_tools::get_task_output".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3483,7 +3483,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:kill_task".to_string(),
+                    id: "cf_tools::kill_task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3546,11 +3546,11 @@ mod tests {
         };
         let config = ToolServerConfig {
             tools: vec![
-                tool("cf_tools:run_terminal_cmd"),
-                tool("cf_tools:task"),
-                tool("cf_tools:get_task_output"),
-                tool("cf_tools:wait_tasks"),
-                tool("cf_tools:kill_task"),
+                tool("cf_tools::run_terminal_cmd"),
+                tool("cf_tools::task"),
+                tool("cf_tools::get_task_output"),
+                tool("cf_tools::wait_tasks"),
+                tool("cf_tools::kill_task"),
             ],
             behavior_preset: None,
         };
@@ -3600,7 +3600,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:run_terminal_cmd".to_string(),
+                id: "cf_tools::run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::json!({ "enabled_background" : false,
                 "auto_background_on_timeout" : true })
@@ -3637,7 +3637,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:run_terminal_cmd".to_string(),
+                id: "cf_tools::run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::json!({ "enabled_background" : false,
                 "auto_background_on_timeout" : false })
@@ -3683,7 +3683,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:run_terminal_cmd".to_string(),
+                id: "cf_tools::run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::json!({ "enabled_background" : false,
                 "auto_background_on_timeout" : false })
@@ -3710,7 +3710,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:run_terminal_cmd".to_string(),
+                id: "cf_tools::run_terminal_cmd".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3727,15 +3727,15 @@ mod tests {
             "expected one bash requirement error: {errors:?}"
         );
         let error = &errors[0];
-        assert_eq!(error.tool, "cf_tools:run_terminal_cmd");
+        assert_eq!(error.tool, "cf_tools::run_terminal_cmd");
         assert_eq!(error.category.as_deref(), Some("requirements"));
         assert_eq!(
             error.field_path.as_deref(),
             Some("params.enabled_background")
         );
         assert_eq!(error.bad_value, Some(serde_json::json!(true)));
-        assert!(error.message.contains("cf_tools:get_task_output"));
-        assert!(error.message.contains("cf_tools:kill_task"));
+        assert!(error.message.contains("cf_tools::get_task_output"));
+        assert!(error.message.contains("cf_tools::kill_task"));
         assert!(
             error
                 .expected
@@ -3749,7 +3749,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:task".to_string(),
+                id: "cf_tools::task".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3766,9 +3766,9 @@ mod tests {
             "expected one task requirement error: {errors:?}"
         );
         let error = &errors[0];
-        assert_eq!(error.tool, "cf_tools:task");
-        assert!(error.message.contains("cf_tools:get_task_output"));
-        assert!(error.message.contains("cf_tools:kill_task"));
+        assert_eq!(error.tool, "cf_tools::task");
+        assert!(error.message.contains("cf_tools::get_task_output"));
+        assert!(error.message.contains("cf_tools::kill_task"));
         assert_eq!(error.field_path.as_deref(), Some("tools"));
     }
     #[test]
@@ -3776,7 +3776,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:get_task_output".to_string(),
+                id: "cf_tools::get_task_output".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3793,17 +3793,17 @@ mod tests {
             "expected one get_task_output requirement error: {errors:?}"
         );
         let error = &errors[0];
-        assert_eq!(error.tool, "cf_tools:get_task_output");
+        assert_eq!(error.tool, "cf_tools::get_task_output");
         assert!(error.message.contains("background-capable bash tool"));
         assert!(error.message.contains("OpenCode:bash"));
-        assert!(error.message.contains("cf_tools:task"));
+        assert!(error.message.contains("cf_tools::task"));
     }
     #[test]
     fn search_replace_requirement_error_mentions_read_tool() {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:search_replace".to_string(),
+                id: "cf_tools::search_replace".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3820,7 +3820,7 @@ mod tests {
         );
         let error = errors
             .iter()
-            .find(|error| error.tool == "cf_tools:search_replace")
+            .find(|error| error.tool == "cf_tools::search_replace")
             .expect("search_replace error should be present");
         assert!(error.message.contains("Read tool"));
         assert_eq!(
@@ -3835,7 +3835,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:ask_user_question".to_string(),
+                id: "cf_tools::ask_user_question".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -3857,7 +3857,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:run_terminal_cmd".to_string(),
+                    id: "cf_tools::run_terminal_cmd".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3866,7 +3866,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:read_file".to_string(),
+                    id: "cf_tools::read_file".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3875,7 +3875,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:search_replace".to_string(),
+                    id: "cf_tools::search_replace".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3884,7 +3884,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:list_dir".to_string(),
+                    id: "cf_tools::list_dir".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3893,7 +3893,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:grep".to_string(),
+                    id: "cf_tools::grep".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3902,7 +3902,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:web_search".to_string(),
+                    id: "cf_tools::web_search".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3911,7 +3911,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:task".to_string(),
+                    id: "cf_tools::task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3920,7 +3920,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:get_task_output".to_string(),
+                    id: "cf_tools::get_task_output".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3929,7 +3929,7 @@ mod tests {
                     kind: None,
                 },
                 ToolConfig {
-                    id: "cf_tools:kill_task".to_string(),
+                    id: "cf_tools::kill_task".to_string(),
                     params: None,
                     name_override: None,
                     params_name_overrides: None,
@@ -3978,19 +3978,19 @@ mod tests {
         assert!(
             builder
                 .tools
-                .contains_key("cf_tools:hashline_read"),
+                .contains_key("cf_tools::hashline_read"),
             "hashline_read should be registered"
         );
         assert!(
             builder
                 .tools
-                .contains_key("cf_tools:hashline_edit"),
+                .contains_key("cf_tools::hashline_edit"),
             "hashline_edit should be registered"
         );
         assert!(
             builder
                 .tools
-                .contains_key("cf_tools:hashline_grep"),
+                .contains_key("cf_tools::hashline_grep"),
             "hashline_grep should be registered"
         );
     }
@@ -4000,9 +4000,9 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![
-                hashline_tool_config("cf_tools:hashline_read"),
-                hashline_tool_config("cf_tools:hashline_edit"),
-                hashline_tool_config("cf_tools:hashline_grep"),
+                hashline_tool_config("cf_tools::hashline_read"),
+                hashline_tool_config("cf_tools::hashline_edit"),
+                hashline_tool_config("cf_tools::hashline_grep"),
             ],
             behavior_preset: None,
         };
@@ -4025,9 +4025,9 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let standard_config = ToolServerConfig {
             tools: vec![
-                hashline_tool_config("cf_tools:read_file"),
-                hashline_tool_config("cf_tools:search_replace"),
-                hashline_tool_config("cf_tools:grep"),
+                hashline_tool_config("cf_tools::read_file"),
+                hashline_tool_config("cf_tools::search_replace"),
+                hashline_tool_config("cf_tools::grep"),
             ],
             behavior_preset: None,
         };
@@ -4038,9 +4038,9 @@ mod tests {
         let builder2 = ToolRegistryBuilder::new();
         let hashline_config = ToolServerConfig {
             tools: vec![
-                hashline_tool_config("cf_tools:hashline_read"),
-                hashline_tool_config("cf_tools:hashline_edit"),
-                hashline_tool_config("cf_tools:hashline_grep"),
+                hashline_tool_config("cf_tools::hashline_read"),
+                hashline_tool_config("cf_tools::hashline_edit"),
+                hashline_tool_config("cf_tools::hashline_grep"),
             ],
             behavior_preset: None,
         };
@@ -4055,9 +4055,9 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![
-                hashline_tool_config("cf_tools:hashline_read"),
-                hashline_tool_config("cf_tools:hashline_edit"),
-                hashline_tool_config("cf_tools:hashline_grep"),
+                hashline_tool_config("cf_tools::hashline_read"),
+                hashline_tool_config("cf_tools::hashline_edit"),
+                hashline_tool_config("cf_tools::hashline_grep"),
             ],
             behavior_preset: None,
         };
@@ -4077,9 +4077,9 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![
-                hashline_tool_config("cf_tools:read_file"),
-                hashline_tool_config("cf_tools:hashline_edit"),
-                hashline_tool_config("cf_tools:grep"),
+                hashline_tool_config("cf_tools::read_file"),
+                hashline_tool_config("cf_tools::hashline_edit"),
+                hashline_tool_config("cf_tools::grep"),
             ],
             behavior_preset: None,
         };
@@ -4134,7 +4134,7 @@ mod tests {
         let config = ToolServerConfig {
             tools: vec![
                 ToolConfig {
-                    id: "cf_tools:hashline_read".to_owned(),
+                    id: "cf_tools::hashline_read".to_owned(),
                     params: Some(
                         serde_json::json!({ "scheme" : "chunk", "hash_len" : 2, "chunk_size"
                 : 16 })
@@ -4174,7 +4174,7 @@ mod tests {
     }
     fn bash_config_with_background() -> ToolConfig {
         ToolConfig {
-            id: "cf_tools:run_terminal_cmd".to_owned(),
+            id: "cf_tools::run_terminal_cmd".to_owned(),
             params: Some(
                 serde_json::json!({ "enabled_background" : true })
                     .as_object()
@@ -4445,7 +4445,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:read_file".to_string(),
+                id: "cf_tools::read_file".to_string(),
                 params: None,
                 name_override: None,
                 params_name_overrides: None,
@@ -4516,7 +4516,7 @@ mod tests {
         let builder = ToolRegistryBuilder::new();
         let config = ToolServerConfig {
             tools: vec![ToolConfig {
-                id: "cf_tools:run_terminal_cmd".to_string(),
+                id: "cf_tools::run_terminal_cmd".to_string(),
                 params: Some(
                     serde_json::json!({ "enabled_background" : false })
                         .as_object()

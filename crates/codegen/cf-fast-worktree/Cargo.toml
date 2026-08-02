@@ -51,6 +51,7 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 serde_json = { workspace = true }
+cf-test-utils = { workspace = true }
 # Unconditional because cargo doesn't support feature-gated dev-deps cleanly.
 # Only used by tests behind #[cfg(feature = "metadata")] in db/tests.rs.
 rusqlite = { version = "0.37", features = ["bundled"] }

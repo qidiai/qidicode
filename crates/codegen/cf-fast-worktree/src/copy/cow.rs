@@ -77,6 +77,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_clone_preserves_permissions() {
         use std::os::unix::fs::PermissionsExt;
 

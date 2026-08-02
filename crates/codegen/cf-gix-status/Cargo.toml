@@ -13,6 +13,7 @@ libc = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+cf-test-utils = { workspace = true }
 
 [lints]
 workspace = true

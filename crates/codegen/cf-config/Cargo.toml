@@ -36,6 +36,10 @@ core-foundation = { workspace = true }
 tempfile = { workspace = true }
 
 [features]
+# Exposes the signed-policy test seam (`set_embedded_keys`) to sibling crates'
+# test builds under cargo, where a dependency is never compiled with `cfg(test)`.
+# Never enabled by production builds.
+test-helpers = []
 
 [lints]
 workspace = true

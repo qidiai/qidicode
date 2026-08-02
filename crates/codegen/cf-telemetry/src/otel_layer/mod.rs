@@ -209,7 +209,7 @@ async fn export_batch(
 impl RefreshableSpanExporter {
     #[cfg(test)]
     fn current_token(&self) -> String {
-        self.credentials.snapshot().token.unwrap_or_else(|| {
+        self.credentials.snapshot().token.map(|t| t.to_string()).unwrap_or_else(|| {
             tracing::debug!("auth: otel credential snapshot has no token, using cached last_token");
             self.last_token.lock().clone()
         })
@@ -677,17 +677,17 @@ mod tests {
     #[tokio::test]
     async fn refresh_after_unauthorized_rotates_token() {
         let provider = TestProvider::with_refresh("stale-token", "fresh-token");
-        assert_eq!(provider.snapshot().token.as_deref(), Some("stale-token"));
+        assert_eq!(provider.snapshot().token.as_deref().map(String::as_str), Some("stale-token"));
         assert!(provider.refresh_after_unauthorized().await);
         assert_eq!(provider.refresh_count(), 1);
-        assert_eq!(provider.snapshot().token.as_deref(), Some("fresh-token"));
+        assert_eq!(provider.snapshot().token.as_deref().map(String::as_str), Some("fresh-token"));
     }
     #[tokio::test]
     async fn no_refresh_when_provider_cannot_refresh() {
         let provider = TestProvider::new(Some("only-token"));
         assert!(!provider.refresh_after_unauthorized().await);
         assert_eq!(provider.refresh_count(), 0);
-        assert_eq!(provider.snapshot().token.as_deref(), Some("only-token"));
+        assert_eq!(provider.snapshot().token.as_deref().map(String::as_str), Some("only-token"));
     }
     /// A provider whose `refresh_after_unauthorized` requires a Tokio
     /// runtime (calls `tokio::task::spawn_blocking`), mimicking the real
@@ -708,7 +708,7 @@ mod tests {
     impl AuthCredentialProvider for TokioDependentProvider {
         fn snapshot(&self) -> CredentialSnapshot {
             CredentialSnapshot {
-                token: Some("test-token".into()),
+                token: Some("test-token".to_string().into()),
                 ..Default::default()
             }
         }

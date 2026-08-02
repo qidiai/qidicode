@@ -57,9 +57,54 @@ const fn const_str_eq(a: &str, b: &str) -> bool {
     true
 }
 /// Run `f` over the trusted key set — the compiled-in [`EMBEDDED_DEPLOYMENT_CONFIG_PUBKEYS`],
-/// unless the compile-time-excluded test seam overrides it.
+/// unless the test seam overrides it.
 fn with_embedded_keys<R>(f: impl FnOnce(&[(&str, &[u8])]) -> R) -> R {
+    #[cfg(any(test, feature = "test-helpers"))]
+    {
+        let mut f = Some(f);
+        if let Some(result) =
+            test_seam::with_keys(|keys| f.take().expect("f consumed twice")(keys))
+        {
+            return result;
+        }
+        f.take().expect("f consumed twice")(EMBEDDED_DEPLOYMENT_CONFIG_PUBKEYS)
+    }
+    #[cfg(not(any(test, feature = "test-helpers")))]
     f(EMBEDDED_DEPLOYMENT_CONFIG_PUBKEYS)
+}
+
+/// Test seam for injecting a trusted key set from downstream test builds.
+///
+/// [`set_embedded_keys`] replaces the compiled-in key set for the rest of the
+/// process; [`verification_active`] and the verify paths consult it first.
+/// Compile-time excluded from production builds (only present under `#[cfg(test)]`
+/// or the `test-helpers` feature).
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_seam {
+    use std::sync::Mutex;
+
+    static OVERRIDE_KEYS: Mutex<Option<Vec<(String, Vec<u8>)>>> = Mutex::new(None);
+
+    /// Replace the trusted embedded key set. Pass `&[]` to clear back to the
+    /// compiled-in set.
+    pub fn set_embedded_keys(keys: &[(&str, &[u8])]) {
+        *OVERRIDE_KEYS.lock().unwrap_or_else(|e| e.into_inner()) = Some(
+            keys.iter()
+                .map(|(id, bytes)| ((*id).to_owned(), bytes.to_vec()))
+                .collect(),
+        );
+    }
+
+    /// Run `f` over the seam's key set when one is installed; `None` otherwise.
+    pub(super) fn with_keys<R>(f: impl FnOnce(&[(&str, &[u8])]) -> R) -> Option<R> {
+        let guard = OVERRIDE_KEYS.lock().unwrap_or_else(|e| e.into_inner());
+        let keys = guard.as_ref()?;
+        let views: Vec<(&str, &[u8])> = keys
+            .iter()
+            .map(|(id, bytes)| (id.as_str(), bytes.as_slice()))
+            .collect();
+        Some(f(&views))
+    }
 }
 /// Sidecar persisted next to the policy so the load-time gate can re-verify it offline.
 pub const SIGNATURE_SIDECAR_FILE: &str = "managed_config.sig.json";

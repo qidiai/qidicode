@@ -12,7 +12,7 @@ pub struct ToolConfigEntryError {
 }
 
 /// Kind of validation error.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ToolConfigEntryErrorKind {
     ParamsJsonParse { raw: String, error: String },
     ParamsJsonNotObject { value: String },
@@ -23,13 +23,24 @@ impl ToolConfigEntryError {
     pub fn new(index: usize, tool_id: String, kind: ToolConfigEntryErrorKind) -> Self {
         Self { index, tool_id, kind }
     }
+
+    /// Path of the offending field within the wire tool-config list, e.g.
+    /// `tools[3].params_json`. Used by callers to report precise error locations.
+    pub fn field_path(&self) -> String {
+        let field = match &self.kind {
+            ToolConfigEntryErrorKind::ParamsJsonParse { .. }
+            | ToolConfigEntryErrorKind::ParamsJsonNotObject { .. } => "params_json",
+            ToolConfigEntryErrorKind::NameOverrideInvalid { .. } => "name_override",
+        };
+        format!("tools[{}].{}", self.index, field)
+    }
 }
 
 /// Parse a params JSON string into a HashMap<String, Value>.
 pub fn parse_params_json(index: usize, tool_id: &str, raw: Option<&str>) -> Result<Option<serde_json::Map<String, serde_json::Value>>, ToolConfigEntryError> {
     match raw {
         Some(r) if !r.is_empty() => {
-            let parsed: serde_json::Map<String, serde_json::Value> = serde_json::from_str(r)
+            let parsed: serde_json::Value = serde_json::from_str(r)
                 .map_err(|e| ToolConfigEntryError::new(
                     index,
                     tool_id.to_string(),
@@ -38,7 +49,16 @@ pub fn parse_params_json(index: usize, tool_id: &str, raw: Option<&str>) -> Resu
                         error: e.to_string(),
                     },
                 ))?;
-            Ok(Some(parsed))
+            match parsed {
+                serde_json::Value::Object(map) => Ok(Some(map)),
+                other => Err(ToolConfigEntryError::new(
+                    index,
+                    tool_id.to_string(),
+                    ToolConfigEntryErrorKind::ParamsJsonNotObject {
+                        value: other.to_string(),
+                    },
+                )),
+            }
         }
         _ => Ok(None),
     }

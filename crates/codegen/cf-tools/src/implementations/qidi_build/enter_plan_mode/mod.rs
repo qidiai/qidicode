@@ -478,7 +478,7 @@ mod tests {
         let (resources, plan_path) = resources_with_plan_fs(&tmp);
         let shared = resources.into_shared();
 
-        let fs = LocalFs;
+        let fs = LocalFs::unconfined();
         fs.write_file(&plan_path, b"# prior plan\n").await.unwrap();
 
         let result = cf_tool_runtime::Tool::run(
@@ -509,7 +509,7 @@ mod tests {
         let (resources, plan_path) = resources_with_plan_fs(&tmp);
         let shared = resources.into_shared();
 
-        let fs = LocalFs;
+        let fs = LocalFs::unconfined();
         fs.write_file(&plan_path, b"").await.unwrap();
 
         let result = cf_tool_runtime::Tool::run(
@@ -531,7 +531,7 @@ mod tests {
     async fn probe_or_create_empty_plan_file_via_fs_creates_parents() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("nested").join("dir").join("plan.md");
-        let fs = LocalFs;
+        let fs = LocalFs::unconfined();
         let status = probe_or_create_empty_plan_file(&fs, &path).await;
         assert_eq!(status, PlanFileSeedStatus::Empty);
         assert!(path.is_file());

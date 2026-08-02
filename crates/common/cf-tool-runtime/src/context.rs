@@ -252,8 +252,8 @@ mod bind_metadata_tests {
         let md = WorkspaceBindMetadata {
             preset: Some("explore".to_owned()),
             capability_mode: Some("read_only".to_owned()),
-            tools: vec![super::tool_config_entry::ToolConfigEntry {
-                id: "cf_tools:grep".to_owned(),
+            tools: vec![crate::tool_config_entry::ToolConfigEntry {
+                id: "cf_tools::grep".to_owned(),
                 ..Default::default()
             }],
             viewer_ctx: Some(super::WorkspaceViewerContext {

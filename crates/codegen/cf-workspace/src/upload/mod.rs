@@ -338,7 +338,7 @@ mod tests {
             .proxy_credentials()
             .expect("proxy_credentials must be Some")
             .snapshot();
-        assert_eq!(snap.token.as_deref(), Some("test-token"));
+        assert_eq!(snap.token.as_deref().map(String::as_str), Some("test-token"));
         assert_eq!(snap.user_id.as_deref(), Some("user-team-1"));
         assert_eq!(snap.team_id.as_deref(), Some("team-9"));
     }
@@ -363,7 +363,7 @@ mod tests {
             .proxy_credentials()
             .expect("proxy_credentials must be Some")
             .snapshot();
-        assert_eq!(snap.token.as_deref(), Some("test-token"));
+        assert_eq!(snap.token.as_deref().map(String::as_str), Some("test-token"));
         assert_eq!(snap.user_id, None);
         assert_eq!(snap.team_id, None);
     }
@@ -414,7 +414,7 @@ mod tests {
         let creds = source
             .proxy_credentials()
             .expect("proxy_credentials must be Some");
-        assert_eq!(creds.snapshot().token.as_deref(), Some("test-token"));
+        assert_eq!(creds.snapshot().token.as_deref().map(String::as_str), Some("test-token"));
     }
     use std::path::Path;
     use tempfile::TempDir;

@@ -6,6 +6,7 @@ use super::common::*;
 /// Enter to resend the restored text. The prompt must appear EXACTLY ONCE in
 /// scrollback and in each wire request — the rewound turn's copy must not
 /// survive in session history and pair with the resend as 2x.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn cancel_then_resend_prompt_appears_once() {

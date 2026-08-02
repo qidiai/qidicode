@@ -8,6 +8,7 @@ use super::common::*;
 /// "Turn cancelled by user" marker). (`do_cancel_turn` rewind path:
 /// `set_text` + `remove_entry`; requires `cancel_rewind_enabled`, on by
 /// default via the initialize `cancelRewind` meta.)
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn send_then_ctrlc_rewinds_to_composer_no_history_dup() {
