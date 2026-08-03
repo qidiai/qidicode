@@ -18,3 +18,17 @@ mem-log/
 _audit_*.ps1
 _audit_check.log
 CODELY.md
+
+# ---- 本机整理:构建产物与一次性运行结果 ----
+qidi.exe
+build_log.txt
+build_result.txt
+
+# 本机专用配置(含绝对路径),勿提交
+.mcp.json
+
+# 本机数据目录
+Library/
+
+# protoc 嵌套解压副本(运行 bin/download_protoc.py 重新生成)
+bin/bin/
