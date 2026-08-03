@@ -1,0 +1,17 @@
+﻿# 数据库
+*.db
+*.sqlite
+
+# 环境变量
+.env
+
+# 构建产物
+target/
+Cargo.lock
+
+# 配置文件（含密钥，见 README）
+agnes_config.json
+finance_config.json
+
+# 日志
+*.log

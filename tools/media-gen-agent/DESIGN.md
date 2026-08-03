@@ -24,19 +24,18 @@
 
 ```
 media-gen-agent/
-├── agnes_config.json              # 多 key 集中配置
+├── agnes_config.json              # 多 key 集中配置（含敏感 key，不入库）
+├── .gitignore                     # 忽略敏感文件与生成物
+├── README.md                      # 使用说明
 ├── SKILL.md                       # QIDI Code skill 定义
 ├── DESIGN.md                      # 本文档
 │
 ├── scripts/
-│   ├── media_system.ps1           # ★ 统一入口（推荐）
-│   └── images/                    # 图片输出目录
+│   └── media_system.ps1           # ★ 统一入口
 │
-├── videos/                        # 视频输出目录
-│
-├── image_system.ps1               # 旧版独立图片脚本（待清理）
-└── video_system/
-    └── video_system.ps1           # 旧版独立视频脚本（待清理）
+└── output/                        # 统一输出目录（不入库）
+    ├── images/
+    └── videos/
 ```
 
 ### 核心设计
@@ -149,34 +148,31 @@ media-gen-agent/
 | text2video | ✅ 已打通 | 2026-07-31 05:39 | 生成 `text2video_agnes_20260731_053938.mp4` |
 | img2video | ✅ 代码就绪 | — | 待实际测试 |
 | ref2video | ✅ 代码就绪 | — | 待实际测试 |
-| 多 Key 配置 | ✅ 已支持 | — | 当前仅 1 个 key，待补充剩余 2 个 |
-| Key 故障切换 | ❌ 未实现 | — | 待实现 429/503 自动轮询 |
-| 冗余文件清理 | ❌ 未完成 | — | `image_system.ps1`、根目录 `media_system.ps1`、`video_system/` 待清理 |
+| 多 Key 配置 | ✅ 已支持 | — | 3 个 key（key2/key3 待填入真实 key） |
+| Key 故障切换 | ✅ 已实现 | — | 429/503/500 自动轮询下一个 key |
+| 冗余文件清理 | ✅ 已完成 | — | 旧版脚本已清理，统一到 `scripts/media_system.ps1` |
+| 统一输出目录 | ✅ 已完成 | — | 图片和视频统一到 `output/` |
 
 ### 已生成文件
 
 ```
-images/
-├── text2img_20260731_152545.png
-├── text2img_20260731_160833.png
-└── text2img_20260731_161134.png
-
-videos/
-└── text2video_agnes_20260731_053938.mp4
+output/
+├── images/          # text2img、img2img 输出
+└── videos/          # img2video、text2video、ref2video 输出
 ```
 
 ---
 
 ## 6. 待完成项（路线图）
 
-### P0 — 高优先级
-1. **补充剩余 2 个 Agnes API key** 到 `agnes_config.json`
-2. **实现 Key 故障切换**：检测到 429/503 时自动轮询下一个 key
-3. **清理冗余文件**：统一到 `scripts/media_system.ps1`，删除旧版独立脚本
+### P0 — 高优先级（已完成）
+1. ✅ **补充剩余 2 个 Agnes API key** 到 `agnes_config.json`（key2/key3 结构已就绪，待填入真实 key）
+2. ✅ **实现 Key 故障切换**：检测到 429/503/500 时自动轮询下一个 key
+3. ✅ **清理冗余文件**：旧版 `image_system.ps1`、根目录 `media_system.ps1`、`video_system/` 已清理
 
 ### P1 — 中优先级
-4. **统一输出目录**：目前图片输出在 `scripts/images/`，视频输出在 `videos/`，建议统一到 `output/`
-5. **日志与重试**：添加生成日志、失败重试机制
+4. ✅ **统一输出目录**：`output/images/` + `output/videos/`
+5. **日志与重试**：`Invoke-WithRetry` 已覆盖下载重试，请求级重试由 `Invoke-AgnesRest` 处理
 6. **完善 SKILL.md**：补充图片/视频模型严格区分的注意事项
 
 ### P2 — 低优先级

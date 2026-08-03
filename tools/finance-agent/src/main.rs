@@ -59,7 +59,7 @@ async fn async_main() -> Result<()> {
     tracing::info!("Database: {:?}", args.db_path);
 
     let db = Database::new(&args.db_path).await?;
-    db.init()?;
+    db.init().await?;
     let ledger = LedgerEngine::new(db.clone());
     let mut agent = FinanceAgent::new(ledger, db.clone())?;
 
@@ -72,7 +72,7 @@ async fn async_main() -> Result<()> {
         return Ok(());
     }
 
-    if let Some(report_type) = args.report {
+    if let Some(_report_type) = args.report {
         let report = agent.ledger.income_statement(&agent.entity_id).await?;
         println!("{}", report);
         return Ok(());

@@ -118,7 +118,7 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_review_queue ON review_queue(transaction_id);
         "#;
         tokio::task::spawn_blocking(move || {
-            let mut c = conn.blocking_lock();
+            let c = conn.blocking_lock();
             c.execute_batch(sql)
         }).await??;
         tracing::info!("Database initialized");
@@ -129,7 +129,7 @@ impl Database {
         let conn = self.conn.clone();
         let name = name.to_string();
         let id = tokio::task::spawn_blocking(move || {
-            let mut c = conn.blocking_lock();
+            let c = conn.blocking_lock();
             let id = Uuid::new_v4().to_string();
             c.execute(
                 "INSERT INTO entities (id, name, created_at) VALUES (?1, ?2, ?3)",
@@ -144,7 +144,7 @@ impl Database {
         let conn = self.conn.clone();
         let name = name.to_string();
         let result = tokio::task::spawn_blocking(move || {
-            let mut c = conn.blocking_lock();
+            let c = conn.blocking_lock();
             let mut stmt = c.prepare("SELECT id FROM entities WHERE name = ?1")?;
             let result = stmt.query_row(params![name], |row| row.get(0)).optional()?;
             Ok::<_, anyhow::Error>(result)
@@ -175,7 +175,7 @@ impl Database {
         let entries = entries.to_vec();
         let entry_count = entries.len();
         let tx_id = tokio::task::spawn_blocking(move || {
-            let mut c = conn.blocking_lock();
+            let c = conn.blocking_lock();
             let tx_id = Uuid::new_v4().to_string();
             c.execute(
                 "INSERT INTO transactions (id, entity_id, date, description, source, status, created_at, created_by)
@@ -212,7 +212,7 @@ impl Database {
         let entity_id = entity_id.to_string();
         let account_id = account_id.to_string();
         let balance = tokio::task::spawn_blocking(move || {
-            let mut c = conn.blocking_lock();
+            let c = conn.blocking_lock();
             let balance: f64 = c.query_row(
                 "SELECT COALESCE(SUM(amount), 0) FROM journal_entries je
                  JOIN transactions t ON je.transaction_id = t.id
@@ -229,7 +229,7 @@ impl Database {
         let conn = self.conn.clone();
         let entity_id = entity_id.to_string();
         let rows = tokio::task::spawn_blocking(move || {
-            let mut c = conn.blocking_lock();
+            let c = conn.blocking_lock();
             let mut stmt = c.prepare(
                 "SELECT a.id, a.name, COALESCE(SUM(je.amount), 0) as balance
                  FROM accounts a
@@ -259,7 +259,7 @@ impl Database {
         let old_value = old_value.map(|s| s.to_string());
         let new_value = new_value.map(|s| s.to_string());
         tokio::task::spawn_blocking(move || {
-            let mut c = conn.blocking_lock();
+            let c = conn.blocking_lock();
             c.execute(
                 "INSERT INTO audit_log (id, entity_id, action, target_type, target_id, old_value, new_value, performed_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",

@@ -10,6 +10,7 @@ pub enum AccountType {
     Expense,
 }
 
+#[allow(dead_code)]
 impl AccountType {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -53,6 +54,7 @@ pub struct JournalEntry {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)]
 pub struct Transaction {
     pub id: String,
     pub entity_id: String,
@@ -73,6 +75,7 @@ impl LedgerEngine {
         Self { db }
     }
 
+#[allow(dead_code)]
     pub async fn create_account(&self, entity_id: &str, name: &str, account_type: AccountType, parent_id: Option<&str>, description: Option<&str>) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.db.conn.lock().await;
@@ -185,3 +188,6 @@ impl LedgerEngine {
         ))
     }
 }
+
+
+

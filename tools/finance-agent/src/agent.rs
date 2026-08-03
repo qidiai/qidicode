@@ -27,18 +27,21 @@ pub struct LLMRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct LLMResponse {
     pub choices: Vec<LLMChoice>,
     pub usage: Option<LLMUsage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct LLMChoice {
     pub message: ChatMessage,
     pub finish_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct LLMUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
@@ -246,7 +249,7 @@ If unsure, ask for clarification instead of guessing."#.to_string()
                 })?;
                 let mut out = Vec::new();
                 for r in rows {
-                    let (id, name, atype) = r?;
+                    let (_id, name, atype) = r?;
                     out.push(format!("{} ({})", name, atype));
                 }
                 Ok(format!("Accounts:\n{}", out.join("\n")))
@@ -379,7 +382,7 @@ async fn list_accounts_handler(
 
 async fn report_handler(
     State(state): State<ServerState>,
-    axum::extract::Path(report_type): axum::extract::Path<String>,
+    axum::extract::Path(_report_type): axum::extract::Path<String>,
 ) -> Json<serde_json::Value> {
     let agent = FinanceAgent {
         ledger: state.ledger.clone(),
@@ -396,3 +399,8 @@ async fn report_handler(
         Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
     }
 }
+
+
+
+
+
