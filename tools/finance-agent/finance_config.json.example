@@ -1,0 +1,7 @@
+{
+  "llm_api_base": "https://api.deepseek.com/v1",
+  "llm_api_key": "sk-...",
+  "llm_model": "deepseek-chat",
+  "default_entity": "my_company",
+  "database_path": "./finance.db"
+}

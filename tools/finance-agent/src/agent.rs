@@ -10,6 +10,7 @@ use axum::{
     Router,
     extract::State,
 };
+use crate::config::Config;
 use crate::db::Database;
 use crate::ledger::LedgerEngine;
 
@@ -60,18 +61,15 @@ pub struct FinanceAgent {
 }
 
 impl FinanceAgent {
-    pub fn new(ledger: LedgerEngine, db: Database) -> Result<Self> {
-        let api_base = std::env::var("LLM_API_BASE").unwrap_or_else(|_| "https://api.deepseek.com/v1".to_string());
-        let api_key = std::env::var("LLM_API_KEY").ok();
-        let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "deepseek-chat".to_string());
+    pub fn new(ledger: LedgerEngine, db: Database, config: Config) -> Result<Self> {
         Ok(Self {
             ledger,
             db,
             entity_id: String::new(),
             client: Client::new(),
-            model,
-            api_base,
-            api_key,
+            model: config.model(),
+            api_base: config.api_base(),
+            api_key: config.api_key(),
             context: Arc::new(Mutex::new(HashMap::new())),
         })
     }
@@ -256,19 +254,7 @@ If unsure, ask for clarification instead of guessing."#.to_string()
             }
             "generate_report" => {
                 let report_type = args["report_type"].as_str().unwrap_or("trial_balance");
-                match report_type {
-                    "income_statement" => Ok(self.ledger.income_statement(&self.entity_id).await?),
-                    "balance_sheet" => Ok(self.ledger.balance_sheet(&self.entity_id).await?),
-                    "trial_balance" => {
-                        let tb = self.ledger.trial_balance(&self.entity_id).await?;
-                        let mut out = String::from("Trial Balance\n=============\n");
-                        for (acc, bal) in tb {
-                            out.push_str(&format!("{}: {:.2}\n", acc.name, bal));
-                        }
-                        Ok(out)
-                    }
-                    _ => Ok("Unknown report type".to_string()),
-                }
+                Ok(crate::skills::report::generate_report(report_type, &self.ledger, &self.entity_id).await?)
             }
             _ => Ok(format!("Unknown tool: {}", name)),
         }
@@ -342,11 +328,25 @@ struct ServerState {
     context: Arc<Mutex<std::collections::HashMap<String, String>>>,
 }
 
+impl ServerState {
+    fn check_api_key(&self, headers: &axum::http::HeaderMap) -> Option<Json<serde_json::Value>> {
+        if let Ok(expected) = std::env::var("FINANCE_API_KEY") {
+            if !expected.is_empty() {
+                let provided = headers.get("X-API-Key").and_then(|v| v.to_str().ok()).unwrap_or("");
+                if provided != expected {
+                    return Some(Json(serde_json::json!({ "error": "Invalid or missing X-API-Key" })));
+                }
+            }
+        }
+        None
+    }
+}
+
 async fn chat_handler(
-    State(state): State<ServerState>,
-    Json(body): Json<serde_json::Value>,
+    State(state): State<ServerState>, headers: axum::http::HeaderMap, Json(body): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    let text = body["message"].as_str().unwrap_or_default();
+    if let Some(e) = state.check_api_key(&headers) { return e; }
+        let text = body["message"].as_str().unwrap_or_default();
     let agent = FinanceAgent {
         ledger: state.ledger.clone(),
         db: state.db.clone(),
@@ -364,8 +364,9 @@ async fn chat_handler(
 }
 
 async fn list_accounts_handler(
-    State(state): State<ServerState>,
+    State(state): State<ServerState>, headers: axum::http::HeaderMap,
 ) -> Json<serde_json::Value> {
+    if let Some(e) = state.check_api_key(&headers) { return e; }
     let conn = state.db.conn.lock().await;
     let mut stmt = conn.prepare("SELECT id, name, account_type FROM accounts WHERE entity_id = ?1").unwrap();
     let rows = stmt.query_map(rusqlite::params![state.entity_id], |row| {
@@ -381,26 +382,12 @@ async fn list_accounts_handler(
 }
 
 async fn report_handler(
-    State(state): State<ServerState>,
-    axum::extract::Path(_report_type): axum::extract::Path<String>,
+    State(state): State<ServerState>, headers: axum::http::HeaderMap, axum::extract::Path(report_type): axum::extract::Path<String>,
 ) -> Json<serde_json::Value> {
-    let agent = FinanceAgent {
-        ledger: state.ledger.clone(),
-        db: state.db.clone(),
-        entity_id: state.entity_id.clone(),
-        client: state.client.clone(),
-        model: state.model.clone(),
-        api_base: state.api_base.clone(),
-        api_key: state.api_key.clone(),
-        context: state.context.clone(),
-    };
-    match agent.ledger.income_statement(&state.entity_id).await {
+    if let Some(e) = state.check_api_key(&headers) { return e; }
+    match crate::skills::report::generate_report(&report_type, &state.ledger, &state.entity_id).await {
         Ok(report) => Json(serde_json::json!({ "report": report })),
         Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
     }
 }
-
-
-
-
 

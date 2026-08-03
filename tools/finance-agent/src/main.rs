@@ -1,7 +1,8 @@
 use std::path::PathBuf;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use anyhow::Result;
 
+mod config;
 mod db;
 mod ledger;
 mod agent;
@@ -9,6 +10,7 @@ mod skills;
 mod models;
 mod export;
 
+use config::Config;
 use db::Database;
 use ledger::LedgerEngine;
 use agent::FinanceAgent;
@@ -17,12 +19,12 @@ use agent::FinanceAgent;
 #[command(author, version, about = "Local-first AI Finance Agent (Rust)", long_about = None)]
 struct Args {
     /// Company/entity name
-    #[arg(short, long, default_value = "default")]
-    entity: String,
+    #[arg(short, long)]
+    entity: Option<String>,
 
     /// Database path
-    #[arg(short, long, default_value = "./finance.db")]
-    db_path: PathBuf,
+    #[arg(short, long)]
+    db_path: Option<PathBuf>,
 
     /// Start web API server
     #[arg(long)]
@@ -38,11 +40,19 @@ struct Args {
 
     /// Generate a report
     #[arg(long, value_enum)]
-    report: Option<String>,
+    report: Option<ReportType>,
 
     /// Interactive REPL mode
     #[arg(short, long)]
     interactive: bool,
+}
+
+#[derive(Clone, ValueEnum, Debug)]
+#[clap(rename_all = "snake_case")]
+enum ReportType {
+    IncomeStatement,
+    BalanceSheet,
+    TrialBalance,
 }
 
 fn main() -> Result<()> {
@@ -54,17 +64,21 @@ async fn async_main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 
-    tracing::info!("Starting Finance Agent v{}", env!("CARGO_PKG_VERSION"));
-    tracing::info!("Entity: {}", args.entity);
-    tracing::info!("Database: {:?}", args.db_path);
+    let config = Config::load()?;
+    let entity = args.entity.unwrap_or_else(|| config.default_entity());
+    let db_path = args.db_path.unwrap_or_else(|| PathBuf::from(config.database_path()));
 
-    let db = Database::new(&args.db_path).await?;
+    tracing::info!("Starting Finance Agent v{}", env!("CARGO_PKG_VERSION"));
+    tracing::info!("Entity: {}", entity);
+    tracing::info!("Database: {:?}", db_path);
+
+    let db = Database::new(&db_path).await?;
     db.init().await?;
     let ledger = LedgerEngine::new(db.clone());
-    let mut agent = FinanceAgent::new(ledger, db.clone())?;
+    let mut agent = FinanceAgent::new(ledger, db.clone(), config)?;
 
     // Load entity context if exists
-    agent.load_entity_context(&args.entity).await?;
+    agent.load_entity_context(&entity).await?;
 
     if let Some(text) = args.input {
         let result = agent.process_natural_language(&text).await?;
@@ -72,8 +86,19 @@ async fn async_main() -> Result<()> {
         return Ok(());
     }
 
-    if let Some(_report_type) = args.report {
-        let report = agent.ledger.income_statement(&agent.entity_id).await?;
+    if let Some(report_type) = args.report {
+        let report = match report_type {
+            ReportType::IncomeStatement => agent.ledger.income_statement(&agent.entity_id).await?,
+            ReportType::BalanceSheet => agent.ledger.balance_sheet(&agent.entity_id).await?,
+            ReportType::TrialBalance => {
+                let tb = agent.ledger.trial_balance(&agent.entity_id).await?;
+                let mut out = String::from("Trial Balance\n=============\n");
+                for (acc, bal) in tb {
+                    out.push_str(&format!("{}: {:.2}\n", acc.name, bal));
+                }
+                out
+            }
+        };
         println!("{}", report);
         return Ok(());
     }
