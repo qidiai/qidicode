@@ -1,4 +1,4 @@
-<#
+﻿<#
 config.ps1 - Config loading / multi-key resolution / failover helpers.
 Dot-sourced by scripts/media_system.ps1, sharing its script-scope variables
 ($projectRoot, $configPath, $keyName). agnes_config.json format is unchanged:
@@ -33,11 +33,27 @@ function Get-ApiKeyEntry {
     return $entry
 }
 
+
+function Get-EffectiveApiKey {
+    param(
+        [Parameter(Mandatory=$true)][object]$Entry
+    )
+    # Environment variables take priority over config file values.
+    # Lookup order: AGNES_API_KEY_<NAME> (name uppercased, '-' -> '_') -> AGNES_API_KEY -> config file.
+    $name = ($Entry.name -replace '-', '_').ToUpperInvariant()
+    $envKey = "AGNES_API_KEY_$name"
+    $fromEnv = [Environment]::GetEnvironmentVariable($envKey)
+    if (-not [string]::IsNullOrEmpty($fromEnv)) { return $fromEnv }
+    $globalEnv = [Environment]::GetEnvironmentVariable('AGNES_API_KEY')
+    if (-not [string]::IsNullOrEmpty($globalEnv)) { return $globalEnv }
+    return $Entry.api_key
+}
+
 function Get-ValidApiKeys {
     param(
         [Parameter(Mandatory=$true)][object]$Config
     )
-    return @($Config.keys | Where-Object { $_.api_key -and $_.api_key.Trim() -ne '' })
+return @($Config.keys | Where-Object { -not [string]::IsNullOrEmpty((Get-EffectiveApiKey $_).Trim()) })
 }
 
 function Get-FailoverStartIndex {

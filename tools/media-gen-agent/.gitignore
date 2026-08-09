@@ -24,3 +24,6 @@ token_stats.jsonl
 *~
 .DS_Store
 Thumbs.db
+
+# Backups (may contain secrets)
+*.bak*
