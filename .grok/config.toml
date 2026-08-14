@@ -6,4 +6,3 @@ name = "Kimi K3"
 api_backend = "chat_completions"
 auth_scheme = "bearer"
 context_window = 262144
-
