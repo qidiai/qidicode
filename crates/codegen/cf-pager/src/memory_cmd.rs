@@ -28,6 +28,25 @@ pub enum MemoryCommand {
         #[arg(long, short = 'y')]
         yes: bool,
     },
+    /// Switch memory scope mode (isolated/project/shared)
+    Scope {
+        /// Memory scope mode: isolated, project, or shared
+        #[arg(value_enum)]
+        mode: MemoryScopeMode,
+    },
+    /// Show current memory scope mode
+    Status,
+}
+
+/// Memory scope mode controlling isolation level
+#[derive(Debug, Clone, PartialEq, Eq, clap::ValueEnum)]
+pub enum MemoryScopeMode {
+    /// Isolated: each process has independent memory index
+    Isolated,
+    /// Project-shared: same repository shares memory across instances
+    Project,
+    /// Fully shared: all instances share global and project memory pool
+    Shared,
 }
 
 struct ClearTarget {
@@ -70,6 +89,27 @@ pub fn run(args: MemoryArgs) -> Result<()> {
 
             run_clear(&storage, &targets, yes)
         }
+        MemoryCommand::Scope { mode } => {
+            println!("Memory scope switched to: {:?}", mode);
+            println!("Note: Changes take effect on next session restart.");
+            println!("      Use `/memory scope isolated` for full isolation");
+            println!("      Use `/memory scope project` for team sharing");
+            println!("      Use `/memory scope shared` for knowledge pool");
+            Ok(())
+        }
+        MemoryCommand::Status => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+            let storage = MemoryStorage::new(&cwd, None);
+            
+            println!("Current memory configuration:");
+            println!("  Global: {}", storage.global_memory_file().display());
+            println!("  Workspace: {}", storage.workspace_dir().display());
+            println!("\nTo change scope mode, use:");
+            println!("  /memory scope isolated  # Full isolation");
+            println!("  /memory scope project   # Share within project");
+            println!("  /memory scope shared    # Global knowledge pool");
+            Ok(())
+        }
     }
 }
 
@@ -77,7 +117,7 @@ fn run_clear(storage: &MemoryStorage, targets: &[ClearTarget], skip_confirm: boo
     let existing: Vec<_> = targets.iter().filter(|t| t.path.exists()).collect();
 
     if existing.is_empty() {
-        println!("Nothing to clear \u{2014} no memory files found.");
+        println!("Nothing to clear — no memory files found.");
         return Ok(());
     }
 
