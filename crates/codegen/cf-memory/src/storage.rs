@@ -12,9 +12,9 @@ use cf_tools::util::grok_home::grok_home;
 /// Write-operation scope. Distinct from `cf_agent::config::MemoryScope` (agent memory dir).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryScope {
-    /// Global memory â€” shared across all workspaces.
+    /// Global memory â€?shared across all workspaces.
     Global,
-    /// Workspace-scoped memory â€” specific to one project.
+    /// Workspace-scoped memory â€?specific to one project.
     Workspace,
 }
 
@@ -322,14 +322,14 @@ impl MemoryStorage {
     ///
     /// The path must resolve (via `canonicalize`) to a location inside the
     /// memory directory tree. Both the path and the memory root must be
-    /// canonicalizable â€” if either fails, the read is rejected.
+    /// canonicalizable â€?if either fails, the read is rejected.
     pub fn read_file(
         &self,
         path: &Path,
         from: Option<usize>,
         lines: Option<usize>,
     ) -> std::io::Result<String> {
-        // Security: canonicalize both sides â€” fail hard if either doesn't exist.
+        // Security: canonicalize both sides â€?fail hard if either doesn't exist.
         let canonical = dunce::canonicalize(path)?;
         let canonical_global = dunce::canonicalize(&self.global_dir).map_err(|e| {
             std::io::Error::new(
@@ -420,7 +420,7 @@ impl MemoryStorage {
                 "# Global Memory\n\
                  \n\
                  > This file is automatically managed by Grok's memory system.\n\
-                 > You can also edit it manually â€” changes will be indexed on next session.\n\
+                 > You can also edit it manually â€?changes will be indexed on next session.\n\
                  \n\
                  ## Preferences\n\
                  \n\
@@ -441,7 +441,7 @@ impl MemoryStorage {
             std::fs::write(
                 &workspace_file,
                 format!(
-                    "# Project Memory â€” {}\n\
+                    "# Project Memory â€?{}\n\
                      \n\
                      > Auto-populated by dream consolidation. Edit freely.\n",
                     self.workspace_path.display()
@@ -592,11 +592,11 @@ fn is_older_than(dir: &Path, days: u64) -> bool {
 /// low-quality chunks. This function ensures every note gets a heading.
 ///
 /// **Rules:**
-/// 1. Content already starts with `#` â†’ leave as-is (user-provided structure).
-/// 2. Single-line content â†’ wrap as `## {content}` (the note IS the heading).
-/// 3. Multi-line, first line â‰¤ 80 chars â†’ first line becomes `## {first_line}`,
+/// 1. Content already starts with `#` â†?leave as-is (user-provided structure).
+/// 2. Single-line content â†?wrap as `## {content}` (the note IS the heading).
+/// 3. Multi-line, first line â‰?80 chars â†?first line becomes `## {first_line}`,
 ///    remaining lines become the body paragraph.
-/// 4. Multi-line, first line > 80 chars â†’ use `## Note` as a generic heading,
+/// 4. Multi-line, first line > 80 chars â†?use `## Note` as a generic heading,
 ///    entire content becomes the body.
 pub fn normalize_memory_content(raw: &str) -> String {
     let trimmed = raw.trim();
@@ -604,16 +604,16 @@ pub fn normalize_memory_content(raw: &str) -> String {
         return String::new();
     }
 
-    // Already has a Markdown heading â†’ preserve user's structure.
+    // Already has a Markdown heading â†?preserve user's structure.
     if trimmed.starts_with('#') {
         return trimmed.to_string();
     }
 
     match trimmed.find('\n') {
-        // Single-line â†’ the note IS the heading.
+        // Single-line â†?the note IS the heading.
         None => format!("## {trimmed}"),
 
-        // Multi-line â†’ promote first line to heading if it's short enough.
+        // Multi-line â†?promote first line to heading if it's short enough.
         Some(pos) => {
             let first_line = trimmed[..pos].trim();
             let rest = trimmed[pos..].trim();
@@ -630,7 +630,7 @@ pub fn normalize_memory_content(raw: &str) -> String {
 /// Returns `true` if `cwd` resides under a system temp directory.
 ///
 /// Subagent worktrees and other transient processes use temp-dir paths
-/// like `/tmp/â€¦` or `/var/folders/â€¦/T/â€¦`. Creating persistent workspace
+/// like `/tmp/â€¦` or `/var/folders/â€?T/â€¦`. Creating persistent workspace
 /// memory for these paths is wasteful and produces orphan directories.
 fn is_ephemeral_cwd(cwd: &Path) -> bool {
     let canonical = dunce::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
@@ -656,7 +656,7 @@ fn is_ephemeral_cwd(cwd: &Path) -> bool {
 /// - `hash8` is 8 hex chars from blake3 for uniqueness
 ///
 /// **Identity strategy:** Prefers git remote `org/repo` as the identity
-/// source â€” all clones, worktrees, and copies of the same repository
+/// source â€?all clones, worktrees, and copies of the same repository
 /// resolve to the same memory directory regardless of filesystem path.
 /// Falls back to filesystem path when not inside a git repo or when
 /// no `origin` remote is configured.
@@ -669,7 +669,7 @@ fn compute_workspace_hash(cwd: &Path) -> String {
             (slugify(slug_source, 40), repo_id.as_str().to_string())
         }
         None => {
-            // Windows-only, non-git cwds: dunce changes the hash input, so the old-form dir is orphaned until session gc() reaps it after max_age_days â€” accepted over an unverifiable rename migration (Unix unchanged).
+            // Windows-only, non-git cwds: dunce changes the hash input, so the old-form dir is orphaned until session gc() reaps it after max_age_days â€?accepted over an unverifiable rename migration (Unix unchanged).
             let canonical = dunce::canonicalize(cwd).unwrap_or_else(|_| {
                 tracing::warn!(
                     path = %cwd.display(),
@@ -710,9 +710,9 @@ pub(crate) fn extract_repo_identity(cwd: &Path) -> Option<String> {
 /// Normalize a git remote URL to `org/repo` form.
 ///
 /// Strips protocol prefix, host, and trailing `.git`:
-/// - `git@github.com:acme/widgets.git`       â†’ `"acme/widgets"`
-/// - `https://github.com/acme/widgets.git`   â†’ `"acme/widgets"`
-/// - `ssh://git@github.com/acme/widgets`     â†’ `"acme/widgets"`
+/// - `git@github.com:acme/widgets.git`       â†?`"acme/widgets"`
+/// - `https://github.com/acme/widgets.git`   â†?`"acme/widgets"`
+/// - `ssh://git@github.com/acme/widgets`     â†?`"acme/widgets"`
 fn normalize_remote_url(url: &str) -> Option<String> {
     let path = if let Some(colon_pos) = url.find(':') {
         // SSH format: git@github.com:org/repo.git
@@ -784,7 +784,7 @@ mod tests {
     /// `Command::new("git")` (and `git2`'s discovery) resolves to the
     /// hermetic static binary instead of system-installed git.
     ///
-    /// Safe to call multiple times â€” only the first call mutates `PATH`.
+    /// Safe to call multiple times â€?only the first call mutates `PATH`.
     fn ensure_hermetic_git_on_path() {
         use std::path::PathBuf;
         use std::sync::Once;
@@ -1826,7 +1826,7 @@ mod tests {
         let workspace_dir = global_dir.join("my-project-ab123456");
         let storage = MemoryStorage::with_paths(global_dir.clone(), workspace_dir.clone());
 
-        // Create the current workspace: old, no sessions â€” would qualify for GC
+        // Create the current workspace: old, no sessions â€?would qualify for GC
         std::fs::create_dir_all(&workspace_dir).unwrap();
         std::fs::write(workspace_dir.join("MEMORY.md"), "# My project").unwrap();
         set_dir_mtime_days_ago(&workspace_dir, 60);
@@ -1898,7 +1898,7 @@ mod tests {
             tmp.path().join("memory").join("test_ws"),
         );
 
-        // Missing index â†’ 0, and the journal-safe open must never create it.
+        // Missing index â†?0, and the journal-safe open must never create it.
         assert_eq!(storage.total_chunk_count(), 0);
         assert!(!storage.workspace_dir().join("index.sqlite").exists());
 

@@ -60,7 +60,7 @@ pub struct MemoryConfig {
 }
 impl MemoryConfig {
     /// Resolve the final memory config from all sources (in priority order):
-    /// 1. CLI flag `--no-memory` (absolute highest â€” always disables, overrides all)
+    /// 1. CLI flag `--no-memory` (absolute highest â€?always disables, overrides all)
     /// 2. CLI flag `--experimental-memory` (enables, but overridden by --no-memory)
     /// 3. `QIDI_MEMORY` env var: `1`/`true` enables, `0`/`false` force-disables
     /// 4. Config file `[memory]` / `[compaction]` sections
@@ -435,12 +435,12 @@ impl SubagentsConfig {
         self.discover_roles_in_dir(&roles_dir);
     }
     /// Resolve the final subagents config from all sources (in priority order):
-    /// 1. CLI flag `--subagents` (absolute highest â€” always enables)
+    /// 1. CLI flag `--subagents` (absolute highest â€?always enables)
     /// 2. `QIDI_SUBAGENTS` env var: `1`/`true` enables, `0`/`false` force-disables
     /// 3. Config file `[subagents]` section
     /// 4. Default (enabled)
     ///
-    /// Subagents are deliberately not remotely gated â€” only explicit local
+    /// Subagents are deliberately not remotely gated â€?only explicit local
     /// intent (CLI flag, `QIDI_SUBAGENTS`, `[subagents] enabled`) changes
     /// the default.
     ///
@@ -540,7 +540,7 @@ pub struct ModelOverrideConfig {
     /// Compiled default (`cf-tools`) when unset locally, remotely, and via env.
     pub image_description: Option<String>,
     /// Next-prompt suggestion model pin. Unlike the other overrides this does
-    /// NOT fill a compiled default â€” see [`PromptSuggestModelPin`].
+    /// NOT fill a compiled default â€?see [`PromptSuggestModelPin`].
     #[serde(skip)]
     pub prompt_suggestion: PromptSuggestModelPin,
 }
@@ -555,14 +555,14 @@ impl Default for ModelOverrideConfig {
     }
 }
 /// Resolved model pin for the next-prompt suggestion call (tab-autocomplete
-/// ghost text), `env > config.toml > remote` â€” see
+/// ghost text), `env > config.toml > remote` â€?see
 /// [`ModelOverrideConfig::resolve`].
 ///
 /// Unlike the other auxiliary overrides this does not collapse to a plain
 /// model string: the consumer (`handle_suggest_prompt`) must distinguish
 /// an explicit pin from "unpinned" (where the client hint and the built-in
 /// `cf-tools-0.1` default apply), and whether the pin came from the env
-/// escape hatch. Every effective model except an env pin is catalog-guarded â€”
+/// escape hatch. Every effective model except an env pin is catalog-guarded â€?
 /// when the model is not in the shell's catalog (e.g. `cf-tools-0.1` for
 /// OAuth users, whose catalogs exclude it) the per-turn suggestion request is
 /// skipped entirely rather than fired doomed. The env pin is deliberately
@@ -571,11 +571,11 @@ impl Default for ModelOverrideConfig {
 /// without checking its catalog).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PromptSuggestModelPin {
-    /// `QIDI_PROMPT_SUGGESTIONS_MODEL` â€” used verbatim, bypasses the
+    /// `QIDI_PROMPT_SUGGESTIONS_MODEL` â€?used verbatim, bypasses the
     /// catalog guard.
     Env(String),
     /// `[models] prompt_suggestion` in config.toml, or the remote
-    /// `prompt_suggestion_model` (remote settings) â€” catalog-guarded.
+    /// `prompt_suggestion_model` (remote settings) â€?catalog-guarded.
     Pinned(String),
     /// No explicit pin: the client hint, then the built-in default apply
     /// (both catalog-guarded).
@@ -686,7 +686,7 @@ impl ModelOverrideConfig {
 /// ```toml
 /// [tools]
 /// disable_zdr_incompatible_tools = true
-/// # [tools.zdr_video_output_s3] â€” see ZdrVideoOutputS3Config
+/// # [tools.zdr_video_output_s3] â€?see ZdrVideoOutputS3Config
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
@@ -878,7 +878,7 @@ fn walk_toml(
 pub(crate) use crate::config::reloader::parse_skills_config;
 /// Effective config: layers + campaign overlay (remote cache + `QIDI_CAMPAIGNS_OVERRIDE`).
 pub use crate::util::config::load_effective_config;
-/// Effective config with disk campaigns only â€” for one-shot entrypoints that
+/// Effective config with disk campaigns only â€?for one-shot entrypoints that
 /// never fetch remote settings (avoids resolving against a never-seeded cache).
 pub use crate::util::config::load_effective_config_disk_only;
 /// Where a requirement or permission rule was loaded from.
@@ -1284,7 +1284,7 @@ pub fn apply_sandbox(
             eprintln!(
                 "error: this sandbox could not enforce its read-deny set on Linux \
                  (bubblewrap missing/unusable, or a deny glob exceeded its expansion \
-                 limit â€” see any message above). Install bubblewrap with \
+                 limit â€?see any message above). Install bubblewrap with \
                  `apt install -y bubblewrap` if needed. Refusing to start with denied \
                  paths unprotected.{detail}"
             );
