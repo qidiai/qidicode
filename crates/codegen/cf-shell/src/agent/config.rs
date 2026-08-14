@@ -269,6 +269,22 @@ fn parse_otlp_header_list(raw: &str) -> Vec<(String, String)> {
         })
         .collect()
 }
+/// Whether an internal-OTLP endpoint may be used: `https` always; plain
+/// `http` only for loopback hosts (`localhost` / `127.0.0.1` / `::1`, local
+/// development / local-ic-testing). The internal firehose carries spans and
+/// any attached headers, so it must never travel in cleartext to an
+/// arbitrary collector.
+fn internal_otlp_endpoint_scheme_allowed(endpoint: &str) -> bool {
+    url::Url::parse(endpoint).is_ok_and(|parsed| match parsed.scheme() {
+        "https" => true,
+        "http" => parsed.host_str().is_some_and(|host| is_loopback_host(host)),
+        _ => false,
+    })
+}
+/// Loopback host check shared by the endpoint scheme gates.
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
+}
 impl EndpointsConfig {
     pub fn has_custom_endpoint(&self) -> bool {
         self.models_base_url.is_some() || self.models_list_url.is_some()
@@ -334,7 +350,9 @@ impl EndpointsConfig {
         })
     }
     /// INTERNAL OTLP traces endpoint. Precedence:
-    /// 1. `grok_internal_otlp_traces_endpoint` (verbatim)
+    /// 1. `grok_internal_otlp_traces_endpoint` (verbatim; https-only, http
+    ///    allowed only for loopback hosts — see
+    ///    [`Self::effective_internal_otlp_traces_endpoint`])
     /// 2. legacy `otel_exporter_otlp_traces_endpoint` (verbatim) >
     ///    `otel_exporter_otlp_endpoint` + `/v1/traces` — ONLY when the
     ///    external-OTEL master switch is unset (back-compat; deprecated)
@@ -345,7 +363,7 @@ impl EndpointsConfig {
     /// completely ignored here so the internally-authed firehose never lands
     /// at an external collector.
     pub fn resolve_otlp_traces_endpoint(&self) -> String {
-        if let Some(full) = blank_as_unset(&self.grok_internal_otlp_traces_endpoint) {
+        if let Some(full) = self.effective_internal_otlp_traces_endpoint() {
             return full.trim_end_matches('/').to_string();
         }
         if !self.external_otel_master_switch
@@ -360,6 +378,23 @@ impl EndpointsConfig {
             return legacy;
         }
         format!("{}/traces", self.proxy_url().trim_end_matches('/'))
+    }
+    /// The `QIDI_INTERNAL_OTLP_TRACES_ENDPOINT` value when set AND
+    /// scheme-allowed (https; http only for loopback). A set-but-refused
+    /// value is treated as unset with a warning, so the pipeline falls back
+    /// to the legacy/proxy default instead of shipping spans (and any
+    /// attached headers) in cleartext to an arbitrary collector.
+    fn effective_internal_otlp_traces_endpoint(&self) -> Option<String> {
+        let full = blank_as_unset(&self.grok_internal_otlp_traces_endpoint)?;
+        if internal_otlp_endpoint_scheme_allowed(&full) {
+            return Some(full);
+        }
+        tracing::warn!(
+            endpoint = %full,
+            "Ignoring QIDI_INTERNAL_OTLP_TRACES_ENDPOINT: only https is allowed \
+             (http allowed only for localhost/127.0.0.1 local development)"
+        );
+        None
     }
     /// Legacy (standard-OTEL-var) internal traces endpoint, if any:
     /// `otel_exporter_otlp_traces_endpoint` verbatim, else
@@ -399,7 +434,10 @@ impl EndpointsConfig {
         if self.external_otel_master_switch {
             return false;
         }
-        let endpoint_consumed = blank_as_unset(&self.grok_internal_otlp_traces_endpoint).is_none()
+        // A set-but-scheme-refused internal endpoint counts as unset here so
+        // the no-double-send invariant holds: the internal pipeline falls
+        // back to the legacy vars, so the external stream must not take them.
+        let endpoint_consumed = self.effective_internal_otlp_traces_endpoint().is_none()
             && self.legacy_internal_otlp_traces_endpoint().is_some();
         let headers_consumed = blank_as_unset(&self.grok_internal_otlp_headers).is_none()
             && blank_as_unset(&self.otel_exporter_otlp_headers).is_some();

@@ -47,7 +47,6 @@ pub struct TelemetryClient {
     client_type: Option<String>,
     client_version: Option<String>,
     subscription_tier: Option<String>,
-    http_client: reqwest::Client,
 }
 
 impl std::fmt::Debug for TelemetryClient {
@@ -76,10 +75,12 @@ impl TelemetryClient {
         http_client: reqwest::Client,
     ) -> Self {
         let mixpanel = if config.mixpanel_enabled {
-            config
-                .mixpanel_token
-                .as_ref()
-                .map(|token| Arc::new(Mixpanel::new(token.as_str())))
+            config.mixpanel_token.as_ref().map(|token| {
+                // Reuse the caller's shared client for Mixpanel (fixed https
+                // endpoints); the product-events POST uses its own
+                // no-redirect client — see `events_http_client`.
+                Arc::new(Mixpanel::with_client(token.as_str(), http_client.clone()))
+            })
         } else {
             None
         };
@@ -103,7 +104,6 @@ impl TelemetryClient {
             client_type,
             client_version,
             subscription_tier: subscription_tier.map(|t| normalize_tier(&t)),
-            http_client,
         }
     }
 }
@@ -168,6 +168,23 @@ impl UserContext {
     }
 }
 
+/// Dedicated reqwest client for the product-events POST. Redirects are
+/// disabled (`Policy::none()`): the events endpoint must never redirect, and
+/// following a 3xx would forward the `x-api-key` header (and the JSON body)
+/// to the redirect target — reqwest only strips `Authorization`/`Cookie` on
+/// cross-origin redirects, never custom `x-*` headers.
+fn events_http_client() -> reqwest::Client {
+    static EVENTS_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    EVENTS_CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("failed to build telemetry events HTTP client")
+        })
+        .clone()
+}
+
 /// Core telemetry emitter. Routes to product events + Mixpanel.
 pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut metadata: Metadata) {
     let lock = TELEMETRY_CLIENT.get_or_init(|| Mutex::new(None));
@@ -215,7 +232,7 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
                     "app_name": "Grok Code",
                 },
             },
-            "api_key": api_key,
+            // api_key intentionally header-only (x-api-key); never in the body.
             "events": [{
                 "event_name": event_name,
                 "event_value": event_value(event_name),
@@ -223,8 +240,7 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
                 "timestamp": ctx.timestamp,
             }]
         });
-        let _ = client
-            .http_client
+        let _ = events_http_client()
             .post(url)
             .header("x-api-key", api_key.as_str())
             .timeout(std::time::Duration::from_secs(10))
@@ -305,8 +321,10 @@ pub fn sync_profile() {
 /// `shell_version` is stamped into every event payload as `shell_version`
 /// (legacy field name preserved for analytics continuity); shell passes its
 /// own `CARGO_PKG_VERSION`. `http_client` is owned by the caller (typically
-/// shell's `shared_client()`) so the shared TLS-warmed pool is reused for
-/// telemetry posts.
+/// shell's `shared_client()`) and reused for Mixpanel posts so the shared
+/// TLS-warmed pool is not duplicated. The product-events POST uses a
+/// dedicated no-redirect client ([`events_http_client`]) — the events
+/// endpoint must never redirect.
 pub fn init(
     config: TelemetryConfig,
     mode: TelemetryMode,

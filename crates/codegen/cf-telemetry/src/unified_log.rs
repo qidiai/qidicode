@@ -203,8 +203,21 @@ fn write_lines(lines: &[u8]) {
     }
 }
 
+/// Serialize `entry` to a JSONL line with secrets scrubbed, then append.
+///
+/// Both `msg` and every string inside `ctx` pass through
+/// `cf_secrets::redact_secrets` before hitting disk: `unified.jsonl` is a
+/// shared diagnostic log that outlives the session and is read by tooling we
+/// don't control (e.g. the pager's log viewer).
 fn write_entry(entry: &LogEntry) {
-    let Ok(mut line) = serde_json::to_vec(entry) else {
+    let mut sanitized = entry.clone();
+    sanitized.msg = cf_secrets::redact_secrets(&entry.msg).into_owned();
+    if let Some(ctx) = sanitized.ctx.as_mut() {
+        cf_secrets::walk_json_strings(ctx, &mut |s| {
+            *s = cf_secrets::redact_secrets(s.as_str()).into_owned();
+        });
+    }
+    let Ok(mut line) = serde_json::to_vec(&sanitized) else {
         return;
     };
     line.push(b'\n');
@@ -263,6 +276,15 @@ pub fn ingest_client_entries(src: LogSource, entries: &[ClientLogEntry]) {
     // Serialize all entries up front, then write in a single lock acquisition.
     let mut buf = Vec::new();
     for client_entry in entries {
+        // Scrub secrets from client-supplied content before it reaches disk
+        // (clients are remote-ish peers; the on-disk log must not retain
+        // credentials they might have echoed into messages or context).
+        let mut ctx = client_entry.ctx.clone();
+        if let Some(c) = ctx.as_mut() {
+            cf_secrets::walk_json_strings(c, &mut |s| {
+                *s = cf_secrets::redact_secrets(s.as_str()).into_owned();
+            });
+        }
         let entry = LogEntry {
             ts: client_entry.ts.clone(),
             src,
@@ -270,8 +292,8 @@ pub fn ingest_client_entries(src: LogSource, entries: &[ClientLogEntry]) {
             ver: client_entry.ver.clone(),
             lvl: client_entry.lvl,
             sid: client_entry.sid.clone(),
-            msg: client_entry.msg.clone(),
-            ctx: client_entry.ctx.clone(),
+            msg: cf_secrets::redact_secrets(&client_entry.msg).into_owned(),
+            ctx,
         };
         if let Ok(mut line) = serde_json::to_vec(&entry) {
             line.push(b'\n');

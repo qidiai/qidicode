@@ -166,7 +166,11 @@ impl cf_tool_runtime::Tool for ExitPlanModeTool {
                     "Exiting plan mode with plan content"
                 );
 
-                let message = "Your plan has been approved. You can now start coding.".to_owned();
+                // Neutral wording: this tool only presents the plan for
+                // approval; the session layer decides whether it is approved.
+                let message =
+                    "Plan presented for approval. You can now start coding once approved."
+                        .to_owned();
 
                 Ok(ExitPlanModeOutput::PlanReady {
                     message,
@@ -178,8 +182,11 @@ impl cf_tool_runtime::Tool for ExitPlanModeTool {
                 tracing::info!("Exiting plan mode with empty/missing plan file");
 
                 Ok(ExitPlanModeOutput::EmptyPlan {
+                    // Retry semantics: with no plan content the exit did not
+                    // actually complete; the caller must write the plan first
+                    // and then exit plan mode again.
                     message:
-                        "Plan mode exit approved. No plan content was found — you can proceed."
+                        "No plan content was found — please write the plan first and then exit plan mode again."
                             .to_string(),
                     plan_file_path,
                 })
@@ -256,7 +263,7 @@ mod tests {
                 ref plan_content,
                 ref plan_file_path,
             } => {
-                assert!(message.contains("plan has been approved"));
+                assert!(message.contains("Plan presented for approval"));
                 assert!(message.contains("start coding"));
                 assert!(plan_content.contains("Do thing A"));
                 assert!(plan_content.contains("Do thing B"));
@@ -288,9 +295,9 @@ mod tests {
 
         match result {
             ExitPlanModeOutput::EmptyPlan { ref message, .. } => {
-                assert!(message.contains("Plan mode exit approved"));
+                assert!(message.contains("write the plan first"));
                 assert!(message.contains("No plan content was found"));
-                assert!(message.contains("you can proceed"));
+                assert!(message.contains("exit plan mode again"));
             }
             other => panic!("Expected EmptyPlan, got {:?}", other),
         }
@@ -314,9 +321,9 @@ mod tests {
 
         match result {
             ExitPlanModeOutput::EmptyPlan { ref message, .. } => {
-                assert!(message.contains("Plan mode exit approved"));
+                assert!(message.contains("write the plan first"));
                 assert!(message.contains("No plan content was found"));
-                assert!(message.contains("you can proceed"));
+                assert!(message.contains("exit plan mode again"));
             }
             other => panic!("Expected EmptyPlan, got {:?}", other),
         }
@@ -394,7 +401,7 @@ mod tests {
 
         let output: ToolOutput = result.into();
         let prompt = output.to_prompt_format();
-        assert!(prompt.contains("plan has been approved"));
+        assert!(prompt.contains("Plan presented for approval"));
         assert!(prompt.contains("saved at:"));
         assert!(prompt.contains("Step 1"));
         assert!(prompt.contains("Step 2"));

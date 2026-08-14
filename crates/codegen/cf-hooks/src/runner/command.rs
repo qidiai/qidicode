@@ -218,6 +218,10 @@ pub async fn run_command_hook(
         // Same value as `QIDI_WORKSPACE_ROOT`; native `.grok` hooks should use
         // `QIDI_WORKSPACE_ROOT`.
         .env("CLAUDE_PROJECT_DIR", ctx.workspace_root)
+        // SECURITY: a hook is arbitrary user/plugin code; never hand it the
+        // shell's inline QIDI_AUTH credentials (AuthManager has consumed
+        // them). Placed last so removal wins over any extra_env value.
+        .env_remove("QIDI_AUTH")
         .kill_on_drop(true)
         .spawn()
     {

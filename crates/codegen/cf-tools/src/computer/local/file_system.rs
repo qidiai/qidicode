@@ -61,10 +61,21 @@ impl LocalFs {
                 #[allow(clippy::disallowed_methods)]
                 match tokio::fs::canonicalize(parent).await {
                     Ok(p) => dunce::simplified(&p).join(path.file_name().unwrap_or_default()),
-                    Err(_) => {
-                        // Parent doesn't exist either — fall back to lexically
-                        // joining with the root and checking prefix.
-                        path.to_path_buf()
+                    Err(parent_err) => {
+                        // SECURITY (fail-closed): do NOT fall back to the raw
+                        // path + lexical starts_with. That fallback allowed a
+                        // path whose target AND parent are missing (e.g.
+                        // `<root>/../newdir/file`) to pass the lexical check,
+                        // letting write_file's create_dir_all escape the
+                        // workspace root. Refuse instead.
+                        return Err(ComputerError::io_with_kind(
+                            format!(
+                                "access denied: cannot resolve parent directory of '{}' for \
+                                 boundary check: {parent_err}",
+                                path.display()
+                            ),
+                            io::ErrorKind::NotFound,
+                        ));
                     }
                 }
             }

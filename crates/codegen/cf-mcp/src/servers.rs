@@ -1,4 +1,4 @@
-//! MCP server integration using the official rmcp SDK.
+﻿//! MCP server integration using the official rmcp SDK.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -1193,6 +1193,10 @@ pub struct McpTool {
     mcp_state: Arc<Mutex<McpState>>,
     schema: serde_json::Value,
     meta: Option<serde_json::Value>,
+    /// Server-declared MCP `readOnlyHint` annotation. Only read-only tools
+    /// are replayed after transport/auth failures; a side-effecting tool
+    /// must never run twice.
+    read_only: bool,
 }
 
 /// Data needed to register an MCP tool via `register_erased()`.
@@ -1217,6 +1221,10 @@ pub struct McpToolRegistration {
 impl McpTool {
     /// Reconstruct an `McpTool` from its constituent parts. Used when stashing
     /// a disabled tool at runtime so it can be re-enabled without a full re-init.
+    ///
+    /// `read_only` mirrors the server's `readOnlyHint` annotation and gates
+    /// retry-after-failure: only read-only tools are replayed after
+    /// transport/auth errors.
     pub fn new(
         name: String,
         description: String,
@@ -1224,6 +1232,7 @@ impl McpTool {
         mcp_state: Arc<Mutex<McpState>>,
         schema: serde_json::Value,
         meta: Option<serde_json::Value>,
+        read_only: bool,
     ) -> Self {
         Self {
             name,
@@ -1232,6 +1241,7 @@ impl McpTool {
             mcp_state,
             schema,
             meta,
+            read_only,
         }
     }
 
@@ -1358,6 +1368,18 @@ impl cf_tool_runtime::Tool for McpErasedTool {
         _ctx: cf_tool_runtime::ToolCallContext,
         raw: serde_json::Value,
     ) -> Result<ToolOutput, cf_tool_runtime::ToolError> {
+        // SECURITY: validate the model-supplied arguments against the tool's
+        // JSON Schema (draft-07, as emitted by schemars) before any dispatch.
+        // Malformed arguments are rejected locally as invalid_arguments
+        // instead of being silently dropped or round-tripped to the server.
+        if let Err(validation_err) =
+            validate_mcp_args(&raw, &self.tool.schema, &self.tool.name)
+        {
+            return Err(cf_tool_runtime::ToolError::invalid_arguments(format!(
+                "MCP tool '{}' arguments failed schema validation: {}",
+                self.tool.name, validation_err
+            )));
+        }
         let mcp_call_start = std::time::Instant::now();
         let (client, event_writer) = {
             let state = self.tool.mcp_state.lock().await;
@@ -1390,7 +1412,10 @@ impl cf_tool_runtime::Tool for McpErasedTool {
             .await
         {
             Ok(result) => Ok(result),
-            Err(first_err) if client.has_auth() => {
+            // Only read-only tools are replayed after an auth failure: the
+            // rejected request may still have executed server-side, so a
+            // side-effecting tool must never run twice.
+            Err(first_err) if client.has_auth() && self.tool.read_only => {
                 auth_retry_attempted = true;
                 let reauth_ok = client.force_reauth(false).await;
                 ew.emit(cf_file_utils::events::Event::McpAuthRetry {
@@ -1570,6 +1595,51 @@ fn should_recover_service_error(
         )
 }
 
+/// Human-readable JSON type name for error messages.
+fn json_value_type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+/// Validate `raw` arguments against the tool's JSON Schema (draft-07, as
+/// emitted by schemars). Returns a human-readable failure description.
+///
+/// Absent arguments (`null`) validate as `{}`: a required field is still
+/// enforced (matching what the MCP server would report), while tools whose
+/// properties are all optional keep accepting omitted arguments.
+///
+/// A schema that fails to compile (unresolvable `$ref`, unsupported keyword,
+/// ...) is logged and skipped: local validation is best-effort hardening and
+/// the MCP server remains the authority.
+fn validate_mcp_args(
+    raw: &serde_json::Value,
+    schema: &serde_json::Value,
+    tool_name: &str,
+) -> Result<(), String> {
+    let empty = serde_json::json!({});
+    let instance = if raw.is_null() { &empty } else { raw };
+    match jsonschema::options()
+        .with_draft(jsonschema::Draft::Draft7)
+        .build(schema)
+    {
+        Ok(validator) => validator.validate(instance).map_err(|e| e.to_string()),
+        Err(e) => {
+            tracing::warn!(
+                tool = %tool_name,
+                error = %e,
+                "MCP tool schema failed to compile; skipping local argument validation"
+            );
+            Ok(())
+        }
+    }
+}
+
 impl McpErasedTool {
     async fn try_call_tool(
         &self,
@@ -1586,7 +1656,20 @@ impl McpErasedTool {
         let tool_timeout = client.tool_timeout_for(&self.tool.name);
         let timeout_duration = std::time::Duration::from_secs(tool_timeout);
         let mut params = CallToolRequestParams::new(self.tool.name.clone());
-        params.arguments = raw.as_object().cloned();
+        // MCP `arguments` must be a JSON object. `null` (the model passed no
+        // args) maps to "absent"; anything else is rejected rather than
+        // silently dropped.
+        params.arguments = match raw {
+            serde_json::Value::Null => None,
+            serde_json::Value::Object(_) => raw.as_object().cloned(),
+            other => {
+                return Err(cf_tool_runtime::ToolError::invalid_arguments(format!(
+                    "MCP tool '{}' received non-object arguments ({})",
+                    self.tool.name,
+                    json_value_type_name(other)
+                )));
+            }
+        };
 
         let result =
             tokio::time::timeout(timeout_duration, mcp_service.call_tool(params.clone())).await;
@@ -1600,17 +1683,36 @@ impl McpErasedTool {
                     *reconnect_attempted,
                 ) =>
             {
-                self.recover_and_retry(
-                    client,
-                    params,
-                    timeout_duration,
-                    tool_timeout,
-                    service_err,
-                    reconnect_attempted,
-                    is_timeout,
-                    ew,
-                )
-                .await
+                if !self.tool.read_only {
+                    // A side-effecting tool must not run twice: the transport
+                    // error may mean the server already started executing, so
+                    // replaying would duplicate side effects. Reset the
+                    // transport for the next call (mirrors the timeout arm
+                    // below) but surface the error without replaying.
+                    if client.is_http() && !*reconnect_attempted {
+                        client.reset_transport().await;
+                        *reconnect_attempted = true;
+                    }
+                    Err(cf_tool_runtime::ToolError::custom(
+                        "process_manager",
+                        format!(
+                            "MCP tool '{}' failed with a transport error and was not retried: {}",
+                            self.tool.name, service_err
+                        ),
+                    ))
+                } else {
+                    self.recover_and_retry(
+                        client,
+                        params,
+                        timeout_duration,
+                        tool_timeout,
+                        service_err,
+                        reconnect_attempted,
+                        is_timeout,
+                        ew,
+                    )
+                    .await
+                }
             }
             Ok(Err(e)) => Err(cf_tool_runtime::ToolError::custom(
                 "process_manager",
@@ -3821,6 +3923,14 @@ impl McpClient {
                     .meta
                     .as_ref()
                     .and_then(|m| serde_json::to_value(m).ok());
+                // Server `readOnlyHint` annotation gates retry-after-failure:
+                // only read-only tools may be replayed after transport/auth
+                // errors (a side-effecting tool must never run twice).
+                let read_only = tool
+                    .annotations
+                    .as_ref()
+                    .and_then(|a| a.read_only_hint)
+                    .unwrap_or(false);
 
                 let name = tool.name.to_string();
                 let description = tool.description.map(|d| d.to_string()).unwrap_or_default();
@@ -3845,6 +3955,7 @@ impl McpClient {
                     mcp_state: Arc::clone(&mcp_state),
                     schema,
                     meta,
+                    read_only,
                 };
                 // Invalid tools (bad names) return None and are skipped
                 mcp_tool.into_registration()
@@ -3887,10 +3998,22 @@ impl McpClient {
         arguments: serde_json::Value,
     ) -> Result<rmcp::model::CallToolResult, McpError> {
         let mcp_service = self.ensure_initialized().await?;
+        // MCP `arguments` must be a JSON object; `null` (no args) maps to
+        // "absent". Anything else is rejected rather than silently dropped.
+        let arguments = match arguments {
+            serde_json::Value::Null => None,
+            serde_json::Value::Object(map) => Some(map),
+            other => {
+                return Err(McpError::ClientError(format!(
+                    "MCP tool '{tool_name}' received non-object arguments ({})",
+                    json_value_type_name(&other)
+                )));
+            }
+        };
         let result = mcp_service
             .call_tool({
                 let mut params = CallToolRequestParams::new(tool_name.to_string());
-                params.arguments = arguments.as_object().cloned();
+                params.arguments = arguments;
                 params
             })
             .await?;
@@ -4010,14 +4133,17 @@ fn is_figma_mcp(server_name: &str, url: &str) -> bool {
     if server_name.eq_ignore_ascii_case("figma") {
         return true;
     }
-    // Legacy direct managed name (`grok_com_figma`); newer clients use gateway tools (`managed_mcp_gateway_tools_enabled`).
-    const MANAGED_PREFIX: &str = "grok_com_";
-    if let (Some(prefix), Some(rest)) = (
-        server_name.get(..MANAGED_PREFIX.len()),
-        server_name.get(MANAGED_PREFIX.len()..),
-    ) && prefix.eq_ignore_ascii_case(MANAGED_PREFIX)
-        && rest.eq_ignore_ascii_case("figma")
-    {
+    // Legacy direct managed name (`grok_com_figma` / `qidi_com_figma`); newer
+    // clients use gateway tools (`managed_mcp_gateway_tools_enabled`).
+    const MANAGED_PREFIXES: [&str; 2] = ["grok_com_", "qidi_com_"];
+    if MANAGED_PREFIXES.iter().any(|p| {
+        server_name
+            .get(..p.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(p))
+            && server_name
+                .get(p.len()..)
+                .is_some_and(|rest| rest.eq_ignore_ascii_case("figma"))
+    }) {
         return true;
     }
     reqwest::Url::parse(url)
@@ -4111,6 +4237,10 @@ pub async fn start_mcp_server(
             for env_variable in &env {
                 cmd.env(&env_variable.name, &env_variable.value);
             }
+            // SECURITY: never pass inline QIDI_AUTH credentials to a spawned
+            // MCP server -- the command comes from project/user config and is
+            // effectively arbitrary code. AuthManager has already read it.
+            cmd.env_remove("QIDI_AUTH");
             cf_tools::util::detach_command(&mut cmd);
 
             let (transport, stderr_handle) =
@@ -5306,6 +5436,7 @@ mod tests {
                 Arc::clone(&mcp_state),
                 serde_json::json!({"type": "object"}),
                 None,
+                false,
             ),
         };
         let tool_b = McpErasedTool {
@@ -5316,6 +5447,7 @@ mod tests {
                 Arc::clone(&mcp_state),
                 serde_json::json!({"type": "object"}),
                 None,
+                false,
             ),
         };
 
@@ -5348,6 +5480,7 @@ mod tests {
                 Arc::clone(&mcp_state),
                 serde_json::json!({"type": "object"}),
                 None,
+                false,
             ),
         };
         let tool_b = McpErasedTool {
@@ -5358,6 +5491,7 @@ mod tests {
                 Arc::clone(&mcp_state),
                 serde_json::json!({"type": "object"}),
                 None,
+                false,
             ),
         };
 
@@ -5747,6 +5881,7 @@ mod tests {
             Arc::new(Mutex::new(McpState::new(vec![]))),
             serde_json::json!({}),
             None,
+            false,
         )
     }
 
@@ -5957,6 +6092,7 @@ mod tests {
                 Arc::new(Mutex::new(McpState::new(vec![]))),
                 serde_json::json!({"type": "object"}),
                 None,
+                false,
             ),
         };
 
@@ -6140,6 +6276,7 @@ mod tests {
                 Arc::new(Mutex::new(McpState::new(vec![]))),
                 serde_json::json!({"type": "object"}),
                 None,
+                true,
             ),
         }
     }
@@ -6755,6 +6892,7 @@ mod tests {
                 Arc::new(Mutex::new(McpState::new(vec![]))),
                 serde_json::json!({}),
                 None,
+                true,
             ),
         };
 
@@ -7596,11 +7734,10 @@ fn validate_mcp_http_url(url_str: &str, server_name: &str) -> Result<(), McpErro
     // Check against known internal hostnames/patterns.
     let host_lower = host.to_lowercase();
 
-    // Reject obvious internal hostnames.
-    if matches!(
-        host_lower.as_str(),
-        "localhost" | "metadata" | "metadata.google.internal"
-    ) {
+    // Loopback is explicitly allowed: local MCP servers (dev/test, local gateways)
+    // are a legitimate configuration. Only cloud metadata / internal hostnames
+    // are rejected.
+    if matches!(host_lower.as_str(), "metadata" | "metadata.google.internal") {
         tracing::warn!(
             server = server_name,
             url = %url_str,
@@ -7616,17 +7753,14 @@ fn validate_mcp_http_url(url_str: &str, server_name: &str) -> Result<(), McpErro
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         let is_blocked = match ip {
             std::net::IpAddr::V4(v4) => {
-                v4.is_loopback()
-                    || v4.is_link_local()
+                // Loopback/unspecified are allowed (local MCP servers).
+                v4.is_link_local()
                     || v4.is_private()
-                    || v4.is_unspecified()
                     || v4.is_broadcast()
             }
             std::net::IpAddr::V6(v6) => {
-                v6.is_loopback()
-                    || v6.is_unspecified()
-                    // IPv6 link-local: fe80::/10
-                    || (v6.segments()[0] & 0xffc0) == 0xfe80
+                // IPv6 link-local: fe80::/10
+                (v6.segments()[0] & 0xffc0) == 0xfe80
             }
         };
         if is_blocked {

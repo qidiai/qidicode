@@ -32,3 +32,7 @@ Library/
 
 # protoc 嵌套解压副本(运行 bin/download_protoc.py 重新生成)
 bin/bin/
+# Media-gen configs (may contain API keys) - defense in depth
+tools/media-gen-agent/agnes_config.json
+tools/media-gen-agent/agnes_config.json.*
+

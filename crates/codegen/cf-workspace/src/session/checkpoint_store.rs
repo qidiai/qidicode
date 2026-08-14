@@ -30,7 +30,7 @@ use tokio::sync::Mutex;
 
 use crate::session::checkpoint::RewindCheckpoint;
 
-/// Directory (under `<cwd>/.grok`) holding every session's checkpoint store.
+/// Directory (under `<cwd>/.qidi`) holding every session's checkpoint store.
 const STORE_SUBDIR: &str = "rewind-checkpoints";
 
 /// Default cap on retained checkpoints per session. Bounds on-disk and in-memory
@@ -74,7 +74,7 @@ impl CheckpointStore {
         // `session_id` is RPC-controlled: never join it verbatim (a `../../etc`
         // would escape the store root). Map it to a safe, collision-free name first.
         let dir = cwd
-            .join(".grok")
+            .join(".qidi")
             .join(STORE_SUBDIR)
             .join(session_store_dir_name(session_id));
         let cap = cap.max(1);
@@ -263,6 +263,23 @@ impl CheckpointStore {
             f.sync_all().await?;
         }
         tokio::fs::rename(&tmp_path, &final_path).await?;
+        // Checkpoint blobs may embed file contents/hunks; keep them owner-only
+        // (0o600) even though the store lives inside the session working tree.
+        // Best-effort: a perms failure must not fail the checkpoint write.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Err(e) = std::fs::set_permissions(
+                &final_path,
+                std::fs::Permissions::from_mode(0o600),
+            ) {
+                tracing::warn!(
+                    path = %final_path.display(),
+                    error = %e,
+                    "rewind checkpoint: failed to chmod 0600 checkpoint blob"
+                );
+            }
+        }
         // Best-effort dir fsync so the rename (the new dir entry) is itself durable;
         // async open keeps this off the blocking path. Ignored where unsupported.
         if let Ok(dir) = tokio::fs::File::open(&self.dir).await {

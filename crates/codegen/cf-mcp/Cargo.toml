@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 license = "Apache-2.0"
 name = "cf-mcp"
 version = "0.1.0"
@@ -51,6 +51,11 @@ agent-client-protocol = { workspace = true }
 cf-file-utils = { path = "../cf-file-utils" }
 futures = { workspace = true }
 regex = { workspace = true }
+# Local JSON Schema validation of MCP tool arguments (draft-07, as emitted by
+# schemars). default-features = false: no HTTP/file $ref retrieval - keeps
+# reqwest 0.12 out of this quarantine crate and prevents untrusted server
+# schemas from triggering network/filesystem reads during validation.
+jsonschema = { version = "0.30.0", default-features = false }
 which = { workspace = true }
 # Atomic descriptor writes (NamedTempFile + persist) in materialize_descriptors.
 tempfile = { workspace = true }

@@ -93,10 +93,14 @@ pub fn register_tool_pack(pack: ToolPack) {
 fn format_tool_output_for_prompt(content: &str) -> String {
     // Don't wrap short error messages or empty content — only wrap content
     // that could plausibly contain injection payloads (longer than ~50 chars).
-    if content.len() < 50 {
-        return content.to_string();
+    // SECURITY: escape any `</tool_output>` inside untrusted content so it
+    // cannot close the wrapper tag early (indirect prompt-injection
+    // boundary). Applies to short outputs too.
+    let escaped = content.replace("</tool_output>", "&lt;/tool_output&gt;");
+    if escaped.len() < 50 {
+        return escaped;
     }
-    format!("<tool_output>\n{content}\n</tool_output>")
+    format!("<tool_output>\n{escaped}\n</tool_output>")
 }
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolConfig {
@@ -2339,6 +2343,7 @@ mod tests {
             timeout: None,
             description: "list files".into(),
             is_background: false,
+            deny_patterns: None,
         });
         let merged = merge_tool_meta(
             &toolset,

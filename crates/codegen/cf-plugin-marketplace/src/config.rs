@@ -1,4 +1,4 @@
-﻿//! Parse marketplace sources from `~/.qidi/config.toml`.
+//! Parse marketplace sources from `~/.qidi/config.toml`.
 //!
 //! Expected format:
 //! ```toml
@@ -163,16 +163,38 @@ fn extract_marketplace_entries(
     }
 }
 /// Loads additional marketplace sources from `settings.json` (`extraKnownMarketplaces`)
-/// and `known_marketplaces.json` files under `~/.qidi/` and `~/.claude/`.
+/// and `known_marketplaces.json` files under `~/.qidi/` and — only when
+/// explicitly enabled — `~/.claude/`.
+///
+/// `~/.claude` is another vendor's config directory and sits outside QIDI's
+/// trust domain, so it is NOT consulted by default. Opt in with
+/// `QIDI_ENABLE_CLAUDE_MARKET_SOURCES=1` (or `true`/`yes`/`on`).
 pub fn load_extra_sources_from_settings(existing: &[MarketplaceSource]) -> Vec<MarketplaceSource> {
-    let roots: Vec<PathBuf> = [
-        cf_config::user_grok_home(),
-        dirs::home_dir().map(|h| h.join(".claude")),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    let mut roots: Vec<PathBuf> = cf_config::user_grok_home().into_iter().collect();
+    if claude_market_sources_enabled() {
+        if let Some(home) = dirs::home_dir() {
+            roots.push(home.join(".claude"));
+        }
+    } else {
+        tracing::debug!(
+            "~/.claude marketplace sources disabled; set QIDI_ENABLE_CLAUDE_MARKET_SOURCES=1 to enable"
+        );
+    }
     load_extra_sources_from_settings_in(existing, &roots)
+}
+/// Whether `~/.claude` settings should be treated as a marketplace source
+/// root. Defaults to `false` (trust boundary); opt in with
+/// `QIDI_ENABLE_CLAUDE_MARKET_SOURCES=1` (or `true`/`yes`/`on`,
+/// case-insensitive).
+fn claude_market_sources_enabled() -> bool {
+    std::env::var("QIDI_ENABLE_CLAUDE_MARKET_SOURCES")
+        .ok()
+        .is_some_and(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
 }
 
 /// Like [`load_extra_sources_from_settings`] but reads from explicit `roots`

@@ -32,6 +32,37 @@ pub fn default_grok_home() -> PathBuf {
     dunce::canonicalize(&home).unwrap_or(home).join(".qidi")
 }
 
+/// Best-effort restrict `dir` to the owning user (0o700) on Unix.
+///
+/// `create_dir_all` honors the umask (commonly 0o755), which would let other
+/// local users list/read the config tree (`auth.json`, `unified.jsonl`,
+/// sessions, ...). Failure is logged, not fatal: a pre-existing directory may
+/// be owned by someone else (e.g. a project `.qidi` tree) and the process must
+/// still function.
+///
+/// Windows: there is no std-equivalent directory ACL call, and the per-file
+/// ACL helper (`cf-shell-base::util::secure_file::set_windows_secure_permissions`)
+/// can't be imported here (cf-config -> cf-shell-base would be a dependency
+/// cycle), so Windows is intentionally skipped. Sensitive *files* are still
+/// protected by their own ACLs (see `write_secure_file`).
+#[cfg(unix)]
+fn ensure_home_permissions(dir: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Err(e) = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)) {
+        tracing::warn!(
+            path = %dir.display(),
+            error = %e,
+            "grok_home: failed to restrict directory permissions to 0700"
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn ensure_home_permissions(_dir: &std::path::Path) {
+    // Windows: no std-equivalent directory permission call; skipped by design
+    // (see rustdoc on the Unix variant). File-level ACLs still apply.
+}
+
 /// Per-user config directory: `$QIDI_HOME` (preferred) or `$QIDI_HOME`
 /// (legacy compat) or `~/.qidi`. Created if needed.
 ///
@@ -49,6 +80,9 @@ pub fn grok_home() -> PathBuf {
                 default_grok_home()
             };
             let _ = std::fs::create_dir_all(&grok_home);
+            // The config home holds credentials (auth.json) and diagnostics;
+            // tighten it to owner-only so other local users can't traverse it.
+            ensure_home_permissions(&grok_home);
             grok_home
         })
         .clone()
@@ -191,6 +225,10 @@ pub fn ensure_sessions_cwd_dir(cwd: &str) -> std::io::Result<PathBuf> {
     let encoded_name = encode_cwd_dirname(cwd);
     let dir = grok_home().join("sessions").join(&encoded_name);
     std::fs::create_dir_all(&dir)?;
+    // Sessions live inside the (0o700) config home; tighten the per-session
+    // directory too so session data isn't listable if the parent perms were
+    // ever loosened.
+    ensure_home_permissions(&dir);
     // Hash-based encoding is in use when the dirname differs from the
     // plain URL-encoded form.  Write a `.cwd` file so decode can recover
     // the original path.  O_CREAT|O_EXCL via create_new avoids TOCTOU

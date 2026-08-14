@@ -2158,6 +2158,7 @@ dependencies = [
  "cf-workspace-types",
  "futures",
  "http 1.4.2",
+ "jsonschema",
  "libc",
  "oauth2",
  "parking_lot",

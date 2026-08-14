@@ -162,6 +162,7 @@ mod tests {
             timeout: None,
             description: "list files".into(),
             is_background: false,
+            deny_patterns: None,
         })
         .try_into();
         assert_eq!(bash.unwrap().command, "ls");

@@ -88,6 +88,11 @@ fn build_http_client() -> Result<reqwest::Client, reqwest::Error> {
         .pool_idle_timeout(Duration::from_secs(pool_idle_timeout_secs))
         .connect_timeout(Duration::from_secs(connect_timeout_secs))
         .tcp_nodelay(true)
+        // Never follow redirects: a 3xx from a model endpoint would re-send
+        // x-api-key / Authorization to the redirect target (reqwest only
+        // strips Authorization/Cookie on cross-origin redirects, never custom
+        // x-* headers). Model endpoints should never redirect.
+        .redirect(reqwest::redirect::Policy::none())
         // HTTP/2 keep-alive: ping every 15s, timeout after 5s.
         .http2_keep_alive_interval(Duration::from_secs(15))
         .http2_keep_alive_timeout(Duration::from_secs(5))
@@ -108,6 +113,9 @@ fn build_http_client_http1() -> Result<reqwest::Client, reqwest::Error> {
         .pool_idle_timeout(Duration::from_secs(0))
         .connect_timeout(Duration::from_secs(connect_timeout_secs))
         .tcp_nodelay(true)
+        // Same no-redirect policy as the HTTP/2 client: the HTTP/1.1 escape
+        // hatch must not forward auth headers to a redirect target either.
+        .redirect(reqwest::redirect::Policy::none())
         .http1_only()
         .build()
 }

@@ -1,4 +1,4 @@
-[licenses]
+﻿[licenses]
 allow = [
     "Apache-2.0",
     "MIT",
@@ -9,6 +9,9 @@ allow = [
     "Unicode-DFS-2016",
     "Zlib",
     "CC0-1.0",
+    "BSL-1.0",
+    "MPL-2.0",
+    "Unicode-3.0",
 ]
 confidence-threshold = 0.8
 

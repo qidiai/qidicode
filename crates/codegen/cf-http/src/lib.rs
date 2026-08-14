@@ -287,6 +287,12 @@ pub fn shared_client() -> reqwest::Client {
             reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(30))
                 .timeout(std::time::Duration::from_secs(300))
+                // DELIBERATE: this general-purpose client keeps following (up
+                // to 5) redirects — settings / managed-config / OIDC /
+                // subscription flows legitimately redirect (CDN -> signed
+                // URL, auth flows). Secret-bearing paths never rely on this
+                // client for redirect safety: the sampler and the telemetry
+                // events POST use their own no-redirect clients.
                 .redirect(reqwest::redirect::Policy::limited(5))
                 .user_agent(process_user_agent_string())
                 .pool_idle_timeout(std::time::Duration::from_secs(30))

@@ -102,7 +102,15 @@ pub fn open_secure_file(path: &Path) -> io::Result<File> {
     {
         // Set file mode to 0o600 (owner read/write only) during creation
         options.mode(0o600);
+        // Refuse to follow symlinks: if an attacker can plant a symlink at
+        // `path`, the open would otherwise truncate/write the *target* with
+        // our credentials. O_NOFOLLOW turns that into a clean ELOOP failure.
+        // create/truncate semantics above are unchanged (flags are OR'd in).
+        options.custom_flags(libc::O_NOFOLLOW);
     }
+    // Windows: no std-equivalent O_NOFOLLOW for OpenOptions; the
+    // reparse-point/symlink race is accepted here (per-file ACLs via
+    // `set_windows_secure_permissions` still apply after the write).
 
     options.open(path)
 }

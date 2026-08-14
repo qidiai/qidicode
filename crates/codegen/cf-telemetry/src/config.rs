@@ -172,6 +172,30 @@ impl TelemetryConfig {
         if let Some(value) = env_bool("QIDI_TELEMETRY_TRACE_UPLOAD") {
             self.trace_upload = Some(value);
         }
+        self.validate_events_url_scheme();
+    }
+    /// Refuse events URLs that would send the `x-api-key` header (and event
+    /// payloads) in cleartext: only `https` is accepted; plain `http` is
+    /// tolerated solely for loopback hosts (`localhost` / `127.0.0.1`) so
+    /// local development keeps working. A rejected URL is dropped (events
+    /// channel silently disabled) with a warning.
+    fn validate_events_url_scheme(&mut self) {
+        let Some(url) = self.events_url.as_deref() else {
+            return;
+        };
+        let allowed = url::Url::parse(url).is_ok_and(|parsed| match parsed.scheme() {
+            "https" => true,
+            "http" => parsed.host_str().is_some_and(|host| is_loopback_host(host)),
+            _ => false,
+        });
+        if !allowed {
+            tracing::warn!(
+                url,
+                "Rejecting telemetry events URL: only https is allowed \
+                 (http allowed only for localhost/127.0.0.1 local development)"
+            );
+            self.events_url = None;
+        }
     }
     fn normalize(&mut self) {
         self.events_url = Self::normalize_optional_string(self.events_url.take());
@@ -194,6 +218,11 @@ impl TelemetryConfig {
             }
         })
     }
+}
+/// Loopback host check shared by the URL scheme gates (`localhost` /
+/// `127.0.0.1` / `::1`).
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
 }
 /// Parse an env var as a boolean. Returns `None` if unset or unrecognized.
 ///

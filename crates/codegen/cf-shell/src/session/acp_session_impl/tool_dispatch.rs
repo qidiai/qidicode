@@ -202,6 +202,7 @@ impl SessionActor {
             timeout: None,
             description: title_command.clone().into_owned(),
             is_background: false,
+            deny_patterns: None,
         });
         // Bash mode has no model-issued wire name; resolve the toolset's
         // execute tool by kind so the x.ai/tool identity still stamps.

@@ -1,4 +1,4 @@
-//! The session actor's main loop (`run_session`): command dispatch, idle
+﻿//! The session actor's main loop (`run_session`): command dispatch, idle
 //! arms, and the free helpers only the loop consumes.
 #![allow(clippy::items_after_test_module)]
 use super::*;
@@ -609,7 +609,7 @@ pub(super) async fn run_session(
             .get(& qualified).cloned(); let schema = def.function.parameters.clone(); let
             mcp_tool = crate ::session::mcp_servers::McpTool::new(tool_name.clone(), def
             .function.description.clone().unwrap_or_default(), server_name.clone(),
-            session.mcp_state.clone(), schema, meta,); if let Some(reg) = mcp_tool
+            session.mcp_state.clone(), schema, meta, false,); if let Some(reg) = mcp_tool
             .into_registration() { mcp_state.disabled_tool_registrations.insert(qualified
             .clone(), reg); } } bridge.unregister_tool_by_name(& qualified); mcp_state
             .disabled_tools.entry(server_name.clone()).or_default().insert(tool_name
