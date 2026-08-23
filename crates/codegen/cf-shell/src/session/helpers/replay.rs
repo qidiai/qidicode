@@ -703,6 +703,47 @@ mod tests {
         }))
     }
 
+    #[test]
+    fn test_replay_skips_request_header_events() {
+        // RequestHeader is persist-only bookkeeping: replay must ignore it
+        // without it ever reaching the derived conversation. Pins the
+        // informational-skip contract (process_update's `_ => {}` arm) so a
+        // future refactor cannot accidentally start deriving messages from
+        // envelope events.
+        let tmp = TempDir::new().unwrap();
+        let mk_header = |reason: &str| {
+            SessionUpdate::Xai(Box::new(XaiNotification {
+                session_id: acp::SessionId::new("s1"),
+                update: XaiSessionUpdate::RequestHeader {
+                    system_prompt_sha256: Some("a".repeat(64)),
+                    tool_names: vec!["bash".to_string(), "read_file".to_string()],
+                    model: Some("test-model".to_string()),
+                    temperature: Some(0.7),
+                    top_p: None,
+                    max_output_tokens: Some(8192),
+                    reason: reason.to_string(),
+                },
+                meta: None,
+            }))
+        };
+        let updates = vec![
+            mk_header("initial"),
+            make_user_update("s1", "hello"),
+            make_agent_update("s1", "hi"),
+            mk_header("change"),
+            make_user_update("s1", "second"),
+        ];
+        let result = replay_updates(&updates, tmp.path(), usize::MAX);
+        let texts: Vec<String> = result
+            .conversation
+            .iter()
+            .map(|c| c.text_content())
+            .collect();
+        assert_eq!(texts, vec!["hello", "hi", "second"]);
+        // Two headers between turns must not inflate the prompt index.
+        assert_eq!(result.prompt_index_reached, 2);
+    }
+
     fn make_checkpoint(
         checkpoint_id: &str,
         prompt_index_at_compaction: usize,
