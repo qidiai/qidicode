@@ -67,6 +67,23 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
         continue-on-error: true
 
+  prompt-template-drift:
+    # dsh doc-sync spirit: mechanically check that the XOR-encrypted prompt
+    # artifact matches the templates it is generated from. A silent drift here
+    # means the runtime prompt diverges from the reviewed template source.
+    # Windows-only for now: the committed artifact and templates are CRLF, and
+    # .gitattributes pins both; lift the OS restriction only after verifying
+    # byte-identical checkout on Linux runners.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Regenerate encrypted prompt artifact
+        run: python crates/codegen/cf-agent/scripts/encrypt_templates.py
+
+      - name: Fail on drift between templates and encrypted artifact
+        run: git diff --exit-code -- crates/codegen/cf-agent/src/prompt/prompt_encrypted.rs
+
   test:
     runs-on: windows-latest
     steps:

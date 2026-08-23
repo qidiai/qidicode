@@ -50,7 +50,14 @@ def main():
     lines.append(f"pub(crate) const PROMPT_SEEDS: [u8; {len(SEEDS)}] = [{seeds_arr}];")
     lines.append("")
 
-    OUT_PATH.write_text("\n".join(lines))
+    # Write bytes with explicit CRLF line endings so the artifact is
+    # byte-identical regardless of the OS or Python text-mode newline
+    # translation (LF on Linux, CRLF on Windows). CI regenerates this file
+    # and diffs it against the committed copy; mixed line endings would
+    # break that gate. Template files are pinned to CRLF via .gitattributes
+    # for the same reason: the encrypted array embeds template bytes
+    # verbatim, so checkout must yield identical bytes on every platform.
+    OUT_PATH.write_bytes("\r\n".join(lines).encode("ascii"))
     print(f"Wrote {OUT_PATH.relative_to(CRATE_DIR)}")
 
 

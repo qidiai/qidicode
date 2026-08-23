@@ -1,0 +1,10 @@
+# Line-ending policy for files whose bytes flow into generated artifacts.
+#
+# templates/*.md are XOR-encrypted verbatim (byte-for-byte) into
+# src/prompt/prompt_encrypted.rs by scripts/encrypt_templates.py, and the CI
+# drift gate regenerates + diffs that artifact. If checkout normalizes these
+# files' line endings differently on different platforms, the encrypted array
+# diverges and the gate fails on one OS. Pin both sides to CRLF — the current
+# committed bytes — so every checkout yields identical bytes everywhere.
+crates/codegen/cf-agent/templates/*.md text eol=crlf
+crates/codegen/cf-agent/src/prompt/prompt_encrypted.rs text eol=crlf
