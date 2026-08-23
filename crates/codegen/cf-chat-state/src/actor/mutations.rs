@@ -6,7 +6,7 @@ use cf_sampling_types::{
 };
 
 use super::ChatStateActor;
-use super::request_builder::HARD_CLEAR_PLACEHOLDER;
+use super::request_builder::is_hard_cleared;
 use crate::events::ChatStateEvent;
 use crate::types::ChatStateSnapshot;
 
@@ -257,8 +257,9 @@ impl ChatStateActor {
                 continue;
             }
 
-            if tr.content.as_ref() != HARD_CLEAR_PLACEHOLDER {
-                tr.content = std::sync::Arc::<str>::from(HARD_CLEAR_PLACEHOLDER);
+            if !super::request_builder::is_hard_cleared(tr.content.as_ref()) {
+                tr.content =
+                    super::request_builder::hard_clear_replacement(tr.content.as_ref());
                 cleared += 1;
             }
         }
