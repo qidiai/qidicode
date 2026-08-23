@@ -14,6 +14,45 @@ use crate::types::PruningConfig;
 /// hard-clears tool results in the retained in-memory conversation.
 pub(super) const HARD_CLEAR_PLACEHOLDER: &str = "[Tool result omitted — too old]";
 
+/// Marker prefix shared by every hard-clear variant (with or without a
+/// preserved retrieval pointer). Idempotency checks match on this prefix
+/// instead of the exact placeholder string.
+pub(super) const HARD_CLEAR_PREFIX: &str = "[Tool result omitted";
+
+/// Inline pointer annotation the bash/terminal tool appends when it spills
+/// the full output to a session-scoped file (`{session_dir}/terminal/{call}.log`).
+const OUTPUT_POINTER_MARKER: &str = "full output at: ";
+
+/// Build the hard-clear replacement for one tool result, preserving any
+/// retrieval pointer the original content carried.
+///
+/// The terminal tool already implements spill semantics: truncated results
+/// keep first/last slices plus a `full output at: <path>` annotation. A blind
+/// placeholder would discard that pointer and make the spilled file
+/// unreachable for the model. When the marker is present (usually in the
+/// soft-trimmed tail), the replacement keeps the whole pointer line so the
+/// model can still re-read the full output with `read_file`.
+pub(super) fn hard_clear_replacement(content: &str) -> std::sync::Arc<str> {
+    if let Some(idx) = content.rfind(OUTPUT_POINTER_MARKER) {
+        let line_end = content[idx..]
+            .find('\n')
+            .map(|e| idx + e)
+            .unwrap_or(content.len());
+        let pointer_line = content[idx..line_end].trim_end();
+        return std::sync::Arc::from(format!(
+            "{HARD_CLEAR_PLACEHOLDER}. {pointer_line}"
+        ));
+    }
+    std::sync::Arc::from(HARD_CLEAR_PLACEHOLDER)
+}
+
+/// Whether this tool-result content is already a hard-clear replacement
+/// (blind placeholder or pointer-preserving variant) and needs no further
+/// clearing.
+pub(super) fn is_hard_cleared(content: &str) -> bool {
+    content.starts_with(HARD_CLEAR_PREFIX)
+}
+
 /// Separator inserted between head and tail in soft-trimmed results.
 const SOFT_TRIM_SEPARATOR: &str = "\n\n[…trimmed…]\n\n";
 
@@ -189,10 +228,13 @@ pub(crate) fn prune_conversation(conversation: &mut [ConversationItem], config: 
             continue;
         }
 
-        // Hard clear: very old tool results → replace entirely.
+        // Hard clear: very old tool results → replace entirely, preserving
+        // any `full output at:` retrieval pointer so spilled files stay
+        // reachable (idempotent across repeated passes).
         if turn_from_end >= config.hard_clear_age_turns {
-            if tool_result.content.as_ref() != HARD_CLEAR_PLACEHOLDER {
-                tool_result.content = std::sync::Arc::<str>::from(HARD_CLEAR_PLACEHOLDER);
+            if !is_hard_cleared(tool_result.content.as_ref()) {
+                tool_result.content =
+                    hard_clear_replacement(tool_result.content.as_ref());
             }
             continue;
         }
@@ -524,6 +566,39 @@ fn safe_char_slice_tail(s: &str, count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hard_clear_replacement_preserves_output_pointer() {
+        let content = "first lines\n...\nlast lines [truncated: showing first/last 1.2 KB of 34 KB - full output at: /home/u/.qidi/sessions/abc/terminal/call-1.log]\n";
+        let cleared = hard_clear_replacement(content);
+        assert!(
+            cleared.starts_with(HARD_CLEAR_PLACEHOLDER),
+            "must start with the placeholder, got: {cleared}"
+        );
+        assert!(
+            cleared.contains("full output at: /home/u/.qidi/sessions/abc/terminal/call-1.log"),
+            "must preserve the retrieval pointer, got: {cleared}"
+        );
+    }
+
+    #[test]
+    fn hard_clear_replacement_without_pointer_is_plain_placeholder() {
+        let cleared = hard_clear_replacement("plain old tool output without pointer");
+        assert_eq!(cleared.as_ref(), HARD_CLEAR_PLACEHOLDER);
+    }
+
+    #[test]
+    fn hard_clear_is_idempotent() {
+        let with_pointer = "head [truncated: full output at: /x/y.log]";
+        let once = hard_clear_replacement(with_pointer);
+        assert!(is_hard_cleared(once.as_ref()));
+        let twice = hard_clear_replacement(once.as_ref());
+        assert_eq!(
+            twice, once,
+            "re-clearing a pointer-preserving replacement must be a no-op"
+        );
+        assert!(is_hard_cleared(HARD_CLEAR_PLACEHOLDER));
+    }
 
     #[test]
     fn should_prune_gating() {
