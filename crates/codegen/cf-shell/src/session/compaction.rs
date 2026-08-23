@@ -2201,6 +2201,7 @@ mod inline_auto_compact_flow_tests {
             },
             auth_method_id: test_auth_method_id("test-auth"),
             model_auth_facts: std::cell::RefCell::new(None),
+            last_request_header_fingerprint: std::cell::RefCell::new(None),
             attribution_callback: None,
             auth_manager: None,
             state,

@@ -573,6 +573,11 @@ pub(crate) struct SessionActor {
     /// [`SessionActor::model_auth_facts`].
     pub(crate) model_auth_facts:
         std::cell::RefCell<Option<(String, crate::agent::config::ModelAuthFacts)>>,
+    /// Last request-envelope fingerprint recorded to `updates.jsonl`
+    /// (`RequestHeader` events). When the next model request's envelope hash
+    /// equals this, no new event is appended. `None` = nothing recorded yet
+    /// in this process (the next request logs with `reason: "initial"`).
+    pub(crate) last_request_header_fingerprint: std::cell::RefCell<Option<String>>,
     /// 401-attribution callback. Joined with the bearer the
     /// sampler sends on the wire to emit an `auth 401 attribution`
     /// event at each of the six `OaiCompatClient` 401 arms in
