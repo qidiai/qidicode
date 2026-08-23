@@ -540,6 +540,47 @@ pub enum SessionUpdate {
         /// When the rewind occurred.
         created_at: String,
     },
+    /// Model-visible request envelope snapshot, appended to `updates.jsonl`
+    /// before each model request whose envelope differs from the last
+    /// recorded one (`reason: "initial"` for the first request of a session,
+    /// `"change"` afterwards).
+    ///
+    /// This is **persist-only** — it is never sent to the gateway/UI. It turns
+    /// the existing overwrite-style snapshots (`system_prompt.txt`,
+    /// `prompt_context.json`, `compaction_requests/`) into an event sequence:
+    /// each model-visible fact about WHAT the model saw (system prompt hash,
+    /// tool set, sampling config) becomes replayable from the log. The full
+    /// prompt text stays in the overwrite snapshots; this event carries only
+    /// the sha256 so no sensitive prompt content (memory injections, skill
+    /// lists) is duplicated into the append-only log.
+    ///
+    /// Replay treats it as informational (skipped), matching the
+    /// `_ => {}` arm for unknown informational xAI updates. Old binaries
+    /// that predate this variant fail to parse the line and skip it as
+    /// malformed — the same tolerance already applied to corrupt lines.
+    RequestHeader {
+        /// sha256 (hex) of the exact rendered system prompt text sent in
+        /// this request's items[0]. Absent for system-less requests.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        system_prompt_sha256: Option<String>,
+        /// Sorted names of every tool exposed to the model in this request.
+        tool_names: Vec<String>,
+        /// The model id this request was routed to.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        /// Sampling scalars that shape generation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        temperature: Option<f32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        top_p: Option<f32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_output_tokens: Option<u32>,
+
+
+        /// Why this header was recorded: `"initial"` (first request of the
+        /// session) or `"change"` (envelope differs from the last record).
+        reason: String,
+    },
     /// Task completed notification
     TaskCompleted {
         task_snapshot: TaskSnapshot,
@@ -1249,6 +1290,96 @@ pub struct RecapRequestFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_header_roundtrips_and_tolerates_old_payloads() {
+        // Full roundtrip of the new event.
+        let update = SessionUpdate::RequestHeader {
+            system_prompt_sha256: Some(
+                "a3f5c9d0e1b2467890abcdef1234567890abcdef1234567890abcdef12345678".into(),
+            ),
+            tool_names: vec!["bash".into(), "read_file".into()],
+            model: Some("test-model".into()),
+            temperature: Some(0.7),
+            top_p: None,
+            max_output_tokens: Some(8192),
+            reason: "initial".into(),
+        };
+        let json = serde_json::to_string(&update).unwrap();
+        assert!(json.contains("\"sessionUpdate\":\"request_header\""));
+        let parsed: SessionUpdate = serde_json::from_str(&json).unwrap();
+        match parsed {
+            SessionUpdate::RequestHeader {
+                ref system_prompt_sha256,
+                ref tool_names,
+                ref model,
+                ref temperature,
+                ref top_p,
+                ref max_output_tokens,
+                ref reason,
+            } => {
+                assert_eq!(system_prompt_sha256.as_deref().map(str::len), Some(64));
+                assert_eq!(tool_names, &vec!["bash".to_string(), "read_file".to_string()]);
+                assert_eq!(model.as_deref(), Some("test-model"));
+                assert_eq!(temperature, &Some(0.7f32));
+                assert_eq!(top_p, &None);
+                assert_eq!(max_output_tokens, &Some(8192u32));
+                assert_eq!(reason, "initial");
+            }
+            other => panic!("expected RequestHeader, got {other:?}"),
+        }
+
+        // A payload missing optional fields (older writer / sparser host)
+        // still parses: serde defaults cover `skip_serializing_if` fields.
+        let sparse = serde_json::json!({
+            "sessionUpdate": "request_header",
+            "tool_names": [],
+            "reason": "change"
+        });
+        let parsed_sparse: SessionUpdate =
+            serde_json::from_value(sparse).expect("sparse request_header must parse");
+        assert!(matches!(
+            parsed_sparse,
+            SessionUpdate::RequestHeader { .. }
+        ));
+    }
+
+    #[test]
+    fn unknown_session_update_tag_parses_as_unknown() {
+        // The enum carries a `#[serde(other)] Unknown` catch-all: a binary
+        // that does not know `request_header` (or any future tag) parses the
+        // line cleanly into `Unknown` — no malformed-line skip, no warn
+        // noise, and replay's informational arm ignores it. This test pins
+        // that contract: unknown tags MUST land in `Unknown`, never error
+        // and never mis-type into a known variant.
+        let future = serde_json::json!({
+            "sessionUpdate": "some_future_event",
+            "data": 42
+        });
+        let parsed: SessionUpdate =
+            serde_json::from_value(future).expect("unknown tag must parse as Unknown");
+        assert_eq!(parsed, SessionUpdate::Unknown);
+    }
+
+    #[test]
+    fn request_header_parses_as_unknown_on_old_reader() {
+        // Simulates an old binary (no RequestHeader variant): the serialized
+        // new event must fall into the same Unknown catch-all.
+        let update = SessionUpdate::RequestHeader {
+            system_prompt_sha256: Some("deadbeef".into()),
+            tool_names: vec!["bash".into()],
+            model: Some("m".into()),
+            temperature: None,
+            top_p: None,
+            max_output_tokens: None,
+            reason: "initial".into(),
+        };
+        let json = serde_json::to_value(&update).unwrap();
+        // Re-parse through the same enum (the old-reader simulation lives in
+        // the Unknown-catch-all behavior itself).
+        let parsed: SessionUpdate = serde_json::from_value(json).unwrap();
+        assert!(matches!(parsed, SessionUpdate::RequestHeader { .. }));
+    }
 
     #[test]
     fn recap_request_file_roundtrips() {

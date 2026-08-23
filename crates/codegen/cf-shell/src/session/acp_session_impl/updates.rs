@@ -665,6 +665,94 @@ impl SessionActor {
             tracing::warn!("Failed to send xAI update to persistence channel");
         }
     }
+
+    /// Append a `RequestHeader` event to `updates.jsonl` when the model-visible
+    /// request envelope changed since the last recorded one.
+    ///
+    /// dsh `request/header` analog: turns the overwrite-style snapshots
+    /// (`system_prompt.txt`, `prompt_context.json`) into an event sequence the
+    /// log can replay. Only the envelope travels here — the full prompt text
+    /// stays out of the append-only log (it may embed memory-injected private
+    /// content), so the event carries the prompt's sha256 instead.
+    ///
+    /// The fingerprint covers: system prompt text (via hash), sorted tool
+    /// names, model, and the sampling scalars. Unchanged envelopes append
+    /// nothing, so a steady session pays a single `initial` event.
+    pub(super) async fn maybe_persist_request_header(
+        &self,
+        request: &cf_sampling_types::ConversationRequest,
+    ) {
+        use cf_sampling_types::ConversationItem;
+
+        // items[0] is the rendered system prompt when present (see
+        // `build_conversation_request`; a system-less request starts with
+        // the first user item).
+        let system_prompt_sha256 = request.items.first().and_then(|item| match item {
+            ConversationItem::System(system) => Some({
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(system.content.as_bytes());
+                format!("{:x}", hasher.finalize())
+            }),
+            _ => None,
+        });
+
+        // Sorted so provider-side tool ordering jitter never counts as a
+        // model-visible change.
+        let mut tool_names: Vec<String> = request.tools.iter().map(|t| t.name.clone()).collect();
+        tool_names.sort();
+
+        // Fingerprint = sha256 over the canonical serialization of the
+        // envelope parts. Includes the prompt hash so a prompt-text change
+        // with identical toolset/config still records.
+        let mut fingerprint_input = String::with_capacity(256);
+        fingerprint_input.push_str(system_prompt_sha256.as_deref().unwrap_or("-"));
+        fingerprint_input.push('\u{1f}');
+        fingerprint_input.push_str(&tool_names.join(","));
+        fingerprint_input.push('\u{1f}');
+        fingerprint_input.push_str(request.model.as_deref().unwrap_or("-"));
+        fingerprint_input.push('\u{1f}');
+        if let Some(t) = request.temperature {
+            fingerprint_input.push_str(&t.to_string());
+        }
+        fingerprint_input.push('\u{1f}');
+        if let Some(p) = request.top_p {
+            fingerprint_input.push_str(&p.to_string());
+        }
+        fingerprint_input.push('\u{1f}');
+        if let Some(m) = request.max_output_tokens {
+            fingerprint_input.push_str(&m.to_string());
+        }
+
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(fingerprint_input.as_bytes());
+        let fingerprint = format!("{:x}", hasher.finalize());
+
+        let reason = {
+            let mut last = self.last_request_header_fingerprint.borrow_mut();
+            if last.as_deref() == Some(fingerprint.as_str()) {
+                return; // envelope unchanged — nothing to record
+            }
+            let reason = if last.is_none() {
+                "initial"
+            } else {
+                "change"
+            };
+            *last = Some(fingerprint);
+            reason.to_string()
+        };
+
+        self.persist_xai_update_only(XaiSessionUpdate::RequestHeader {
+            system_prompt_sha256,
+            tool_names,
+            model: request.model.clone(),
+            temperature: request.temperature,
+            top_p: request.top_p,
+            max_output_tokens: request.max_output_tokens,
+            reason,
+        });
+    }
     /// Dispatch a `Notification` hook for a user-attention event.
     pub(super) async fn dispatch_notification_hook(
         &self,

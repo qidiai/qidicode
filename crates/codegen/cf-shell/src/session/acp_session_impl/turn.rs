@@ -1893,6 +1893,12 @@ impl SessionActor {
             if use_backend_search {
                 request.hosted_tools = self.agent.borrow().hosted_tools().to_vec();
             }
+            // Model-visible request envelope logging (dsh request_header):
+            // hash + tool names + sampling config, appended to updates.jsonl
+            // only when the envelope changed since the last recorded one.
+            // Persist-only; replay treats it as informational. Old binaries
+            // skip the line as malformed (same as corrupt-line tolerance).
+            self.maybe_persist_request_header(&request).await;
             self.emit_event(crate::session::events::Event::PhaseChanged {
                 phase: crate::session::events::Phase::WaitingForModel,
             });
