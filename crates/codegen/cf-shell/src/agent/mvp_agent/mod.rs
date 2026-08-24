@@ -1498,8 +1498,35 @@ impl MvpAgent {
         let end_offset = view.frozen_len();
         let mut prepared = {
             let _timer = crate::instrumentation_timer!("session.replay.read_and_filter");
-            crate::session::storage::prepare_replay_lines(&raw_contents, cursor)
+            crate::session::storage::prepare_replay_lines(&raw_contents, cursor, Some(&updates_path))
         };
+        tracing::debug!(
+            used_checkpoint = prepared.used_checkpoint,
+            file_bytes = raw_contents.len(),
+            "replay: filter strategy"
+        );
+        // Off-path checkpoint maintenance: a full scan of a large session
+        // (no checkpoint yet — legacy session — or one too stale to help)
+        // just paid the whole scan cost. Refresh the checkpoint on a
+        // background thread so the NEXT resume hits the fast path.
+        // Best-effort: failure just costs speed, never correctness.
+        if !prepared.used_checkpoint
+            && raw_contents.len() as u64
+                >= crate::session::storage::replay_checkpoint::SEED_MIN_BYTES
+        {
+            let path = updates_path.clone();
+            tokio::task::spawn_blocking(move || {
+                if let Err(error) =
+                    crate::session::storage::replay_checkpoint::refresh_checkpoint(&path)
+                {
+                    tracing::debug!(
+                        error = %error,
+                        path = %path.display(),
+                        "replay: background checkpoint refresh failed (non-fatal)"
+                    );
+                }
+            });
+        }
         let unfinished_subagents = std::mem::take(&mut prepared.unfinished_subagents);
         if cursor.is_some() {
             let sending = prepared.lines.len();

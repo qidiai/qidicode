@@ -1,4 +1,7 @@
-use super::{PersistedData, SessionUpdateEnvelope, StorageAdapter, updates_truncate_for_prompt};
+use super::{
+    PersistedData, SessionUpdateEnvelope, StorageAdapter, replay_checkpoint,
+    updates_truncate_for_prompt,
+};
 use crate::sampling::types::ChatRequestMessage;
 use crate::sampling::{
     ContentPart, ConversationItem, conversation_truncate_for_prompt, transform_conversation_cwd,
@@ -55,6 +58,49 @@ impl JsonlStorageAdapter {
     pub fn with_explicit_session_dir(session_dir: PathBuf) -> Self {
         Self {
             dir_mode: SessionDirMode::Explicit(session_dir),
+        }
+    }
+    /// Replay-checkpoint maintenance for `updates.jsonl`.
+    ///
+    /// A process-local counter of bytes appended since the last refresh; every
+    /// [`replay_checkpoint::TRIGGER_BYTES`] we re-map the file, catch-up-feed
+    /// the (validated) previous checkpoint and atomically rewrite it. The
+    /// counter is per-path (multiple sessions share one adapter) but
+    /// best-effort: a failed refresh is logged and retried at the next append
+    /// (the checkpoint is only an accelerator — the next replay falls back to
+    /// the full scan), and two live agents writing the same session is not a
+    /// supported topology — the last rename wins, and any published
+    /// checkpoint is a valid prefix snapshot.
+    fn maybe_refresh_replay_checkpoint(&self, updates_path: &Path, appended: u64) {
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+        static SINCE_REFRESH: OnceLock<Mutex<HashMap<PathBuf, u64>>> = OnceLock::new();
+        let counters = SINCE_REFRESH.get_or_init(|| Mutex::new(HashMap::new()));
+        let trigger = {
+            let Ok(mut guard) = counters.lock() else {
+                return; // poisoned — skip checkpoint maintenance entirely
+            };
+            let counter = guard.entry(updates_path.to_path_buf()).or_insert(0);
+            *counter += appended;
+            *counter >= replay_checkpoint::TRIGGER_BYTES
+        };
+        if !trigger {
+            return;
+        }
+        // Reset only on success; a failed refresh retries at the next append
+        // (which is fine — it's the same work).
+        match replay_checkpoint::refresh_checkpoint(updates_path) {
+            Ok(()) => {
+                if let Ok(mut guard) = counters.lock() {
+                    guard.insert(updates_path.to_path_buf(), 0);
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    error = %error, path = %updates_path.display(),
+                    "replay checkpoint refresh failed (non-fatal; next replay full-scans)"
+                );
+            }
         }
     }
     /// Load chat history from a specific directory.
@@ -302,17 +348,20 @@ impl JsonlStorageAdapter {
         Ok(items)
     }
     /// Append a session update to the updates.jsonl file, wrapping it in an envelope with timestamp.
+    /// Returns the byte length of the appended line (envelope + `\n`).
     async fn append_update_to_file(
         &self,
         path: PathBuf,
         update: &super::SessionUpdate,
-    ) -> io::Result<()> {
+    ) -> io::Result<u64> {
         let envelope = SessionUpdateEnvelope::from_update(update)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         let mut line = serde_json::to_vec(&envelope)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         line.push(b'\n');
-        self.append_jsonl_line(path, line).await
+        let len = line.len() as u64;
+        self.append_jsonl_line(path, line).await?;
+        Ok(len)
     }
     /// Read session updates from an updates.jsonl file, handling both envelope and legacy formats.
     ///
@@ -978,8 +1027,12 @@ impl StorageAdapter for JsonlStorageAdapter {
         .await
     }
     async fn append_update(&self, info: &Info, update: &super::SessionUpdate) -> io::Result<()> {
-        self.append_update_to_file(self.updates_file(info), update)
-            .await?;
+        let updates_path = self.updates_file(info);
+        let appended = self.append_update_to_file(updates_path.clone(), update).await?;
+        // Replay-checkpoint maintenance: count bytes appended since the last
+        // refresh and rewrite the checkpoint every TRIGGER_BYTES. Never fails
+        // the append (see the method doc).
+        self.maybe_refresh_replay_checkpoint(&updates_path, appended);
         self.apply_summary_patch(
             info,
             super::summary_write::SummaryPatch {
