@@ -1469,7 +1469,17 @@ impl MvpAgent {
         let view = match crate::session::storage::jsonl_mmap::JsonlMmapView::open(&updates_path)
         {
             Ok(Some(v)) => v,
-            _ => return Ok((0, 0, Vec::new())),
+            Ok(None) => return Ok((0, 0, Vec::new())),
+            Err(e) => {
+                // Legacy read_to_string also returned empty on IO error; keep
+                // the same lenient semantics but leave a trace for debugging
+                // (permission / sharing violation / mapping failure).
+                tracing::warn!(
+                    error = % e, path = % updates_path.display(),
+                    "replay: failed to map updates.jsonl; replaying nothing"
+                );
+                return Ok((0, 0, Vec::new()));
+            }
         };
         let raw_contents = match view.as_str() {
             Some(s) if !s.is_empty() => s,

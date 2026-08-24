@@ -44,16 +44,25 @@ impl JsonlMmapView {
             return Ok(None);
         }
         let file = open_shared_read(path)?;
-        let frozen_len = file.metadata()?.len();
         // SAFETY: append-only contract (defensive-patterns §3.1) — nothing
-        // mutates the mapped prefix; appends only extend past `frozen_len`.
+        // mutates the mapped prefix; appends only extend past the mapped end.
         let mmap = unsafe { Mmap::map(&file)? };
+        // Take the length FROM the map, not from a separate metadata() call:
+        // an append racing between two stats would make the map longer than
+        // frozen_len, and replay's delta path would re-send events after
+        // frozen_len. mmap.len() is exactly the mapped window.
+        let frozen_len = mmap.len() as u64;
         Ok(Some(Self { mmap, frozen_len }))
     }
 
-    /// Byte length of the frozen prefix (== file length at map time).
+    /// Byte length of the frozen prefix (== mapped window length).
     pub(crate) fn frozen_len(&self) -> u64 {
         self.frozen_len
+    }
+
+    /// The mapped bytes (the frozen prefix itself).
+    pub(crate) fn bytes(&self) -> &[u8] {
+        self.mmap.as_ref()
     }
 
     /// The mapped bytes as a `&str`, if the file is valid UTF-8.
@@ -63,7 +72,7 @@ impl JsonlMmapView {
     /// tolerance (invalid bytes on one line must not hide the rest) should
     /// use [`lines`] instead, which skips undecodable lines individually.
     pub(crate) fn as_str(&self) -> Option<&str> {
-        std::str::from_utf8(self.mmap.as_ref()).ok()
+        std::str::from_utf8(self.bytes()).ok()
     }
 
     /// Lines of the frozen prefix, skipping empty/whitespace-only lines and
@@ -75,7 +84,7 @@ impl JsonlMmapView {
     /// contents — the previous `read_to_string` path copied the whole file
     /// into the heap first.
     pub(crate) fn lines(&self) -> Vec<&str> {
-        let bytes = self.mmap.as_ref();
+        let bytes = self.bytes();
         let mut lines = Vec::new();
         let mut start = 0usize;
         for (i, &b) in bytes.iter().enumerate() {
@@ -90,20 +99,23 @@ impl JsonlMmapView {
     }
 }
 
-/// Open a file for read while allowing concurrent writers to keep appending.
+/// Open a file for read while concurrent writers keep appending and other
+/// handles may delete/rename it.
 ///
-/// `File::open` on Windows opens with share-read only; a live session's
-/// persistence actor holds the file open for append, which would make the
-/// plain open fail with a sharing violation. Unix has no equivalent lock.
+/// `std::fs::File::open` on Windows uses FILE_SHARE_READ | WRITE | DELETE by
+/// default; we state all three explicitly so the mapping never blocks a
+/// concurrent `delete_session` (`remove_dir_all`) for the seconds the map is
+/// held during replay. Unix has no equivalent lock.
 fn open_shared_read(path: &Path) -> io::Result<File> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
         const FILE_SHARE_READ: u32 = 0x1;
         const FILE_SHARE_WRITE: u32 = 0x2;
+        const FILE_SHARE_DELETE: u32 = 0x4;
         std::fs::OpenOptions::new()
             .read(true)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
             .open(path)
     }
     #[cfg(not(windows))]
@@ -149,8 +161,11 @@ mod tests {
         let view = JsonlMmapView::open(&path).unwrap().unwrap();
         let lines = view.lines();
         assert_eq!(lines, vec!["{\"a\":1}", "{\"a\":2}", "{\"a\":3}"]);
-        // `{"a":1}\n{"a":2}\n\n{"a":3}\n` = 7+1+7+1+1+7+1 = 25 bytes.
+        // `{"a":1}\n{"a":2}\n\n{"a":3}\n` = 7+1+7+1+1+7+1 = 25 bytes; the
+        // frozen length must equal the mapped window exactly (P1 audit fix:
+        // taken from mmap.len(), not a second stat that can race appends).
         assert_eq!(view.frozen_len(), 25);
+        assert_eq!(view.frozen_len() as usize, view.bytes().len());
     }
 
     #[test]

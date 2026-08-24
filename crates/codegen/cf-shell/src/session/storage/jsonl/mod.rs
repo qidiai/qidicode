@@ -328,24 +328,58 @@ impl JsonlStorageAdapter {
         // Memory-mapped read (append-only file, defensive-patterns §3.1):
         // updates.jsonl can grow to hundreds of MB; mapping it avoids the
         // whole-file heap copy on fork/load. Torn trailing lines are handled
-        // per-line below exactly as before.
-        let view = match crate::session::storage::jsonl_mmap::JsonlMmapView::open(&path)? {
-            Some(v) => v,
-            None => return Ok(Vec::new()),
-        };
+        // per-line below exactly as before. Mapping can fail on some network
+        // filesystems (CreateFileMappingW over SMB), so fall back to the
+        // legacy full read instead of hard-failing session load / fork copy.
         let mut skipped_lines: usize = 0;
         let mut updates = Vec::new();
-        for line in view.lines() {
-            let parsed = SessionUpdateEnvelope::from_str(line).map_err(|e| e.to_string());
-            match parsed {
-                Ok(update) => updates.push(update),
+        // Returns the number of lines skipped in this call; accumulates into
+        // `updates` / logs the first parse failure.
+        fn parse_line(
+            line: &str,
+            path: &Path,
+            updates: &mut Vec<super::SessionUpdate>,
+            skipped_before: usize,
+        ) -> usize {
+            match SessionUpdateEnvelope::from_str(line) {
+                Ok(update) => {
+                    updates.push(update);
+                    skipped_before
+                }
                 Err(error) => {
-                    skipped_lines += 1;
-                    if skipped_lines == 1 {
+                    if skipped_before == 0 {
                         tracing::warn!(
                             error = % error, path = % path.display(),
                             "skipping unparseable updates.jsonl line (torn append?)"
                         );
+                    }
+                    skipped_before + 1
+                }
+            }
+        }
+        match crate::session::storage::jsonl_mmap::JsonlMmapView::open(&path) {
+            Ok(Some(view)) => {
+                for line in view.lines() {
+                    skipped_lines = parse_line(line, &path, &mut updates, skipped_lines);
+                }
+            }
+            Ok(None) => return Ok(Vec::new()),
+            Err(e) => {
+                tracing::warn!(
+                    error = % e, path = % path.display(),
+                    "updates.jsonl mmap failed; falling back to full read"
+                );
+                let contents = std::fs::read(&path)?;
+                for line in contents.split(|b| *b == b'\n') {
+                    let line = line.trim_ascii();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    match std::str::from_utf8(line) {
+                        Ok(s) => {
+                            skipped_lines = parse_line(s, &path, &mut updates, skipped_lines);
+                        }
+                        Err(_) => skipped_lines += 1,
                     }
                 }
             }

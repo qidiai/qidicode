@@ -7689,7 +7689,7 @@ Additional requirements / notices:
   Upstream license expression: Unlicense OR MIT. For this distribution, obligations are satisfied under: MIT.
 
 --------------------------------------------------------------------------------
-memmap2 0.9.10
+memmap2 0.9.11
 --------------------------------------------------------------------------------
 Source:  https://github.com/RazrFalcon/memmap2-rs
 License: MIT  (upstream declares: MIT OR Apache-2.0)
