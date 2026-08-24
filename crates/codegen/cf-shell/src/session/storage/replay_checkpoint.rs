@@ -476,6 +476,8 @@ pub(crate) fn refresh_checkpoint(updates_path: &Path) -> io::Result<()> {
 /// Seed a checkpoint for a session that has none (legacy sessions predating
 /// this feature): one incremental pass over the already-mapped contents, then
 /// write. Called after a full replay so the *next* resume skips the scan.
+/// Test/bench only: production seeding goes through [`refresh_checkpoint`].
+#[cfg(test)]
 pub(crate) fn seed_checkpoint(updates_path: &Path, contents: &str) -> io::Result<()> {
     let mut state = IncrementalReplayState::new();
     state.feed(contents);

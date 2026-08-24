@@ -17,7 +17,6 @@ fn full_scan_vs_checkpoint_on_real_file() {
         .expect("map")
         .expect("exists");
     let contents = view.as_str().expect("utf8");
-    let updates_path = std::path::Path::new(TARGET);
 
     // 1. Full scan (cold, no checkpoint).
     let t0 = std::time::Instant::now();
