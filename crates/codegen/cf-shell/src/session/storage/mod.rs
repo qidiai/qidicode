@@ -16,6 +16,7 @@ use cf_sampling_types::ReasoningEffort;
 use cf_workspace::session::file_state::RewindPoint;
 
 pub mod jsonl;
+pub(crate) mod jsonl_mmap;
 pub(crate) mod reducer;
 pub mod search;
 pub mod search_fts;

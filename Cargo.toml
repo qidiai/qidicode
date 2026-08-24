@@ -167,6 +167,7 @@ linkify = "0.10"
 lipsum = "0.9"
 log = { version = "0.4", features = ["kv", "kv_unstable"] }
 md5 = "0.8"
+memmap2 = "0.9"
 dagre_rust = { path = "third_party/dagre_rust" }
 graphlib_rust = { path = "third_party/graphlib_rust" }
 mermaid-to-svg = { path = "third_party/mermaid-to-svg" }

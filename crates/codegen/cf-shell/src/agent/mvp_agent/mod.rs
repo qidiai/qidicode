@@ -1461,11 +1461,31 @@ impl MvpAgent {
             return Ok((0, 0, Vec::new()));
         };
         let file_size = std::fs::metadata(&updates_path).map(|m| m.len()).unwrap_or(0);
-        let raw_contents = match std::fs::read_to_string(&updates_path) {
-            Ok(s) if !s.is_empty() => s,
+        // Memory-mapped read: updates.jsonl is append-only (defensive-patterns
+        // §3.1) and can grow to hundreds of MB; mapping it avoids copying the
+        // whole log into the heap before line filtering. The map is a frozen
+        // prefix — concurrent appends past `frozen_len` are invisible, which
+        // matches the previous `read_to_string` snapshot semantics.
+        let view = match crate::session::storage::jsonl_mmap::JsonlMmapView::open(&updates_path)
+        {
+            Ok(Some(v)) => v,
             _ => return Ok((0, 0, Vec::new())),
         };
-        let end_offset = raw_contents.len() as u64;
+        let raw_contents = match view.as_str() {
+            Some(s) if !s.is_empty() => s,
+            Some(_) => return Ok((0, 0, Vec::new())),
+            None => {
+                // Invalid UTF-8: the previous read_to_string path also failed
+                // here and replayed nothing. Torn-line corruption is handled
+                // per-line by prepare_replay_lines, which never sees it.
+                tracing::warn!(
+                    path = % updates_path.display(),
+                    "replay: updates.jsonl is not valid UTF-8; skipping replay"
+                );
+                return Ok((0, 0, Vec::new()));
+            }
+        };
+        let end_offset = view.frozen_len();
         let mut prepared = {
             let _timer = crate::instrumentation_timer!("session.replay.read_and_filter");
             crate::session::storage::prepare_replay_lines(&raw_contents, cursor)
@@ -1601,14 +1621,13 @@ impl MvpAgent {
         let Some(updates_path) = updates_file_path else {
             return Vec::new();
         };
-        let contents = match std::fs::read_to_string(updates_path) {
-            Ok(c) => c,
-            Err(_) => return Vec::new(),
+        // Memory-mapped read (append-only file): avoids the whole-log heap
+        // copy on every session resume. Lines are slices into the mapping.
+        let view = match crate::session::storage::jsonl_mmap::JsonlMmapView::open(updates_path) {
+            Ok(Some(v)) => v,
+            _ => return Vec::new(),
         };
-        let all_lines: Vec<&str> = contents
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .collect();
+        let all_lines: Vec<&str> = view.lines();
         let live_lines = crate::session::storage::filter_rewind_lines(all_lines);
         let mut pending = std::collections::HashMap::<String, OrphanedTask>::new();
         for line in live_lines {

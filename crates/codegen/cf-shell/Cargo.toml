@@ -46,6 +46,7 @@ futures = { workspace = true }
 glob = { workspace = true }
 globset = { workspace = true }
 kanal = "0.1"
+memmap2 = { workspace = true }
 regex = { workspace = true }
 # rmcp 2.1 + reqwest 0.13 are quarantined inside `cf-mcp`. The remaining
 # MCP code in this crate (extensions/mcp.rs, mcp_doctor.rs) reaches rmcp model
