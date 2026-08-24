@@ -325,20 +325,18 @@ impl JsonlStorageAdapter {
     /// (session load, fork copy). The live replay path is already lenient;
     /// this keeps the fork path from bricking on the same corruption.
     fn read_updates_jsonl(&self, path: PathBuf) -> io::Result<Vec<super::SessionUpdate>> {
-        if !path.exists() {
-            return Ok(Vec::new());
-        }
-        let contents = std::fs::read(&path)?;
+        // Memory-mapped read (append-only file, defensive-patterns §3.1):
+        // updates.jsonl can grow to hundreds of MB; mapping it avoids the
+        // whole-file heap copy on fork/load. Torn trailing lines are handled
+        // per-line below exactly as before.
+        let view = match crate::session::storage::jsonl_mmap::JsonlMmapView::open(&path)? {
+            Some(v) => v,
+            None => return Ok(Vec::new()),
+        };
         let mut skipped_lines: usize = 0;
         let mut updates = Vec::new();
-        for line in contents.split(|b| *b == b'\n') {
-            let line = line.trim_ascii();
-            if line.is_empty() {
-                continue;
-            }
-            let parsed = std::str::from_utf8(line)
-                .map_err(|e| e.to_string())
-                .and_then(|s| SessionUpdateEnvelope::from_str(s).map_err(|e| e.to_string()));
+        for line in view.lines() {
+            let parsed = SessionUpdateEnvelope::from_str(line).map_err(|e| e.to_string());
             match parsed {
                 Ok(update) => updates.push(update),
                 Err(error) => {
