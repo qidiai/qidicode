@@ -184,7 +184,17 @@ pub(crate) mod hydrate {
             }
         }
 
-        w.flush().map_err(|e| io_err(&path, e))
+        w.flush().map_err(|e| io_err(&path, e))?;
+
+        // The pull rewrote updates.jsonl from scratch, so any checkpoint from
+        // a previous hydration of this session is stale: its offsets (and the
+        // prefix hash they certify) no longer describe this file. Remove it so
+        // the next replay falls back to a full scan instead of trusting
+        // offsets that happen to validate against different content.
+        let _ = std::fs::remove_file(
+            crate::session::storage::replay_checkpoint::checkpoint_path(&path),
+        );
+        Ok(())
     }
 
     /// Rebuild `chat_history.jsonl` from `updates.jsonl` so pulled sessions are continuable.
