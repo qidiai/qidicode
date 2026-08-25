@@ -83,6 +83,13 @@ fn full_scan_vs_checkpoint_on_real_file() {
     let t0 = std::time::Instant::now();
     replay_checkpoint::refresh_checkpoint(&copy).unwrap();
     eprintln!("refresh_checkpoint: {:>9.1?}", t0.elapsed());
+    if let Ok(meta) = std::fs::metadata(dir.join("updates_checkpoint.json")) {
+        eprintln!(
+            "checkpoint size:   {:>9.1?} KiB ({:.3}% of log)",
+            meta.len() as f64 / 1024.0,
+            meta.len() as f64 * 100.0 / contents.len() as f64
+        );
+    }
     let loaded = replay_checkpoint::load_validated_checkpoint(&copy, contents).expect("valid");
     let prepared2 = build_prepared_replay(contents, None, &loaded);
     assert_eq!(prepared2.lines, full.lines);
