@@ -5076,6 +5076,18 @@ pub fn resolve_web_search_sampling_config(
     client_version: Option<String>,
     endpoints: &EndpointsConfig,
 ) -> Option<SamplerConfig> {
+    // "native" selects the built-in scraping engine before any model lookup:
+    // the sentinel is reserved and never resolves to a `[model.native]`
+    // table. Marker config: spawn.rs turns it into WebSearchConfig::Native.
+    if model_id == cf_tools::implementations::web_search::NATIVE_MODEL_ID {
+        return Some(SamplerConfig {
+            // Empty-string key satisfies the "resolved config has an API key"
+            // guard in spawn.rs; the native engine never sends it anywhere.
+            api_key: Some(String::new()),
+            model: model_id.to_owned(),
+            ..SamplerConfig::default()
+        });
+    }
     let resolved = if let Some(entry) = find_model_by_id(models, model_id).cloned() {
         let credentials = resolve_credentials_enforced(&entry, session_key, disable_api_key_auth);
         Some(sampling_config_for_model(

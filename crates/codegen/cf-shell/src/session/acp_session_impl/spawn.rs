@@ -370,7 +370,11 @@ pub(crate) async fn spawn_session_actor(
     let web_search_config = if disable_web_search {
         cf_tools::implementations::WebSearchConfig::Disabled
     } else if let Some(cfg) = web_search_sampling_config {
-        if let Some(api_key) = cfg.api_key {
+        if cfg.model == cf_tools::implementations::web_search::NATIVE_MODEL_ID {
+            // Marker config from resolve_web_search_sampling_config: use the
+            // built-in scraping engine (no key, no Responses API).
+            cf_tools::implementations::WebSearchConfig::Native
+        } else if let Some(api_key) = cfg.api_key {
             cf_tools::implementations::WebSearchConfig::Enabled {
                 api_key,
                 base_url: cfg.base_url,
