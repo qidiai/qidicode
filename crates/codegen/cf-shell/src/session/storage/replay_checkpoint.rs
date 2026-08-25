@@ -185,14 +185,17 @@ impl IncrementalReplayState {
     /// live lines that may live anywhere in the prefix, and the counters are
     /// re-derived over the survivors by slicing them back out of `contents`.
     pub(crate) fn feed(&mut self, contents: &str) {
-        if self.offset as usize > contents.len() {
-            // The file shrank or was replaced under us (shouldn't happen for
-            // an append-only log). Rebuild from scratch rather than feed a
-            // misaligned tail.
+        if self.offset as usize > contents.len() || !contents.is_char_boundary(self.offset as usize)
+        {
+            // The file shrank / was replaced under us (shouldn't happen for
+            // an append-only log), or the checkpoint offset is corrupt and
+            // lands inside a multi-byte character (validate normally rejects
+            // this; defensive belt for callers feeding a raw checkpoint).
+            // Rebuild from scratch rather than slice a misaligned tail.
             tracing::warn!(
                 checkpoint_offset = self.offset,
                 file_len = contents.len(),
-                "replay checkpoint: file shorter than checkpoint offset; rescanning"
+                "replay checkpoint: offset unusable against file; rescanning"
             );
             *self = Self::new();
         }
@@ -400,12 +403,38 @@ pub(crate) fn checkpoint_path(updates_path: &Path) -> PathBuf {
 /// Structural + prefix-integrity validation against the mapped contents.
 /// Rejecting here simply falls back to a full scan.
 pub(crate) fn validate(cp: &UpdatesCheckpoint, contents: &str) -> bool {
+    // Line-start check: the offset must be a valid line boundary. This is
+    // what a healthy writer always produces (feed advances over whole lines),
+    // but a mid-line offset can appear two ways:
+    //  1. a single-bit flip in this sidecar JSON turning one digit into
+    //     another — landing the offset inside a multi-byte UTF-8 character
+    //     would later panic `feed`'s slicing (`str` slicing panics on
+    //     non-char-boundary);
+    //  2. a checkpoint written while an append was mid-flight (the seeder's
+    //     mmap froze a torn last line); accepting it would freeze that half
+    //     line into every future checkpoint, misclassifying it forever.
+    // A raw `\n` cannot occur mid-line (JSON escapes it), so both forms below
+    // are true line boundaries — and both place `o` on a char boundary, since
+    // every UTF-8 continuation byte is >= 0x80:
+    //  * `bytes[o-1] == '\n'` — healthy writer: the consumed prefix ends with
+    //    `\n`, the next line starts at `o`;
+    //  * `bytes[o] == '\n'` — crash-torn tail: feed consumed a last line whose
+    //    `\n` hadn't landed yet, and the healing append writes `\n` at exactly
+    //    this offset (empty remainder line).
+    let bytes = contents.as_bytes();
+    let offset = cp.offset as usize;
+    let is_line_start = |o: usize| {
+        o == 0 || o >= bytes.len() || bytes[o - 1] == b'\n' || bytes[o] == b'\n'
+    };
     cp.version == CHECKPOINT_VERSION
         && cp.offset <= contents.len() as u64
+        && is_line_start(offset)
         && cp.live_offsets.len() == cp.acu_flags.len()
         && cp.acu_flags.iter().all(|&f| f <= 1)
-        // Live lines start strictly inside the consumed prefix.
+        // Live lines start strictly inside the consumed prefix…
         && cp.live_offsets.iter().all(|&o| o < cp.offset)
+        // …at actual line boundaries (same bit-flip / torn-write concern).
+        && cp.live_offsets.iter().all(|&o| is_line_start(o as usize))
         && cp.live_offsets.windows(2).all(|w| w[0] < w[1])
         && cp.prompt_starts.iter().all(|&p| p <= cp.live_offsets.len())
         && cp.prefix_hash == prefix_hash(contents, cp.offset as usize)
@@ -488,10 +517,17 @@ pub(crate) fn seed_checkpoint(updates_path: &Path, contents: &str) -> io::Result
 
 /// The line starting at byte `offset` in `contents` (up to the next `\n` or
 /// EOF). Offsets come from a validated checkpoint, so they land on line
-/// starts; the `min` clamp is pure paranoia against a corrupted file.
+/// starts; the clamps are paranoia against a corrupted file — a bad offset
+/// yields an empty slice instead of panicking on a non-char-boundary index.
 fn line_at<'a>(contents: &'a str, offset: u64) -> &'a str {
     let start = (offset as usize).min(contents.len());
-    let rest = &contents[start..];
+    // Snap forward to a char boundary (corrupted offset inside a multi-byte
+    // character); `contents` itself is valid UTF-8 so this always terminates.
+    let mut start = start;
+    while start < contents.len() && !contents.is_char_boundary(start) {
+        start += 1;
+    }
+    let rest = contents.get(start..).unwrap_or("");
     match rest.find('\n') {
         Some(rel) => &rest[..rel],
         None => rest,

@@ -66,11 +66,15 @@ impl JsonlStorageAdapter {
     /// [`replay_checkpoint::TRIGGER_BYTES`] we re-map the file, catch-up-feed
     /// the (validated) previous checkpoint and atomically rewrite it. The
     /// counter is per-path (multiple sessions share one adapter) but
-    /// best-effort: a failed refresh is logged and retried at the next append
-    /// (the checkpoint is only an accelerator — the next replay falls back to
-    /// the full scan), and two live agents writing the same session is not a
-    /// supported topology — the last rename wins, and any published
+    /// best-effort: a failed refresh is logged and retried once the counter
+    /// re-fills (see below), and two live agents writing the same session is
+    /// not a supported topology — the last rename wins, and any published
     /// checkpoint is a valid prefix snapshot.
+    ///
+    /// The refresh runs on a blocking thread: it mmaps + re-reads the file,
+    /// and with no valid checkpoint on disk that is a *full scan* of a
+    /// potentially huge log (tens of seconds on a legacy session) — far too
+    /// long to run inline on a tokio worker inside `append_update`.
     fn maybe_refresh_replay_checkpoint(&self, updates_path: &Path, appended: u64) {
         use std::collections::HashMap;
         use std::sync::{Mutex, OnceLock};
@@ -87,21 +91,23 @@ impl JsonlStorageAdapter {
         if !trigger {
             return;
         }
-        // Reset only on success; a failed refresh retries at the next append
-        // (which is fine — it's the same work).
-        match replay_checkpoint::refresh_checkpoint(updates_path) {
-            Ok(()) => {
-                if let Ok(mut guard) = counters.lock() {
-                    guard.insert(updates_path.to_path_buf(), 0);
-                }
-            }
-            Err(error) => {
+        // Drain the counter *before* spawning: a persistent failure (e.g.
+        // SMB rename conflicts, disk full) must not re-trigger on every
+        // subsequent append — that would retry an ever-growing full re-scan
+        // per line and flood the log with warns. Draining means the next
+        // attempt waits for another full TRIGGER_BYTES of appends.
+        if let Ok(mut guard) = counters.lock() {
+            guard.insert(updates_path.to_path_buf(), 0);
+        }
+        let path = updates_path.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = replay_checkpoint::refresh_checkpoint(&path) {
                 tracing::warn!(
-                    error = %error, path = %updates_path.display(),
+                    error = %error, path = %path.display(),
                     "replay checkpoint refresh failed (non-fatal; next replay full-scans)"
                 );
             }
-        }
+        });
     }
     /// Load chat history from a specific directory.
     /// Used by fork bootstrap to load the copied parent conversation.
