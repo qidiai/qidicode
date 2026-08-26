@@ -1,7 +1,7 @@
 # WebSearch Shim（qidi web_search 本地搜索代理）
 
 把 qidi.exe 的 `web_search` 工具的「模型调用」偷换为**真实网络搜索 + RAG 注入 + 快模型总结**，
-零搜索 API 成本实现带引用溯源的联网问答。当前版本 **v2.1**（2026-08-26）。
+零搜索 API 成本实现带引用溯源的联网问答。当前版本 **v2.2**（2026-08-27）。
 
 ## 架构
 
@@ -24,6 +24,7 @@ qidi.exe ──POST /v1/responses──▶ shim.py (127.0.0.1:8766, Flask)
 | count 透传 | 读工具定义的 `count`/`max_results`（含 `filters` 内）；`search_context_size` low/med/high → 3/5/8；夹取 1-10 |
 | 引用锚点 | 解析正文 `[n]` 标注，`url_citation` 的 start/end_index 定位到真实偏移；未标注时退化为全量列表 |
 | 查询缓存 | 120s TTL，键为 (query, count)；容量 256 惰性清理 |
+| 日志轮转（v2.2） | RotatingFileHandler 10MB × 5 备份，shim.log 自动截断历史 |
 
 ## 文件
 
@@ -32,7 +33,7 @@ qidi.exe ──POST /v1/responses──▶ shim.py (127.0.0.1:8766, Flask)
 | `shim.py` | 主程序（唯一需要维护的文件） |
 | `shim_v1_backup_20260826.py` | v1 完整备份（回滚用） |
 | `restart_shim.ps1` | 重启脚本：杀旧进程 → WMI 拉新 → 健康验证（基于 $PSScriptRoot，可在任意目录执行） |
-| `shim.log` | 运行时自动生成的全链路请求日志（UTF-8） |
+| `shim.log` | 运行时自动生成的全链路请求日志（UTF-8，10MB × 5 自动轮转） |
 
 > 2026-08-27 迁移：本目录从 `.qidi/tmp/websearch-shim/` 迁至 `.qidi/services/websearch-shim/`（生产位）。
 > 开发期调试脚本（`debug_*.py`、`check_log*.py`）已随 tmp 清理归档至 `_archive/2026-08-27/qidi-tmp/`。
@@ -60,7 +61,6 @@ powershell -ExecutionPolicy Bypass -File .qidi\services\websearch-shim\restart_s
 - 缓存无 single-flight：并发同查询会各自抓取一次（无害，last-write-wins）
 - 搜索注入会丢弃原请求的 `instructions`/`temperature`/`top_p`（v1 起即如此，隔离总结行为）
 - Flask dev server、无鉴权——仅绑定 127.0.0.1，勿暴露到公网
-- `shim.log` 无轮转，需定期手动清理
 - 依赖：Python ≥3.9（`shutdown(cancel_futures=)`）、flask、httpx
 
 ## 排障速查

@@ -23,6 +23,10 @@ v2 变更（2026-08-26）：
   模型未标注时退化为全量引用列表。
 - 120 秒查询缓存：同一 (query,count) 短时间内直接复用抓取结果。
 
+v2.2 变更（2026-08-27）：
+- 日志轮转：RotatingFileHandler（10MB × 5 备份），shim.log 不再无限增长。
+- 迁移至 .qidi/services/websearch-shim/（生产位，随 git 追踪）。
+
 v2.1 变更（2026-08-26 深度审计后）：
 - 竞速循环修复：已有结果且剩余引擎都不比当前更偏好时立即结束，不再空等宽限期。
 - /health 增加 cache_hits / searches 观测字段；版本号 bump 以便日志追溯。
@@ -36,13 +40,14 @@ import logging
 import threading
 import concurrent.futures
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 
 import httpx
 from flask import Flask, request, jsonify, Response
 
 UPSTREAM = "http://127.0.0.1:8765/v1/chat/completions"
 SHIM_MODEL = "deepseek-v4-flash"
-SHIM_VERSION = "2.1"
+SHIM_VERSION = "2.2"
 PORT = 8766
 
 # 竞速宽限期：首个结果到手后，再等更偏好引擎这么久（秒）
@@ -55,7 +60,8 @@ CACHE_TTL = 120
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[logging.FileHandler("shim.log", encoding="utf-8")],
+    handlers=[RotatingFileHandler(
+        "shim.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8")],
 )
 log = logging.getLogger("shim")
 
