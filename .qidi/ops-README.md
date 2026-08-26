@@ -82,6 +82,10 @@ Invoke-RestMethod http://127.0.0.1:8765/v1/embeddings -Method Post -Headers @{Au
   所以怀疑向量检索失效时先看 8800 health。
 - **维度强校验**：请求 `dimensions != 1024` 直接 400，配置错了一眼可见，
   不会静默产出错误向量。
+- **质量评估（08-27）**：S5 在真实记忆库上 hit@1/5=3/5，弱于词法基线（短文本对
+  模型 vs 长文档检索），详见 `.qidi/docs/s5-retrieval-eval.md`；后端可插拔，
+  换 bge-m3 等只需改 server.py 引擎加载，链路零改动。基准：
+  `services/baize-embed/bench_retrieval.py`。
 - **切换笔记本部署**：改中转 `config.json` 的 `embedding_upstream.base_url`
   即可，本目录无需动。FastAPI 模板见 `services/embedding-bridge/`。
 - 日志 `baize_embed.log`（10MB×5 轮转）在服务目录内。
