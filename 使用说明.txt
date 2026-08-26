@@ -1,0 +1,29 @@
+QIDI Code 免编译便携版 (v0.1.220-alpha.4)
+=========================================
+
+一、这是什么
+  这是 QIDI Code 的免编译安装包。程序已经编译好(静态链接,无第三方 DLL 依赖),
+  拷贝到任何 64 位 Windows 电脑即可运行,无需安装 Rust、无需编译。
+
+二、安装步骤(重要:请用启动脚本运行)
+  1. 把 qidicode-portable 整个文件夹解压/拷贝到目标电脑任意位置(如 D:\qidicode)。
+  2. 双击运行「启动qidi.bat」——它会自动把 QIDI_HOME 指向包内的 .qidi 配置目录,
+     然后启动 qidi.exe。
+  ★ 不要直接双击 qidi.exe!程序默认从 ~/.qidi 或 $QIDI_HOME 读取配置,
+    直接运行 exe 会因找不到配置而只有「退出」选项。
+
+三、配置说明
+  - 配置文件位于 .qidi\config.toml,包含各 AI Provider 的 API Key。
+  - 默认模型 agnes-2.5-flash,公网可用,开箱即用。
+  - 若目标电脑装有本机 ai-bridge(127.0.0.1:9800),可切换 glm-5.2 / deepseek-v4-flash-free;
+    没有也不影响公网模型。
+  - 如需修改配置,直接编辑 .qidi\config.toml。
+
+四、运行要求
+  - 64 位 Windows 7 及以上
+  - 如需 git 工具功能,请先安装 Git
+
+五、注意事项
+  - 本包已排除历史会话(sessions)、缓存(downloads)、日志(logs)等运行时数据,
+    首次运行会自动重建。
+  - API Key 属于敏感信息,请勿随意分发此包。

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Git for Windows cannot spawn a bare PowerShell script as a hook.
+# This wrapper invokes the PowerShell implementation via the bundled bash.
+# Note: do NOT pass paths containing ".." to powershell.exe -File (it rejects
+# them), and bash cd cannot handle ".." in C:/-style paths either — so strip
+# the trailing component with pure string manipulation instead.
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"   # .../scripts/hooks
+SCRIPT_DIR="${HOOK_DIR%/*}"                  # .../scripts (strip trailing /hooks)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_DIR/pre-commit.ps1"
+exit $?

@@ -1,0 +1,29 @@
+# ============================================================
+# Whitelist .gitignore — only infra/scripts/docs are tracked.
+# Runtime data, credentials, sessions, binaries stay untracked.
+# ============================================================
+
+# ignore everything at root by default
+/*
+
+# root: launchers & docs
+!.gitignore
+!启动qidi.bat
+!在指定目录启动qidi.bat
+!使用说明.txt
+!README.md
+
+# .qidi: curated subsets only (config.toml with keys is NOT tracked)
+!.qidi/
+.qidi/*
+!.qidi/docs/
+!.qidi/skills/
+!.qidi/bridge/
+!.qidi/services/
+!.qidi/ensure_services.ps1
+!.qidi/ops-README.md
+
+# universal exclusions inside tracked dirs
+*.log
+__pycache__/
+*.pyc
