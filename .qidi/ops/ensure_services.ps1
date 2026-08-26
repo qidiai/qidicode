@@ -4,6 +4,7 @@
 # Services managed:
 #   8765  QiDi Relay (multi-account LAN proxy)  -> G:\程序开发\本地局域网中转-v3
 #   8766  websearch shim (Responses->chat + real web search) -> .qidi\(services|tmp)\websearch-shim
+#   8800  baize-embed (白泽 S5 向量服务, qidi 记忆向量检索) -> .qidi\services\baize-embed
 #
 # WHY WMI SPAWN: processes started via Start-Process from a job-object context
 # (e.g. agent terminal tools) die when the job ends. Win32_Process.Create parents
@@ -76,7 +77,33 @@ if ($shimUp) {
     if ($ok) { Write-Output "  started ok" } else { Write-Output "  START FAILED (no /health after 8s)" }
 }
 
+# ---- 3) baize-embed on 8800 (白泽 S5 向量服务, qidi 记忆向量检索经中转转发) ----
+Write-Output "[8800] baize-embed ..."
+$baizeUp = $false
+try {
+    $h = Invoke-RestMethod "http://127.0.0.1:8800/health" -TimeoutSec 2
+    if ($h.ok) { $baizeUp = $true }
+} catch { }
+
+if ($baizeUp) {
+    Write-Output "  already up"
+} else {
+    $baizeDir = Join-Path $qidiHome "services\baize-embed"
+    Write-Output "  down -> starting in $baizeDir"
+    Spawn-Detached "python server.py" $baizeDir
+    $ok = $false
+    for ($i = 0; $i -lt 24 -and -not $ok; $i++) {   # 模型加载 ~3-5s
+        Start-Sleep -Milliseconds 500
+        try {
+            $h = Invoke-RestMethod "http://127.0.0.1:8800/health" -TimeoutSec 2
+            if ($h.ok) { $ok = $true }
+        } catch { }
+    }
+    if ($ok) { Write-Output "  started ok" } else { Write-Output "  START FAILED (no ok /health after 12s)" }
+}
+
 # ---- summary ----
 $r8765 = if (Test-PortUp 8765) { "UP" } else { "DOWN" }
 $r8766 = if (Test-PortUp 8766) { "UP" } else { "DOWN" }
-Write-Output "RESULT relay(8765)=$r8765 shim(8766)=$r8766"
+$r8800 = if (Test-PortUp 8800) { "UP" } else { "DOWN" }
+Write-Output "RESULT relay(8765)=$r8765 shim(8766)=$r8766 baize(8800)=$r8800"

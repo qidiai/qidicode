@@ -8,13 +8,18 @@
 qidi.exe (本目录)
    │  普通对话：直接走 config.toml 各模型端点
    │  web_search：POST /v1/responses
+   │  记忆向量检索：POST /v1/embeddings（跟默认模型走 8765）
    ▼
 websearch shim ── Flask, 127.0.0.1:8766 ── .qidi/services/websearch-shim/shim.py
    │  检测 tools[].type == "web_search" → 三引擎竞速抓真实搜索结果
    │  结果注入上下文 → 转发为 chat/completions
    ▼
-QiDi Relay ── LiteLLM 多账户中转, 0.0.0.0:8765 ── G:\程序开发\本地局域网中转-v3
+QiDi Relay ── 多账户中转, 0.0.0.0:8765 ── G:\程序开发\本地局域网中转-v3
    │  （注意：在便携包【外】运行，py -3 main.py，多账户轮换 16 个模型）
+   │  /v1/chat/completions → 上游账号池；/v1/embeddings → 转发到 ↓
+   ▼
+baize-embed ── 白泽 S5 自研向量模型, 127.0.0.1:8800 ── .qidi/services/baize-embed/server.py
+   │  1024 维归一化向量（qidi 记忆 hybrid 检索：FTS5 + sqlite-vec）
    ▼
 agnes / chipcloud / deepseek / intern-ai / stepfun 等上游
 ```
@@ -22,6 +27,10 @@ agnes / chipcloud / deepseek / intern-ai / stepfun 等上游
 - **Relay（8765）**：上游中转。进程在外部目录，配置/日志/密钥都在那边。
 - **Shim（8766）**：websearch 代理，`config.toml` 里 `[model.deepseek-v4-flash]`
   的 `base_url` 指向它，`models.web_search = "deepseek-v4-flash"` 完成接线。
+- **Baize（8800）**：白泽 S5 向量服务（自研模型）。qidi 的记忆向量检索跟着
+  **默认模型**走 8765，中转 `/v1/embeddings` 路由转发到本服务；模型权重与
+  成果包源在 `G:\实验测试\模型研究\白泽成果包_20260825`。切笔记本部署只需改
+  中转 config.json 的 `embedding_upstream.base_url`。
 - **启动自愈**：`启动qidi.bat` 每次启动先跑 `ops/ensure_services.ps1`（WMI 拉起，
   进程不随终端 Job Object 陪葬），哪个服务没起就拉哪个。
 
@@ -29,7 +38,7 @@ agnes / chipcloud / deepseek / intern-ai / stepfun 等上游
 
 | 脚本 | 用途 | 用法 |
 |------|------|------|
-| `ensure_services.ps1` | 自愈拉起 8765/8766，两者都已在跑则无操作 | `powershell -ExecutionPolicy Bypass -File .qidi\ops\ensure_services.ps1` |
+| `ensure_services.ps1` | 自愈拉起 8765/8766/8800，全部已在跑则无操作 | `powershell -ExecutionPolicy Bypass -File .qidi\ops\ensure_services.ps1` |
 | `status_check.ps1` | 一页快照：python 进程 / 端口 / shim health / relay 模型数 / shim.log 尾部 | `... -File .qidi\ops\status_check.ps1` |
 | `check_models.ps1` | 探测 config.toml 全部端点（自动去重，密钥运行时读取，脚本内零密钥） | `... -File .qidi\ops\check_models.ps1` |
 | `test_chat_models.ps1` | 逐模型真实对话冒烟（验证能生成，不只是列表） | `... -File .qidi\ops\test_chat_models.ps1 [-Filter glm]` |
@@ -53,6 +62,29 @@ Copy-Item .qidi\services\websearch-shim\shim_v1_backup_20260826.py .qidi\service
 
 版本历史：v1（基础转发+搜索注入）→ v2.1（三引擎竞速/锚点/缓存）→
 **v2.2**（日志轮转 10MB×5；迁入 services/ 生产位）。详见 `services/websearch-shim/README.md`。
+
+## baize-embed 运维（白泽 S5 向量服务）
+
+```powershell
+# 健康（引擎加载状态 + 维度 1024）
+Invoke-RestMethod http://127.0.0.1:8800/health
+
+# 重启（杀 8800 占用 → WMI 拉新 → 等模型加载完，约 10s）
+powershell -ExecutionPolicy Bypass -File .qidi\services\baize-embed\restart_baize.ps1
+
+# 直接冒烟（走中转 8765 全链路，应返回 1024 维向量）
+Invoke-RestMethod http://127.0.0.1:8765/v1/embeddings -Method Post -Headers @{Authorization="Bearer <relay密钥>"} -ContentType 'application/json' -Body '{"model":"baize-s5","input":["测试"]}'
+```
+
+要点：
+- **路由链**：qidi 记忆向量检索跟默认模型走 8765 → relay `/v1/embeddings` →
+  本服务。中间任何一环挂掉，qidi 会**静默回退 FTS5 纯文本检索**（日志才可见），
+  所以怀疑向量检索失效时先看 8800 health。
+- **维度强校验**：请求 `dimensions != 1024` 直接 400，配置错了一眼可见，
+  不会静默产出错误向量。
+- **切换笔记本部署**：改中转 `config.json` 的 `embedding_upstream.base_url`
+  即可，本目录无需动。FastAPI 模板见 `services/embedding-bridge/`。
+- 日志 `baize_embed.log`（10MB×5 轮转）在服务目录内。
 
 ## 日志管理
 

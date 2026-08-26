@@ -27,3 +27,7 @@
 *.log
 __pycache__/
 *.pyc
+
+# model weights (~47MB, source: G:\实验测试\模型研究\白泽成果包_20260825)
+*.pt
+.qidi/services/baize-embed/embedding_model.json
