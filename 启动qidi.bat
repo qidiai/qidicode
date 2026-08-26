@@ -23,6 +23,6 @@ set "XAI_API_KEY=lan-no-key"
 
 rem Local services self-heal: QiDi Relay (8765, upstream) + websearch shim (8766).
 rem WMI-spawned processes survive any launcher context; starts whichever is down.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0.qidi\ensure_services.ps1" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0.qidi\ops\ensure_services.ps1" >nul 2>&1
 
 "%~dp0qidi.exe" %*

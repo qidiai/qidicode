@@ -20,7 +20,7 @@
 !.qidi/skills/
 !.qidi/bridge/
 !.qidi/services/
-!.qidi/ensure_services.ps1
+!.qidi/ops/
 !.qidi/ops-README.md
 
 # universal exclusions inside tracked dirs

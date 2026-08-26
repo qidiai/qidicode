@@ -12,8 +12,9 @@
 # NOTE: this file contains a Chinese path; keep it saved as UTF-8 WITH BOM
 # (re-encode after editing, else PowerShell 5.1 misreads it as GBK).
 
+# This script lives in .qidi/ops/ (moved from .qidi root 2026-08-27).
 $ErrorActionPreference = "Continue"
-$qidiHome = (Resolve-Path $PSScriptRoot).Path            # .qidi (absolute)
+$qidiHome = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path  # .qidi (parent of ops/)
 $root = Split-Path -Parent $qidiHome                     # workspace root
 $relayDir = "G:\程序开发\本地局域网中转-v3"
 
