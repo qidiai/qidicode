@@ -10,6 +10,7 @@ members = [
     "crates/codegen/cf-chat-state",
     "crates/codegen/cf-codebase-graph",
     "crates/codegen/cf-crash-handler",
+    "crates/codegen/cf-dirs",
     "crates/codegen/cf-fast-worktree",
     "crates/codegen/cf-file-utils",
     "crates/codegen/cf-fsnotify",
@@ -284,6 +285,7 @@ cf-http = { path = "crates/codegen/cf-http" }
 cf-markdown = { path = "crates/codegen/cf-markdown" }
 cf-markdown-core = { path = "crates/codegen/cf-markdown-core" }
 cf-mcp = { path = "crates/codegen/cf-mcp" }
+cf-dirs = { path = "crates/codegen/cf-dirs" }
 cf-memory = { path = "crates/codegen/cf-memory" }
 cf-mermaid = { path = "crates/codegen/cf-mermaid" }
 cf-models = { path = "crates/codegen/cf-models" }
