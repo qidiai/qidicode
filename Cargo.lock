@@ -1926,6 +1926,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-dirs"
+version = "0.1.0"
+dependencies = [
+ "dirs 5.0.1",
+ "dunce",
+ "pretty_assertions",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "cf-env"
 version = "0.1.0"
 dependencies = [
