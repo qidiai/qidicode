@@ -133,3 +133,36 @@ bridge 已移除。**config.toml（含全部真实密钥）、sessions、memory�
 | relay 429 | 多账户轮换的临时限流，重试即可；持续 429 去外部 relay 目录查账户状态 |
 | 模型列表对但对话失败 | `test_chat_models.ps1 -Filter <名字>` 定位到具体模型 |
 | .ps1 报"字符串缺少终止符" | 含中文的 ps1 必须存成 UTF-8 **带 BOM**（PS5.1 无 BOM 按 GBK 解析） |
+
+## 归档规则（archive.ps1）
+
+`_archive/` 采用"只进不出"归档制，靠 `ops/archive.ps1` 把归档规则固化，防止归档区无限膨胀。
+默认 **dry-run**（只打印 `[OK] would ...`），加 `-Execute` 才真操作；工作区根由脚本自动定位
+（脚本在 `.qidi/ops/`，根 = 上两级，不依赖 cwd）。
+
+| 模式 | 作用 | 是否写盘 |
+|------|------|----------|
+| `Scan`（默认） | 只读：列根目录可归档项（内置清单 12 文件 + 3 目录）+ 扫 `_archive/` 可再生物（node_modules / __pycache__ / *.pyc / qidi.exe.*），汇总"若执行可回收 MB / 将移动 N 项" | ❌ 只读 |
+| `ArchiveRoot` | 把根目录内置清单项移到 `_archive/<今日yyyy-MM-dd>/`（文件 → `root_docs\`，目录整移） | ✅ 加 -Execute |
+| `Slim` | 只作用于 `_archive/` 内部：删全部 node_modules 整目录、__pycache__ 目录、散落 *.pyc；qidi.exe.* 备份总数>2 时删最老（保留最新 2）。**永不碰根目录与 .qidi** | ✅ 加 -Execute |
+
+规则要点：
+- 根目录内置归档清单硬编码在 `archive.ps1` 顶部数组 `$RootFiles` / `$RootDirs`，要改清单先改脚本。
+- 长路径防御：`_archive/` 内存在 URL 编码超长路径（>260 字符，历史报 DirectoryNotFound），遍历与删除一律 `-LiteralPath`，遇异常打印 WARN 跳过不中断。
+- Slim 明确不删 *.log / *.txt / 其他文件，只清可再生物（可重装 / 可再生的产物）。
+- 本脚本含中文，必须保持 UTF-8 **带 BOM**（PS5.1 无 BOM 按 GBK 解析报"字符串缺少终止符"）。
+
+示例命令：
+
+```powershell
+# 只读体检：看根目录可归档项 + _archive 可回收多少
+powershell -NoProfile -ExecutionPolicy Bypass -File .qidi\ops\archive.ps1
+
+# 归档根目录清单（先 dry-run，确认无误后加 -Execute）
+powershell -NoProfile -ExecutionPolicy Bypass -File .qidi\ops\archive.ps1 -Mode ArchiveRoot
+powershell -NoProfile -ExecutionPolicy Bypass -File .qidi\ops\archive.ps1 -Mode ArchiveRoot -Execute
+
+# 瘦身 _archive（先 dry-run，确认后再加 -Execute）
+powershell -NoProfile -ExecutionPolicy Bypass -File .qidi\ops\archive.ps1 -Mode Slim
+powershell -NoProfile -ExecutionPolicy Bypass -File .qidi\ops\archive.ps1 -Mode Slim -Execute
+```
