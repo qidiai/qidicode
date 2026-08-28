@@ -47,7 +47,7 @@ from flask import Flask, request, jsonify, Response
 
 UPSTREAM = "http://127.0.0.1:8765/v1/chat/completions"
 SHIM_MODEL = "deepseek-v4-flash"
-SHIM_VERSION = "2.2"
+SHIM_VERSION = "2.3"
 PORT = 8766
 
 # 竞速宽限期：首个结果到手后，再等更偏好引擎这么久（秒）
@@ -568,7 +568,7 @@ def v1_responses():
                 lines.append(f"用户问题：{query}")
                 lines.append("请优先引用上面的搜索结果回答：正文中在对应结论处用 [编号] 标注，"
                              "并在末尾列出引用的编号与来源 URL。")
-                messages = [{"role": "user", "content": "\n".join(lines)}]
+                messages = messages + [{"role": "user", "content": "\n".join(lines)}]
                 log.info("注入搜索结果 %d 条 (count=%d)", len(results), count)
             else:
                 log.warning("搜索无结果，退回原样提问")

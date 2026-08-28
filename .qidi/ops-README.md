@@ -166,3 +166,38 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .qidi\ops\archive.ps1 -Mode 
 powershell -NoProfile -ExecutionPolicy Bypass -File .qidi\ops\archive.ps1 -Mode Slim
 powershell -NoProfile -ExecutionPolicy Bypass -File .qidi\ops\archive.ps1 -Mode Slim -Execute
 ```
+
+## 会话尾部截断（session_trim.py）
+
+归档规则（2 天前归档）对活跃工作区永远追不上，`updates.jsonl` / `events.jsonl` /
+`chat_history.jsonl` 单文件可涨到 100MB+。`ops/session_trim.py` 做**尾部截断**止血：
+把超大且久不活跃的 jsonl 只保留尾部 `--keep-lines` 行，丢弃旧头部。
+
+```powershell
+# dry-run（默认）：只打印候选清单，不写盘
+python .qidi\ops\session_trim.py
+
+# 真操作：先全量备份到 _archive\sessions-trim\<相对路径>.<时间戳>.bak，再截断
+python .qidi\ops\session_trim.py --execute
+
+# 调阈值：>50MB 且 3 天未动才动，保留尾部 5000 行
+python .qidi\ops\session_trim.py --execute --max-mb 50 --keep-lines 5000 --idle-days 3
+```
+
+| 参数 | 默认 | 含义 |
+|------|------|------|
+| `--execute` | 关 | 加它才真操作，否则只 dry-run 打印候选 |
+| `--max-mb` | 20 | 文件超过该体积（MB）才候选 |
+| `--keep-lines` | 2000 | 截断后保留的尾部行数 |
+| `--idle-days` | 1 | 文件最后修改早于该天数才候选 |
+
+规则要点：
+- 候选需**同时**满足超 `--max-mb` 且 mtime 早于 `--idle-days`——活跃会话绝不碰。
+- 只扫 `updates.jsonl` / `events.jsonl` / `chat_history.jsonl`，**排除**
+  `compaction_checkpoints` / `rewind_points`（qidi 恢复点，不许碰）。
+- sessions 根由脚本自身位置推导（`.qidi/ops/` → `../sessions/`），不依赖 cwd。
+- 截断前先全量复制到 `_archive\sessions-trim\`（备份区在 `_archive`，只进不出，不删）。
+- 长路径（URL 编码 >260 字符）防御：open/os 先试普通路径，`FileNotFoundError` 再试
+  `\\?\` 前缀；仍失败打 WARN 跳过不中断。尾部读取用 `deque(maxlen=keep_lines)` 逐行，
+  178MB 大文件也不爆内存。
+- 结尾汇总：扫描 N / 候选 M / 截断 K / 备份耗时 / 回收 MB / 跳过 S。
