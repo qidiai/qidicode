@@ -18,9 +18,8 @@
 //!
 //! ## Feature Flag
 //!
-//! Memory is gated behind `--experimental-memory` CLI flag or
-//! `QIDI_MEMORY=1` environment variable. When disabled, this crate
-//! is not initialized by the host.
+//! Memory is enabled through `QIDI_MEMORY`, `[memory] enabled`, or remote settings.
+//! When disabled, this crate is not initialized by the host.
 
 pub mod archive;
 pub mod backend;
@@ -30,6 +29,7 @@ pub mod dream_lock;
 pub mod embedding;
 pub mod index;
 pub mod mmr;
+pub mod observation;
 pub mod query_expansion;
 pub mod schema;
 pub mod search;
@@ -39,6 +39,7 @@ pub mod watcher;
 
 pub use backend::{MemoryBackendImpl, MemoryBackendParams};
 pub use index::{MemoryIndex, init_sqlite_vec};
+pub use observation::*;
 pub use storage::{MemoryScope, MemoryStorage};
 
 /// Embed all chunks that don't have embeddings yet.

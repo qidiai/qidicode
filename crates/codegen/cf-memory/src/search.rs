@@ -21,7 +21,60 @@ use std::collections::HashMap;
 
 use super::embedding::EmbeddingProvider;
 use super::index::MemoryIndex;
+use super::observation::MemoryRetrievalMode;
 use cf_config::xai_grok_config_types::MemorySearchConfig;
+
+/// Resolved query embedding strategy for a hybrid search.
+///
+/// `FtsOnly` when no provider or no vector index; `Hybrid` on a successful
+/// query embed; `EmbeddingFallback` when the embed call failed (search
+/// proceeds FTS-only but the degradation is observable via
+/// [`Self::mode`]).
+pub(super) enum QueryEmbedding {
+    FtsOnly,
+    Hybrid(Vec<f32>),
+    EmbeddingFallback,
+}
+
+impl QueryEmbedding {
+    pub fn embedding(&self) -> Option<&[f32]> {
+        if let Self::Hybrid(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn mode(&self) -> MemoryRetrievalMode {
+        match self {
+            Self::FtsOnly => MemoryRetrievalMode::FtsOnly,
+            Self::Hybrid(_) => MemoryRetrievalMode::Hybrid,
+            Self::EmbeddingFallback => MemoryRetrievalMode::EmbeddingFallback,
+        }
+    }
+}
+
+/// Embed the query (single-item batch). Never fails the search: an embed
+/// error degrades to [`QueryEmbedding::EmbeddingFallback`].
+pub(super) async fn resolve_query_embedding(
+    provider: Option<&dyn EmbeddingProvider>,
+    is_vector_index_available: bool,
+    query: &str,
+) -> QueryEmbedding {
+    let Some(provider) = provider.filter(|_| is_vector_index_available) else {
+        return QueryEmbedding::FtsOnly;
+    };
+    match provider.embed_batch(&[query]).await {
+        Ok(embeddings) => embeddings
+            .into_iter()
+            .next()
+            .map_or(QueryEmbedding::EmbeddingFallback, QueryEmbedding::Hybrid),
+        Err(error) => {
+            tracing::warn!(error = %error, "embedding query failed");
+            QueryEmbedding::EmbeddingFallback
+        }
+    }
+}
 
 /// A search result with merged scoring from FTS and vector search.
 #[derive(Debug, Clone)]
@@ -164,30 +217,21 @@ pub async fn hybrid_search(
             fts_results.push(r);
         }
     }
-    let vec_available = index.vec_available();
 
     // Phase 2 (async): embed query — no &index borrow here
-    let query_embedding = if vec_available {
-        if let Some(provider) = embedding_provider {
-            match provider.embed_batch(&[query]).await {
-                Ok(embeddings) if !embeddings.is_empty() => {
-                    Some(embeddings.into_iter().next().unwrap())
-                }
-                Ok(_) => None,
-                Err(e) => {
-                    tracing::warn!(error = %e, "embedding query failed, falling back to FTS-only");
-                    None
-                }
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let query_embedding =
+        resolve_query_embedding(embedding_provider, index.vec_available(), query).await;
 
     // Phase 3 (sync): vector search + scoring + merge
-    hybrid_search_merge(index, fts_results, query_embedding.as_deref(), config)
+    let results = hybrid_search_merge(index, fts_results, query_embedding.embedding(), config)?;
+    if query_embedding.mode() == MemoryRetrievalMode::EmbeddingFallback {
+        tracing::warn!(
+            target: cf_telemetry::memory_log::TARGET,
+            result_count = results.len(),
+            "hybrid search degraded to FTS-only (query embedding failed)"
+        );
+    }
+    Ok(results)
 }
 
 /// Synchronous merge phase: vector search (if embedding provided), score
