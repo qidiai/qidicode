@@ -1471,1358 +1471,34 @@ impl BtrfsDelegate for RecordingDelegate {
 }
 
 #[cfg(feature = "metadata")]
-pub mod gc {
-    use std::path::{Path, PathBuf};
-    use std::sync::Arc;
+#[path = "api/gc.rs"]
+pub mod gc;
 
-    use anyhow::Result;
+/// Serializes tests that mutate the process-global CWD (see `cwd_test_guard`).
+#[cfg(all(test, feature = "metadata"))]
+pub(crate) static CWD_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    use crate::BtrfsDelegate;
-    use crate::db::{ListFilter, WorktreeDb, WorktreeStatus};
-    use serde::{Deserialize, Serialize};
+/// Take the CWD test lock: tests that chdir (e.g. process-cwd scans) serialize
+/// so they don't observe each other's working directories.
+#[cfg(all(test, feature = "metadata"))]
+pub(crate) fn cwd_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    CWD_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
-    #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-    pub struct GcOptions {
-        pub max_age_secs: Option<i64>,
-        pub force: bool,
-        pub dry_run: bool,
-    }
+/// Restores the CWD on drop.
+#[cfg(all(test, feature = "metadata"))]
+pub(crate) struct CwdGuard(pub PathBuf);
 
-    #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-    pub struct GcReport {
-        pub dead_removed: u64,
-        pub expired_removed: u64,
-        pub skipped_alive: u64,
-        /// Expired worktrees whose on-disk removal failed (e.g. EPERM); the
-        /// record stays tracked for a later retry. serde(default) so reports
-        /// from agents predating this field still deserialize.
-        #[serde(default)]
-        pub remove_failed: u64,
-        // TODO(v2): untracked_found, untracked_registered (via rebuild_worktree_db),
-        // stale_registrations_cleaned (stale .git/worktrees/ cleanup)
-    }
-
-    /// Decode a `kill(pid, 0)` outcome into liveness. `ret == 0` ⇒ the process
-    /// exists. Otherwise: `ESRCH` ⇒ no such process (dead); anything else
-    /// (notably `EPERM`/`EACCES` — exists but owned by another user) ⇒ alive.
-    /// `kill -0`'s exit status can't distinguish `EPERM` from `ESRCH` and wrongly
-    /// reports `EPERM` as dead; split out so this is unit-testable.
-    #[cfg(target_os = "linux")]
-    fn pid_alive_from_kill(ret: i32, errno: i32) -> bool {
-        ret == 0 || errno != libc::ESRCH
-    }
-
-    fn is_pid_alive(pid: u32) -> bool {
-        #[cfg(target_os = "linux")]
-        {
-            // pid 0 targets the caller's process group and pid > i32::MAX wraps to
-            // a negative pid_t (also a process group); neither is a real tracked
-            // pid (creator_pid is always our own process id), so treat as dead.
-            if pid == 0 || pid > i32::MAX as u32 {
-                return false;
-            }
-            // A null signal (sig 0) runs the kernel's existence/permission check
-            // without delivering a signal.
-            let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            pid_alive_from_kill(ret, errno)
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            // No libc dependency off Linux; fall back to `kill -0` exit status.
-            let mut cmd = std::process::Command::new("kill");
-            cf_tty_utils::detach_std_command(&mut cmd);
-            cmd.stdin(std::process::Stdio::null());
-            cmd.args(["-0", &pid.to_string()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .is_ok_and(|s| s.success())
-        }
-    }
-
-    /// Physical CWDs of every readable running process, via the Linux `/proc`
-    /// scan. Empty on non-Linux — the creator-PID guard still applies.
-    /// Dep-free on purpose (avoids re-adding a process-listing crate just for
-    /// this guard).
-    #[cfg(target_os = "linux")]
-    fn live_process_cwds() -> Vec<PathBuf> {
-        let Ok(entries) = std::fs::read_dir("/proc") else {
-            return Vec::new();
-        };
-        entries
-            .filter_map(Result::ok)
-            // Only numeric `/proc/<pid>` entries expose a `cwd` symlink.
-            .filter(|e| {
-                e.file_name()
-                    .to_str()
-                    .is_some_and(|n| n.parse::<u32>().is_ok())
-            })
-            // An unreadable link (process exited / not permitted) means nothing
-            // is parked there, so drop it.
-            .filter_map(|e| std::fs::read_link(e.path().join("cwd")).ok())
-            .collect()
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn live_process_cwds() -> Vec<PathBuf> {
-        Vec::new()
-    }
-
-    /// True if any `live_cwds` entry sits inside `wt_path`. Kernel CWD links are
-    /// physical paths, so also match the canonicalized worktree path — a
-    /// symlinked `$QIDI_HOME` or custom worktree path would otherwise never match.
-    fn cwd_within(wt_path: &Path, live_cwds: &[PathBuf]) -> bool {
-        let wt_canon = dunce::canonicalize(wt_path).unwrap_or_else(|_| wt_path.to_path_buf());
-        live_cwds
-            .iter()
-            .any(|cwd| cwd.starts_with(wt_path) || cwd.starts_with(&wt_canon))
-    }
-
-    /// Effective freshness timestamp: the more recent of creation and last
-    /// access (last_accessed_at is never read as older than created_at).
-    fn last_active(rec: &crate::db::WorktreeRecord) -> i64 {
-        rec.last_accessed_at
-            .unwrap_or(rec.created_at)
-            .max(rec.created_at)
-    }
-
-    /// Guarded — must not be reclaimed — when the creator process is still
-    /// running or any live process has its CWD inside the tree.
-    fn is_guarded(rec: &crate::db::WorktreeRecord, live_cwds: &[PathBuf]) -> bool {
-        rec.creator_pid.is_some_and(is_pid_alive) || cwd_within(Path::new(&rec.path), live_cwds)
-    }
-
-    /// Reclaimable only when expired (older than `cutoff` by [`last_active`]) and
-    /// unguarded. Used for the per-candidate re-check against a freshly-read row.
-    fn is_reclaimable(rec: &crate::db::WorktreeRecord, cutoff: i64, live_cwds: &[PathBuf]) -> bool {
-        last_active(rec) < cutoff && !is_guarded(rec, live_cwds)
-    }
-
-    pub fn gc_worktrees(db: &WorktreeDb, opts: &GcOptions) -> Result<GcReport> {
-        gc_worktrees_with_delegate(db, opts, None)
-    }
-
-    /// Like [`gc_worktrees`], but uses `delegate` to reclaim btrfs snapshots in
-    /// the expired path so rootless hosts (no `CAP_SYS_ADMIN`) can delete
-    /// snapshots via a privileged helper instead of leaking them on EPERM.
-    pub fn gc_worktrees_with_delegate(
-        db: &WorktreeDb,
-        opts: &GcOptions,
-        delegate: Option<Arc<dyn BtrfsDelegate>>,
-    ) -> Result<GcReport> {
-        let mut report = GcReport::default();
-        let now = crate::db::now_epoch_secs();
-
-        // Dead-record reclamation.
-        if opts.dry_run {
-            // A dry run must not mutate: skip sweep_dead (which flips records to
-            // dead) and only COUNT what a real run would reclaim — records that
-            // are already dead, or alive with a path that no longer exists (what
-            // sweep_dead would mark dead and then unregister).
-            let all = db.list(&ListFilter {
-                include_dead: true,
-                ..Default::default()
-            })?;
-            report.dead_removed = all
-                .iter()
-                .filter(|r| r.status == WorktreeStatus::Dead || !Path::new(&r.path).exists())
-                .count() as u64;
-        } else {
-            db.sweep_dead()?;
-            let dead = db.list(&ListFilter {
-                status: Some(WorktreeStatus::Dead),
-                include_dead: true,
-                ..Default::default()
-            })?;
-            for rec in dead {
-                // Count only when the row was actually removed.
-                if db.unregister(&rec.id).unwrap_or(false) {
-                    report.dead_removed += 1;
-                }
-            }
-        }
-
-        // Expired alive-worktree reclamation (liveness-guarded).
-        if let Some(max_age) = opts.max_age_secs {
-            // Clamp: a negative max_age must not push the cutoff into the future
-            // (which would expire everything), and an extreme value must not
-            // overflow the subtraction.
-            let cutoff = now.saturating_sub(max_age.max(0));
-            // One process-table scan, reused by the in-tree liveness guard below;
-            // skipped under --force, where the guard never fires.
-            let live_cwds = if opts.force {
-                Vec::new()
-            } else {
-                live_process_cwds()
-            };
-            let alive = db.list(&ListFilter::default())?;
-            for rec in alive {
-                // A worktree touched within the age window must not expire;
-                // callers bump last_accessed_at on use.
-                if last_active(&rec) >= cutoff {
-                    continue;
-                }
-                let path = Path::new(&rec.path);
-                // Cheap first-pass guard against the upfront snapshot; the
-                // per-candidate re-check below re-confirms against a fresh row.
-                if !opts.force && is_guarded(&rec, &live_cwds) {
-                    report.skipped_alive += 1;
-                    continue;
-                }
-                // Dry run: count the candidate without touching disk or DB. Skip
-                // a missing path — a real run sweeps it to dead first, so it's
-                // already counted in dead_removed (don't double-count here).
-                if opts.dry_run {
-                    if path.exists() {
-                        report.expired_removed += 1;
-                    }
-                    continue;
-                }
-                // Re-evaluate against a freshly-read row + live process scan right
-                // before the destructive step: the list snapshot is stale (earlier
-                // removals take time), so a concurrent touch_worktree_for_cwd
-                // (bumps last_accessed_at), a revived creator, or a process that
-                // chdir'd into the tree must still protect it.
-                if !opts.force {
-                    match db.get_by_id(&rec.id) {
-                        Ok(Some(fresh)) => {
-                            if !is_reclaimable(&fresh, cutoff, &live_process_cwds()) {
-                                report.skipped_alive += 1;
-                                continue;
-                            }
-                        }
-                        // Fail closed: a vanished row (concurrently unregistered)
-                        // or an unreadable DB must not green-light a remove.
-                        Ok(None) | Err(_) => continue,
-                    }
-                }
-                if path.exists() {
-                    match super::remove_worktree_with_delegate(path, delegate.clone()) {
-                        Ok(_) => report.expired_removed += 1,
-                        // A failed remove (e.g. EPERM) leaves the record tracked
-                        // for a later retry; surface it instead of reporting zero.
-                        Err(e) => {
-                            tracing::warn!(
-                                path = %path.display(),
-                                error = %e,
-                                "failed to remove expired worktree"
-                            );
-                            report.remove_failed += 1;
-                        }
-                    }
-                } else if db.unregister(&rec.id).unwrap_or(false) {
-                    // Path already gone: drop the stale record.
-                    report.expired_removed += 1;
-                }
-            }
-        }
-
-        Ok(report)
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[cfg(target_os = "linux")]
-        #[test]
-        fn pid_alive_from_kill_decodes_errno() {
-            // Testable without needing a process in each errno state.
-            assert!(pid_alive_from_kill(0, 0), "ret==0 ⇒ alive");
-            assert!(!pid_alive_from_kill(-1, libc::ESRCH), "ESRCH ⇒ dead");
-            assert!(
-                pid_alive_from_kill(-1, libc::EPERM),
-                "EPERM ⇒ alive (owned by another user)"
-            );
-            assert!(pid_alive_from_kill(-1, libc::EACCES), "EACCES ⇒ alive");
-        }
-
-        #[test]
-        fn is_pid_alive_true_for_running_processes() {
-            assert!(is_pid_alive(std::process::id()));
-            // PID 1 (init) always exists.
-            #[cfg(target_os = "linux")]
-            assert!(is_pid_alive(1), "init must be detected as alive");
-        }
-
-        #[cfg(target_os = "linux")]
-        #[test]
-        fn is_pid_alive_false_for_guarded_pids() {
-            // pid 0 and pid > i32::MAX are process-group selectors to kill(2), not
-            // real tracked pids; the guard short-circuits them to dead.
-            assert!(!is_pid_alive(0));
-            assert!(!is_pid_alive(u32::MAX));
-        }
-
-        #[test]
-        fn is_pid_alive_false_for_reaped_child() {
-            // A fully reaped child's pid is gone (ESRCH) and must read as dead.
-            let mut child = std::process::Command::new("true")
-                .spawn()
-                .expect("spawn `true`");
-            let pid = child.id();
-            child.wait().expect("wait on `true`");
-            assert!(!is_pid_alive(pid));
-        }
-
-        #[test]
-        fn cwd_within_matches_nested_and_canonical_paths() {
-            let tmp = tempfile::TempDir::new().unwrap();
-            let wt = tmp.path().join("wt");
-            std::fs::create_dir_all(wt.join("a").join("b")).unwrap();
-            // A CWD nested in the tree counts as live; a sibling dir does not.
-            assert!(cwd_within(&wt, &[wt.join("a").join("b")]));
-            assert!(!cwd_within(&wt, &[tmp.path().join("other")]));
-            assert!(!cwd_within(&wt, &[]));
-        }
-
-        fn rec_at(path: &str, created_at: i64) -> crate::db::WorktreeRecord {
-            crate::db::WorktreeRecord {
-                id: "r".to_string(),
-                path: path.into(),
-                source_repo: "/repo".into(),
-                repo_name: "repo".to_string(),
-                kind: crate::db::WorktreeKind::Session,
-                creation_mode: "linked".to_string(),
-                git_ref: None,
-                head_commit: None,
-                session_id: None,
-                creator_pid: None,
-                created_at,
-                last_accessed_at: None,
-                status: WorktreeStatus::Alive,
-                metadata: None,
-            }
-        }
-
-        #[test]
-        fn is_reclaimable_requires_expired_and_unguarded() {
-            let cutoff = 1_000;
-            // Expired (old created_at, never accessed) and unguarded → reclaimable.
-            assert!(is_reclaimable(&rec_at("/no/such/wt", 1), cutoff, &[]));
-            // A recent last_accessed_at within the window protects it.
-            let mut fresh = rec_at("/no/such/wt", 1);
-            fresh.last_accessed_at = Some(cutoff + 10);
-            assert!(!is_reclaimable(&fresh, cutoff, &[]));
-            // A live creator pid protects it.
-            let mut live_creator = rec_at("/no/such/wt", 1);
-            live_creator.creator_pid = Some(std::process::id());
-            assert!(!is_reclaimable(&live_creator, cutoff, &[]));
-            // A live process CWD inside the tree protects it.
-            let inside = std::path::PathBuf::from("/no/such/wt/sub");
-            assert!(!is_reclaimable(
-                &rec_at("/no/such/wt", 1),
-                cutoff,
-                &[inside]
-            ));
-        }
+#[cfg(all(test, feature = "metadata"))]
+impl Drop for CwdGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.0);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn is_out_of_disk_detects_storage_full_kind() {
-        // Cross-platform: std maps ENOSPC and the Windows disk-full codes onto
-        // ErrorKind::StorageFull, so the typed check fires on every OS.
-        let io = std::io::Error::from(std::io::ErrorKind::StorageFull);
-        let err = anyhow::Error::new(io).context("failed to copy index from a to b");
-        assert!(is_out_of_disk(&err));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn is_out_of_disk_detects_enospc_io_error() {
-        // Real ENOSPC (errno 28 on Linux/macOS) must decode to StorageFull.
-        let io = std::io::Error::from_raw_os_error(28);
-        assert_eq!(io.kind(), std::io::ErrorKind::StorageFull);
-        let err = anyhow::Error::new(io).context("failed to copy index from a to b");
-        assert!(is_out_of_disk(&err));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn is_out_of_disk_detects_windows_disk_full_codes() {
-        // Windows reports a full disk as ERROR_DISK_FULL (112) or
-        // ERROR_HANDLE_DISK_FULL (39); std decodes both to StorageFull.
-        for code in [112, 39] {
-            let io = std::io::Error::from_raw_os_error(code);
-            assert_eq!(io.kind(), std::io::ErrorKind::StorageFull);
-            let err = anyhow::Error::new(io).context("failed to copy index from a to b");
-            assert!(is_out_of_disk(&err));
-        }
-    }
-
-    #[test]
-    fn is_out_of_disk_detects_message_text() {
-        // `git` subcommands surface ENOSPC only as stderr text.
-        let err = anyhow::anyhow!("git worktree add failed: No space left on device");
-        assert!(is_out_of_disk(&err));
-    }
-
-    #[test]
-    fn is_out_of_disk_ignores_unrelated_errors() {
-        let err = anyhow::anyhow!("failed to get HEAD commit from source");
-        assert!(!is_out_of_disk(&err));
-    }
-
-    #[test]
-    fn annotate_disk_full_promotes_reason_to_top_context() {
-        let err = anyhow::anyhow!("failed to copy index: No space left on device (os error 28)");
-        let annotated = annotate_disk_full(err);
-        // Display (top context only) now carries the disk reason, so it
-        // survives the workspace/ACP flattening to a single message.
-        assert_eq!(annotated.to_string(), OUT_OF_DISK_CONTEXT);
-        // The original chain is preserved underneath for logs.
-        assert!(format!("{annotated:#}").contains("failed to copy index"));
-    }
-
-    #[test]
-    fn annotate_disk_full_leaves_other_errors_unchanged() {
-        let err = anyhow::anyhow!("some other failure");
-        assert_eq!(annotate_disk_full(err).to_string(), "some other failure");
-    }
-
-    #[test]
-    fn test_copy_report_from_copy_stats() {
-        let stats = CopyStats {
-            files_copied: 10,
-            dirs_created: 3,
-            symlinks_copied: 2,
-            files_skipped: 5,
-            issues: vec!["warning 1".to_string(), "warning 2".to_string()],
-        };
-
-        let report: CopyReport = stats.into();
-        assert_eq!(report.files_copied, 10);
-        assert_eq!(report.dirs_created, 3);
-        assert_eq!(report.symlinks_copied, 2);
-        assert_eq!(report.files_skipped, 5);
-        assert_eq!(report.issues.len(), 2);
-        assert!(report.dirty_files.is_none());
-    }
-
-    #[test]
-    fn test_btrfs_mode_default() {
-        let mode = BtrfsMode::default();
-        assert_eq!(mode, BtrfsMode::Auto);
-    }
-
-    #[test]
-    fn test_btrfs_mode_variants() {
-        // Test that all variants can be created and compared
-        assert_eq!(BtrfsMode::Auto, BtrfsMode::Auto);
-        assert_eq!(BtrfsMode::Force, BtrfsMode::Force);
-        assert_eq!(BtrfsMode::Disabled, BtrfsMode::Disabled);
-
-        assert_ne!(BtrfsMode::Auto, BtrfsMode::Force);
-        assert_ne!(BtrfsMode::Auto, BtrfsMode::Disabled);
-        assert_ne!(BtrfsMode::Force, BtrfsMode::Disabled);
-    }
-
-    #[test]
-    fn test_btrfs_mode_debug() {
-        // Test that Debug is implemented
-        let auto = format!("{:?}", BtrfsMode::Auto);
-        let force = format!("{:?}", BtrfsMode::Force);
-        let disabled = format!("{:?}", BtrfsMode::Disabled);
-
-        assert!(auto.contains("Auto"));
-        assert!(force.contains("Force"));
-        assert!(disabled.contains("Disabled"));
-    }
-
-    #[test]
-    fn test_btrfs_mode_clone() {
-        let mode = BtrfsMode::Force;
-        let cloned = mode.clone();
-        assert_eq!(mode, cloned);
-    }
-
-    #[test]
-    fn test_creation_mode_default() {
-        let mode = CreationMode::default();
-        assert_eq!(mode, CreationMode::Linked);
-    }
-
-    #[test]
-    fn test_creation_mode_variants() {
-        assert_eq!(CreationMode::Linked, CreationMode::Linked);
-        assert_eq!(CreationMode::Standalone, CreationMode::Standalone);
-        assert_eq!(CreationMode::GitCheckout, CreationMode::GitCheckout);
-        assert_ne!(CreationMode::Linked, CreationMode::Standalone);
-        assert_ne!(CreationMode::Linked, CreationMode::GitCheckout);
-    }
-
-    #[test]
-    fn test_worktree_builder_chain() {
-        // Test that all builder methods can be chained
-        let _builder = WorktreeBuilder::new("/source", "/dest")
-            .git_ref("main")
-            .parallelism(4)
-            .ignored_parallelism(2)
-            .channel_buffer(512)
-            .working_tree_mode(WorkingTreeMode::CleanAll)
-            .ignored_files_mode(IgnoredFilesMode::Copy {
-                skip_patterns: vec!["*.log".to_string()],
-            })
-            .creation_mode(CreationMode::GitCheckout);
-    }
-
-    #[test]
-    fn test_standalone_shorthand() {
-        // .standalone(true) should be equivalent to .creation_mode(Standalone)
-        let _builder = WorktreeBuilder::new("/source", "/dest").standalone(true);
-    }
-
-    #[test]
-    fn copy_ignored_only_returns_err_when_cancelled() {
-        let src = tempfile::TempDir::new().unwrap();
-        let dest = tempfile::TempDir::new().unwrap();
-        std::fs::write(src.path().join("file.txt"), "content").unwrap();
-
-        let token = CancellationToken::new();
-        token.cancel();
-
-        let err = WorktreeBuilder::new(src.path(), dest.path())
-            .cancellation_token(token)
-            .copy_ignored_only()
-            .expect_err("a pre-cancelled token must produce an error, not Ok(partial)");
-
-        assert!(
-            err.to_string().contains("cancelled"),
-            "error should report cancellation, got: {err}"
-        );
-    }
-
-    #[test]
-    fn test_cleanup_report_default() {
-        let report = CleanupReport::default();
-        assert_eq!(report.removed, 0);
-        assert_eq!(report.overlays_unmounted, 0);
-        assert_eq!(report.btrfs_deleted, 0);
-        assert_eq!(report.errors, 0);
-    }
-
-    #[test]
-    fn test_cleanup_worktrees_in_empty_dir() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let report = cleanup_worktrees_in(tmp.path());
-        assert_eq!(report.removed, 0);
-        assert_eq!(report.errors, 0);
-    }
-
-    #[test]
-    fn test_cleanup_worktrees_in_missing_dir() {
-        let report = cleanup_worktrees_in(std::path::Path::new("/nonexistent/path/xyz"));
-        assert_eq!(report.removed, 0);
-        assert_eq!(report.errors, 0);
-    }
-
-    #[test]
-    fn test_cleanup_worktrees_in_with_plain_worktrees() {
-        cf_test_utils::require_git!();
-        use cf_test_utils::git::{git_commit_all, init_git_repo};
-
-        let tmp = tempfile::TempDir::new().unwrap();
-
-        // Create a source repo.
-        let repo_path = tmp.path().join("repo");
-        std::fs::create_dir(&repo_path).unwrap();
-        init_git_repo(&repo_path);
-        std::fs::write(repo_path.join("file.txt"), "content").unwrap();
-        git_commit_all(&repo_path, "initial");
-
-        // Create two worktrees in a worktrees dir.
-        let worktrees_dir = tmp.path().join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        let wt1 = worktrees_dir.join("wt1");
-        let wt2 = worktrees_dir.join("wt2");
-
-        WorktreeBuilder::new(&repo_path, &wt1).create().unwrap();
-        WorktreeBuilder::new(&repo_path, &wt2).create().unwrap();
-
-        assert!(wt1.exists());
-        assert!(wt2.exists());
-
-        // Cleanup should remove both.
-        let report = cleanup_worktrees_in(&worktrees_dir);
-        assert_eq!(report.removed, 2);
-        assert_eq!(report.errors, 0);
-        assert!(!wt1.exists());
-        assert!(!wt2.exists());
-    }
-
-    #[test]
-    fn test_cleanup_worktrees_in_with_nested_dirs() {
-        cf_test_utils::require_git!();
-        use cf_test_utils::git::{git_commit_all, init_git_repo};
-
-        let tmp = tempfile::TempDir::new().unwrap();
-
-        // Create a source repo.
-        let repo_path = tmp.path().join("repo");
-        std::fs::create_dir(&repo_path).unwrap();
-        init_git_repo(&repo_path);
-        std::fs::write(repo_path.join("file.txt"), "content").unwrap();
-        git_commit_all(&repo_path, "initial");
-
-        // Create ~/.qidi/worktrees/<repo>/<session>/ structure.
-        let worktrees_dir = tmp.path().join("worktrees");
-        let repo_group = worktrees_dir.join("myrepo");
-        std::fs::create_dir_all(&repo_group).unwrap();
-
-        let wt1 = repo_group.join("session-1");
-        WorktreeBuilder::new(&repo_path, &wt1).create().unwrap();
-        assert!(wt1.exists());
-
-        // Cleanup should find the nested worktree.
-        let report = cleanup_worktrees_in(&worktrees_dir);
-        assert_eq!(report.removed, 1);
-        assert_eq!(report.errors, 0);
-        assert!(!wt1.exists());
-        // Grouping dir should be removed since it's empty now.
-        assert!(!repo_group.exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_cleanup_worktrees_in_removes_dangling_symlink() {
-        // A worktree exposed as a symlink whose snapshot was already deleted is a
-        // dangling symlink; it must be unlinked, not skipped (`is_dir()` follows
-        // the link and returns false, which would leak it).
-        let tmp = tempfile::TempDir::new().unwrap();
-        let worktrees_dir = tmp.path().join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        let dangling = worktrees_dir.join("dead-wt");
-        std::os::unix::fs::symlink(tmp.path().join("gone-snapshot"), &dangling).unwrap();
-        assert!(dangling.symlink_metadata().is_ok());
-        assert!(!dangling.is_dir(), "precondition: dangling symlink");
-
-        let report = cleanup_worktrees_in(&worktrees_dir);
-
-        assert!(
-            dangling.symlink_metadata().is_err(),
-            "dangling symlink worktree must be removed, not skipped"
-        );
-        assert_eq!(report.removed, 1);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_cleanup_worktrees_in_removes_nested_dangling_symlink() {
-        // Dangling symlink one level deeper (~/.qidi/worktrees/<repo>/<session>):
-        // the nested branch must also unlink it rather than skip it.
-        let tmp = tempfile::TempDir::new().unwrap();
-        let worktrees_dir = tmp.path().join("worktrees");
-        // A grouping dir with NO `.git`, so cleanup recurses into it.
-        let repo_group = worktrees_dir.join("myrepo");
-        std::fs::create_dir_all(&repo_group).unwrap();
-
-        let dangling = repo_group.join("dead-session");
-        std::os::unix::fs::symlink(tmp.path().join("gone-snapshot"), &dangling).unwrap();
-        assert!(!dangling.is_dir(), "precondition: dangling symlink");
-
-        let report = cleanup_worktrees_in(&worktrees_dir);
-
-        assert!(
-            dangling.symlink_metadata().is_err(),
-            "nested dangling symlink worktree must be removed"
-        );
-        assert_eq!(report.removed, 1);
-    }
-
-    #[test]
-    fn test_remove_report_has_overlay_field() {
-        let report = RemoveReport {
-            used_btrfs_delete: false,
-            unmounted_bind: false,
-            unmounted_overlay: true,
-        };
-        assert!(report.unmounted_overlay);
-        assert!(!report.used_btrfs_delete);
-    }
-
-    #[test]
-    fn test_creation_mode_as_db_str() {
-        assert_eq!(CreationMode::Linked.as_db_str(), "linked");
-        assert_eq!(CreationMode::Standalone.as_db_str(), "standalone");
-        assert_eq!(CreationMode::GitCheckout.as_db_str(), "git");
-    }
-
-    #[test]
-    fn test_remove_worktree_with_delegate_no_delegate() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("nonexistent");
-        let result = remove_worktree_with_delegate(&path, None);
-        assert!(result.is_ok());
-        let report = result.unwrap();
-        assert!(!report.used_btrfs_delete);
-        assert!(!report.unmounted_bind);
-        assert!(!report.unmounted_overlay);
-    }
-
-    #[test]
-    fn test_remove_worktree_with_delegate_existing_dir() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("some-dir");
-        std::fs::create_dir(&path).unwrap();
-        let result = remove_worktree_with_delegate(&path, None);
-        assert!(result.is_ok());
-        assert!(!path.exists());
-    }
-
-    /// A plain (non-snapshot) linked worktree removed through the delegate-aware
-    /// path must still deregister `.git/worktrees/<name>`, and the delegate must
-    /// be used only as a fallback — never invoked when the direct removal succeeds.
-    #[test]
-    fn remove_with_delegate_deregisters_plain_worktree_without_calling_delegate() {
-        cf_test_utils::require_git!();
-        use cf_test_utils::git::{git_commit_all, init_git_repo};
-        // Isolate QIDI_HOME so the post-removal unregister writes to a private DB.
-        #[cfg(feature = "metadata")]
-        let _fx = crate::db::GrokHomeFixture::new();
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let repo = tmp.path().join("repo");
-        std::fs::create_dir(&repo).unwrap();
-        init_git_repo(&repo);
-        std::fs::write(repo.join("file.txt"), "content").unwrap();
-        git_commit_all(&repo, "initial");
-
-        let wt = tmp.path().join("worktrees").join("wt1");
-        WorktreeBuilder::new(&repo, &wt).create().unwrap();
-
-        // `.git` is a file pointing at `<repo>/.git/worktrees/<name>`.
-        let registration_dir =
-            read_worktree_gitdir(&wt).expect("linked worktree must have a gitdir pointer");
-        assert!(
-            registration_dir.exists(),
-            "precondition: registration exists"
-        );
-
-        let deletes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let delegate: Arc<dyn BtrfsDelegate> = Arc::new(RecordingDelegate {
-            snapshot_path: PathBuf::from("/unused"),
-            worktree_path: PathBuf::from("/unused"),
-            deletes: deletes.clone(),
-        });
-
-        let report = remove_worktree_with_delegate(&wt, Some(delegate)).unwrap();
-
-        assert!(!wt.exists(), "worktree directory must be removed");
-        assert!(
-            !registration_dir.exists(),
-            "`.git/worktrees/<name>` registration must be deregistered"
-        );
-        assert!(!report.used_btrfs_delete);
-        assert_eq!(
-            deletes.load(std::sync::atomic::Ordering::Relaxed),
-            0,
-            "delegate is a fallback only; a plain worktree removal must not call it"
-        );
-    }
-
-    /// When the direct `btrfs delete` fails (e.g. EPERM on a rootless host),
-    /// the snapshot delete must fall back to the delegate and return its report.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn delete_fallback_invokes_delegate_when_direct_delete_fails() {
-        let deletes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let delegate: Arc<dyn BtrfsDelegate> = Arc::new(RecordingDelegate {
-            snapshot_path: PathBuf::from("/unused"),
-            worktree_path: PathBuf::from("/unused"),
-            deletes: deletes.clone(),
-        });
-
-        let report = delete_snapshot_with_delegate_fallback(
-            Path::new("/mnt/btrfs/worktrees/snap-1"),
-            Path::new("/home/u/.qidi/worktrees/repo/wt"),
-            Some(&delegate),
-            |_| anyhow::bail!("operation not permitted (os error 1)"),
-        )
-        .unwrap()
-        .expect("delegate fallback must handle the failed direct delete");
-        assert!(report.used_btrfs_delete);
-        assert_eq!(deletes.load(std::sync::atomic::Ordering::Relaxed), 1);
-    }
-
-    /// A successful direct delete returns `None` (caller does local cleanup) and
-    /// never touches the delegate.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn delete_fallback_skips_delegate_when_direct_delete_succeeds() {
-        let deletes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let delegate: Arc<dyn BtrfsDelegate> = Arc::new(RecordingDelegate {
-            snapshot_path: PathBuf::from("/unused"),
-            worktree_path: PathBuf::from("/unused"),
-            deletes: deletes.clone(),
-        });
-
-        let res = delete_snapshot_with_delegate_fallback(
-            Path::new("/snap"),
-            Path::new("/wt"),
-            Some(&delegate),
-            |_| Ok(()),
-        )
-        .unwrap();
-        assert!(res.is_none(), "successful direct delete must return None");
-        assert_eq!(deletes.load(std::sync::atomic::Ordering::Relaxed), 0);
-    }
-
-    /// With no delegate, a failed direct delete propagates the original error so
-    /// the worktree reference is preserved for a retry.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn delete_fallback_without_delegate_propagates_error() {
-        let err = delete_snapshot_with_delegate_fallback(
-            Path::new("/snap"),
-            Path::new("/wt"),
-            None,
-            |_| anyhow::bail!("EPERM marker"),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("EPERM marker"));
-    }
-
-    /// Metadata persisted by the public `write_btrfs_metadata` lets metadata-based
-    /// removal locate a worktree purely from its `mount_target` and drop the
-    /// symlink + metadata, even when the snapshot subvolume is already gone.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn metadata_written_by_public_writer_is_found_by_metadata_removal() {
-        use crate::btrfs;
-        use crate::mount_info::MountEntry;
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let mount = tmp.path();
-        let worktrees_dir = mount.join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        // `dest` is a symlink to a snapshot under <mount>/worktrees/, with metadata.
-        let snapshot_path = worktrees_dir.join("snap-1");
-        let dest = tmp.path().join("dest-worktree");
-        std::os::unix::fs::symlink(&snapshot_path, &dest).unwrap();
-
-        btrfs::write_btrfs_metadata(&snapshot_path, &dest).unwrap();
-        let meta_path = btrfs::btrfs_meta_path(&snapshot_path).unwrap();
-        assert!(
-            meta_path.exists(),
-            "metadata must be written next to snapshot"
-        );
-        assert!(
-            dest.symlink_metadata().is_ok(),
-            "precondition: symlink exists"
-        );
-
-        let entries = vec![MountEntry {
-            mount_id: 1,
-            parent_id: 0,
-            root: "/".to_string(),
-            mount_point: mount.to_path_buf(),
-            fs_type: "btrfs".to_string(),
-            source: "/dev/loop0".to_string(),
-            super_options: String::new(),
-        }];
-
-        let report = try_btrfs_remove_from_metadata_inner(&dest, &entries, None)
-            .unwrap()
-            .expect("metadata removal must find the snapshot by mount_target");
-        // Snapshot subvolume is already gone, so no btrfs delete is attempted.
-        assert!(!report.used_btrfs_delete);
-        assert!(
-            dest.symlink_metadata().is_err(),
-            "the worktree symlink must be removed"
-        );
-        assert!(
-            !meta_path.exists(),
-            "metadata must be cleaned up after handling"
-        );
-    }
-
-    /// Metadata written by the public `write_btrfs_metadata` for a snapshot whose
-    /// worktree is gone (orphan) must be discovered and reclaimed by the orphan
-    /// scanner.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn metadata_written_by_public_writer_is_reclaimed_by_orphan_scan() {
-        use crate::btrfs;
-        use crate::mount_info::MountEntry;
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let mount = tmp.path();
-        let worktrees_dir = mount.join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        // Orphan: the worktree's mount_target no longer exists (symlink lost),
-        // so the scanner must treat it as reclaimable rather than active.
-        let snapshot_path = worktrees_dir.join("snap-orphan");
-        let mount_target = tmp.path().join("gone-dest");
-        btrfs::write_btrfs_metadata(&snapshot_path, &mount_target).unwrap();
-        let meta_path = btrfs::btrfs_meta_path(&snapshot_path).unwrap();
-        assert!(meta_path.exists());
-
-        let entries = vec![MountEntry {
-            mount_id: 1,
-            parent_id: 0,
-            root: "/".to_string(),
-            mount_point: mount.to_path_buf(),
-            fs_type: "btrfs".to_string(),
-            source: "/dev/loop0".to_string(),
-            super_options: String::new(),
-        }];
-
-        let report = cleanup_orphaned_btrfs_snapshots_inner(&entries);
-        assert_eq!(report.removed, 1, "orphaned snapshot must be reclaimed");
-        // Snapshot subvolume doesn't exist on disk, so no btrfs delete is attempted.
-        assert_eq!(report.btrfs_deleted, 0);
-        assert!(!meta_path.exists(), "orphan metadata must be cleaned up");
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_cleanup_orphaned_btrfs_snapshots_no_mounts() {
-        let report = cleanup_orphaned_btrfs_snapshots_inner(&[]);
-        assert_eq!(report.removed, 0);
-        assert_eq!(report.errors, 0);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_cleanup_orphaned_btrfs_snapshots_with_metadata() {
-        use crate::btrfs;
-        use crate::mount_info::MountEntry;
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let worktrees_dir = tmp.path().join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        // Orphan: the mount_target is gone but its PARENT dir exists (home is
-        // restored), so the scanner can prove it's orphaned and reclaim it.
-        let mount_parent = tmp.path().join("home-restored");
-        std::fs::create_dir(&mount_parent).unwrap();
-        let meta = btrfs::BtrfsSnapshotMetadata {
-            kind: std::borrow::Cow::Borrowed("btrfs"),
-            snapshot_path: worktrees_dir.join("wt-abc"),
-            mount_target: mount_parent.join("gone-target"),
-            created_at: "1740000000s-since-epoch".to_string(),
-        };
-        let meta_path = worktrees_dir.join("wt-abc.btrfs-meta.json");
-        std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap()).unwrap();
-
-        let entries = vec![MountEntry {
-            mount_id: 1,
-            parent_id: 0,
-            root: "/".to_string(),
-            mount_point: tmp.path().to_path_buf(),
-            fs_type: "btrfs".to_string(),
-            source: "/dev/loop0".to_string(),
-            super_options: String::new(),
-        }];
-
-        let report = cleanup_orphaned_btrfs_snapshots_inner(&entries);
-        assert_eq!(report.removed, 1);
-        // snapshot_path doesn't exist as dir, so no btrfs delete attempted
-        assert_eq!(report.btrfs_deleted, 0);
-        assert!(!meta_path.exists(), "metadata should be cleaned up");
-    }
-
-    /// A snapshot whose `mount_target` parent dir is missing can't be proven orphaned,
-    /// so the scanner must skip it rather than destroy one about to be re-exposed.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_cleanup_orphaned_btrfs_skips_when_mount_target_parent_missing() {
-        use crate::btrfs;
-        use crate::mount_info::MountEntry;
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let worktrees_dir = tmp.path().join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        // mount_target lives under a home dir not yet restored. Hermetic: the parent
-        // is a path inside this tempdir that the test never creates.
-        let snapshot_path = worktrees_dir.join("wt-live");
-        std::fs::create_dir(&snapshot_path).unwrap();
-        let unrestored_home = tmp.path().join("unrestored-home");
-        let mount_target = unrestored_home.join(".qidi/worktrees/x/wt-live");
-        assert!(
-            !mount_target.parent().unwrap().exists(),
-            "precondition: mount_target parent must be absent"
-        );
-        let meta = btrfs::BtrfsSnapshotMetadata {
-            kind: std::borrow::Cow::Borrowed("btrfs"),
-            snapshot_path: snapshot_path.clone(),
-            mount_target,
-            created_at: "1740000000s-since-epoch".to_string(),
-        };
-        let meta_path = worktrees_dir.join("wt-live.btrfs-meta.json");
-        std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap()).unwrap();
-
-        let entries = vec![MountEntry {
-            mount_id: 1,
-            parent_id: 0,
-            root: "/".to_string(),
-            mount_point: tmp.path().to_path_buf(),
-            fs_type: "btrfs".to_string(),
-            source: "/dev/loop0".to_string(),
-            super_options: String::new(),
-        }];
-
-        let report = cleanup_orphaned_btrfs_snapshots_inner(&entries);
-        assert_eq!(
-            report.removed, 0,
-            "must not reclaim while orphan status is unprovable"
-        );
-        // The guard must skip cleanly: without it, a non-btrfs tempdir host would
-        // instead error-class this as "outside scanned storage" (errors == 1).
-        assert_eq!(report.errors, 0, "guard must skip cleanly, not error-class");
-        assert!(
-            meta_path.exists(),
-            "metadata must be preserved for a later scan"
-        );
-        // The guard `continue`s before any delete, so the snapshot dir is untouched.
-        assert!(snapshot_path.exists(), "snapshot must not be deleted");
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_cleanup_orphaned_btrfs_skips_active() {
-        use crate::btrfs;
-        use crate::mount_info::MountEntry;
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let worktrees_dir = tmp.path().join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        let mount_target = std::path::PathBuf::from("/home/user/.qidi/worktrees/active-wt");
-
-        let meta = btrfs::BtrfsSnapshotMetadata {
-            kind: std::borrow::Cow::Borrowed("btrfs"),
-            snapshot_path: worktrees_dir.join("active-wt"),
-            mount_target: mount_target.clone(),
-            created_at: "1740000000s-since-epoch".to_string(),
-        };
-        let meta_path = worktrees_dir.join("active-wt.btrfs-meta.json");
-        std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap()).unwrap();
-
-        // mount_target appears in the mount entries (simulates active bind mount)
-        let entries = vec![
-            MountEntry {
-                mount_id: 1,
-                parent_id: 0,
-                root: "/".to_string(),
-                mount_point: tmp.path().to_path_buf(),
-                fs_type: "btrfs".to_string(),
-                source: "/dev/loop0".to_string(),
-                super_options: String::new(),
-            },
-            MountEntry {
-                mount_id: 2,
-                parent_id: 1,
-                root: "/worktrees/active-wt".to_string(),
-                mount_point: mount_target,
-                fs_type: "btrfs".to_string(),
-                source: "/dev/loop0".to_string(),
-                super_options: String::new(),
-            },
-        ];
-
-        let report = cleanup_orphaned_btrfs_snapshots_inner(&entries);
-        assert_eq!(report.removed, 0, "active snapshot should not be removed");
-        assert!(
-            meta_path.exists(),
-            "metadata for active snapshot should remain"
-        );
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_cleanup_orphaned_btrfs_skips_active_symlink() {
-        // Current layout: the live worktree is a SYMLINK to the snapshot and
-        // never appears in mountinfo. The orphan scanner must recognize it as
-        // active (resolves to snapshot_path) and NOT delete it.
-        use crate::btrfs;
-        use crate::mount_info::MountEntry;
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let worktrees_dir = tmp.path().join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        // The snapshot dir (a plain dir here) and a live symlink pointing at it.
-        let snapshot_path = worktrees_dir.join("live-wt");
-        std::fs::create_dir(&snapshot_path).unwrap();
-        let mount_target = tmp.path().join("worktree-symlink");
-        std::os::unix::fs::symlink(&snapshot_path, &mount_target).unwrap();
-
-        let meta = btrfs::BtrfsSnapshotMetadata {
-            kind: std::borrow::Cow::Borrowed("btrfs"),
-            snapshot_path: snapshot_path.clone(),
-            mount_target: mount_target.clone(),
-            created_at: "1740000000s-since-epoch".to_string(),
-        };
-        let meta_path = worktrees_dir.join("live-wt.btrfs-meta.json");
-        std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap()).unwrap();
-
-        // No mount entry references the symlink — only the btrfs mount itself.
-        let entries = vec![MountEntry {
-            mount_id: 1,
-            parent_id: 0,
-            root: "/".to_string(),
-            mount_point: tmp.path().to_path_buf(),
-            fs_type: "btrfs".to_string(),
-            source: "/dev/loop0".to_string(),
-            super_options: String::new(),
-        }];
-
-        let report = cleanup_orphaned_btrfs_snapshots_inner(&entries);
-        assert_eq!(report.removed, 0, "active symlink worktree must be kept");
-        assert!(
-            meta_path.exists(),
-            "metadata for live worktree should remain"
-        );
-        assert!(snapshot_path.exists(), "snapshot must not be deleted");
-        assert!(
-            mount_target.symlink_metadata().is_ok(),
-            "live symlink must not be removed"
-        );
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_symlink_resolves_to() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let target = tmp.path().join("worktrees").join("snap");
-        std::fs::create_dir_all(&target).unwrap();
-
-        // Absolute-target symlink resolving to `target` → true.
-        let abs_link = tmp.path().join("abs-link");
-        std::os::unix::fs::symlink(&target, &abs_link).unwrap();
-        assert!(symlink_resolves_to(&abs_link, &target));
-
-        // Relative-target symlink resolving (via link.parent()) to `target` → true.
-        let rel_link = tmp.path().join("rel-link");
-        std::os::unix::fs::symlink(std::path::Path::new("worktrees/snap"), &rel_link).unwrap();
-        assert!(symlink_resolves_to(&rel_link, &target));
-
-        // Symlink resolving elsewhere → false.
-        let other = tmp.path().join("other");
-        std::fs::create_dir(&other).unwrap();
-        let wrong_link = tmp.path().join("wrong-link");
-        std::os::unix::fs::symlink(&other, &wrong_link).unwrap();
-        assert!(!symlink_resolves_to(&wrong_link, &target));
-
-        // Non-symlink path → false.
-        assert!(!symlink_resolves_to(&target, &target));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_try_btrfs_remove_from_metadata_finds_match() {
-        use crate::btrfs;
-        use crate::mount_info::MountEntry;
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let worktrees_dir = tmp.path().join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        let mount_target = tmp.path().join("mount-target");
-        std::fs::create_dir(&mount_target).unwrap();
-
-        let meta = btrfs::BtrfsSnapshotMetadata {
-            kind: std::borrow::Cow::Borrowed("btrfs"),
-            snapshot_path: worktrees_dir.join("snap-abc"),
-            mount_target: mount_target.clone(),
-            created_at: "1740000000s-since-epoch".to_string(),
-        };
-        let meta_path = worktrees_dir.join("snap-abc.btrfs-meta.json");
-        std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap()).unwrap();
-
-        let entries = vec![MountEntry {
-            mount_id: 1,
-            parent_id: 0,
-            root: "/".to_string(),
-            mount_point: tmp.path().to_path_buf(),
-            fs_type: "btrfs".to_string(),
-            source: "/dev/loop0".to_string(),
-            super_options: String::new(),
-        }];
-
-        // `snapshot_path` is intentionally never created, so the privileged
-        // `btrfs subvolume delete` is gated out (btrfs is unavailable in CI; real
-        // subvolume deletion is exercised only on a btrfs-capable host). The
-        // discriminating signals here are the metadata + dir cleanup.
-        let report = try_btrfs_remove_from_metadata_inner(&mount_target, &entries, None)
-            .unwrap()
-            .expect("should find metadata match");
-        // Nothing was deleted (snapshot absent) and this dir branch unmounts
-        // nothing on an already-unmounted dir.
-        assert!(!report.used_btrfs_delete);
-        assert!(!report.unmounted_bind);
-        assert!(!meta_path.exists(), "metadata should be cleaned up");
-        assert!(!mount_target.exists(), "dir worktree should be removed");
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_try_btrfs_remove_from_metadata_removes_symlink_target() {
-        use crate::btrfs;
-        use crate::mount_info::MountEntry;
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let worktrees_dir = tmp.path().join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        // The on-disk snapshot dir (a plain dir here — no real btrfs subvolume,
-        // so deletion is skipped, but the symlink + metadata must be cleaned up).
-        let snapshot_path = worktrees_dir.join("snap-link");
-
-        // The worktree is exposed at `mount_target` via a symlink to the snapshot.
-        let mount_target = tmp.path().join("worktree-symlink");
-        std::os::unix::fs::symlink(&snapshot_path, &mount_target).unwrap();
-        assert!(mount_target.is_symlink());
-
-        let meta = btrfs::BtrfsSnapshotMetadata {
-            kind: std::borrow::Cow::Borrowed("btrfs"),
-            snapshot_path: snapshot_path.clone(),
-            mount_target: mount_target.clone(),
-            created_at: "1740000000s-since-epoch".to_string(),
-        };
-        let meta_path = worktrees_dir.join("snap-link.btrfs-meta.json");
-        std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap()).unwrap();
-
-        let entries = vec![MountEntry {
-            mount_id: 1,
-            parent_id: 0,
-            root: "/".to_string(),
-            mount_point: tmp.path().to_path_buf(),
-            fs_type: "btrfs".to_string(),
-            source: "/dev/loop0".to_string(),
-            super_options: String::new(),
-        }];
-
-        // NOTE: `snapshot_path` is intentionally never created here, so the
-        // privileged `btrfs subvolume delete` is gated out (btrfs is unavailable
-        // in CI). This test covers the symlink-vs-dir branch selection and the
-        // symlink + metadata cleanup; the real subvolume deletion is exercised
-        // only on a btrfs-capable host.
-        let result = try_btrfs_remove_from_metadata_inner(&mount_target, &entries, None);
-        assert!(result.is_ok());
-        let report = result.unwrap().expect("should find metadata match");
-        // The symlink branch never unmounts a bind mount.
-        assert!(!report.unmounted_bind);
-        // No leak: the symlink and the metadata file are both gone.
-        assert!(
-            mount_target.symlink_metadata().is_err(),
-            "symlink worktree should be removed"
-        );
-        assert!(!meta_path.exists(), "metadata should be cleaned up");
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_try_btrfs_remove_from_metadata_removes_legacy_dir_target() {
-        // Legacy bind-mount layout: `mount_target` is a real (empty) directory.
-        // Exercises the non-symlink `else` branch (umount is a no-op on an
-        // already-unmounted empty dir, then `remove_dir`).
-        use crate::btrfs;
-        use crate::mount_info::MountEntry;
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let worktrees_dir = tmp.path().join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        let mount_target = tmp.path().join("mount-target");
-        std::fs::create_dir(&mount_target).unwrap();
-        assert!(!mount_target.is_symlink());
-
-        let meta = btrfs::BtrfsSnapshotMetadata {
-            kind: std::borrow::Cow::Borrowed("btrfs"),
-            snapshot_path: worktrees_dir.join("snap-dir"),
-            mount_target: mount_target.clone(),
-            created_at: "1740000000s-since-epoch".to_string(),
-        };
-        let meta_path = worktrees_dir.join("snap-dir.btrfs-meta.json");
-        std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap()).unwrap();
-
-        let entries = vec![MountEntry {
-            mount_id: 1,
-            parent_id: 0,
-            root: "/".to_string(),
-            mount_point: tmp.path().to_path_buf(),
-            fs_type: "btrfs".to_string(),
-            source: "/dev/loop0".to_string(),
-            super_options: String::new(),
-        }];
-
-        let report = try_btrfs_remove_from_metadata_inner(&mount_target, &entries, None)
-            .unwrap()
-            .expect("should find metadata match");
-        // No leak: the directory and metadata are both gone.
-        assert!(!mount_target.exists(), "dir worktree should be removed");
-        assert!(!meta_path.exists(), "metadata should be cleaned up");
-        let _ = report;
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_try_btrfs_remove_symlink_to_non_btrfs_target() {
-        // A symlink whose target is not a btrfs subvolume: try_btrfs_remove
-        // should remove the symlink and fall through (Ok(None) overall once the
-        // now-removed path is no longer a btrfs subvolume).
-        let tmp = tempfile::TempDir::new().unwrap();
-        let target = tmp.path().join("plain-target");
-        std::fs::create_dir(&target).unwrap();
-
-        let link = tmp.path().join("worktree-symlink");
-        std::os::unix::fs::symlink(&target, &link).unwrap();
-        assert!(link.is_symlink());
-
-        let result = try_btrfs_remove(&link, None);
-        assert!(result.is_ok());
-        assert!(
-            result.unwrap().is_none(),
-            "should fall through for non-btrfs"
-        );
-        assert!(
-            link.symlink_metadata().is_err(),
-            "non-btrfs symlink should be removed before falling through"
-        );
-        // The target itself is untouched by the symlink removal.
-        assert!(target.exists());
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_try_btrfs_remove_from_metadata_no_match() {
-        use crate::mount_info::MountEntry;
-
-        let tmp = tempfile::TempDir::new().unwrap();
-        let worktrees_dir = tmp.path().join("worktrees");
-        std::fs::create_dir(&worktrees_dir).unwrap();
-
-        let entries = vec![MountEntry {
-            mount_id: 1,
-            parent_id: 0,
-            root: "/".to_string(),
-            mount_point: tmp.path().to_path_buf(),
-            fs_type: "btrfs".to_string(),
-            source: "/dev/loop0".to_string(),
-            super_options: String::new(),
-        }];
-
-        let result = try_btrfs_remove_from_metadata_inner(
-            std::path::Path::new("/nonexistent/target"),
-            &entries,
-            None,
-        );
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
-    }
 
     #[cfg(feature = "metadata")]
     mod metadata_integration {
@@ -2973,11 +1649,13 @@ mod tests {
             // but gc with max_age should still check liveness for expiry.
             // Since the path doesn't exist, sweep_dead marks it dead first,
             // then dead_removed cleans it. Let's use a real existing path instead.
-            let dir = tmp.path().join("real-wt");
-            std::fs::create_dir(&dir).unwrap();
+            // Real worktree so the gate clears and liveness is the only guard.
+            let dir = crate::test_support::deletable_linked_worktree(tmp.path(), "real-wt");
+            let source = tmp.path().join("gate-source");
             let mut record2 = record.clone();
             record2.id = "alive-wt2".to_string();
             record2.path = dir.clone();
+            record2.source_repo = source.clone();
             db.register(&record2).unwrap();
 
             let report = gc::gc_worktrees(
@@ -2986,6 +1664,7 @@ mod tests {
                     max_age_secs: Some(0), // everything is expired
                     force: false,
                     dry_run: false,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -3046,13 +1725,13 @@ mod tests {
             let tmp = tempfile::TempDir::new().unwrap();
             let db = db_at(&tmp);
 
-            let dir = tmp.path().join("force-wt");
-            std::fs::create_dir(&dir).unwrap();
+            let dir = crate::test_support::deletable_linked_worktree(tmp.path(), "force-wt");
+            let source = tmp.path().join("gate-source");
 
             let record = crate::db::WorktreeRecord {
                 id: "force-1".to_string(),
                 path: dir.clone(),
-                source_repo: "/repo".into(),
+                source_repo: source.clone(),
                 repo_name: "repo".to_string(),
                 kind: WorktreeKind::Session,
                 creation_mode: "linked".to_string(),
@@ -3073,7 +1752,7 @@ mod tests {
                     max_age_secs: Some(0),
                     force: true,
                     dry_run: false,
-                },
+                ..Default::default() },
             )
             .unwrap();
 
@@ -3113,7 +1792,7 @@ mod tests {
                     max_age_secs: Some(i64::MIN),
                     force: false,
                     dry_run: false,
-                },
+                ..Default::default() },
             )
             .unwrap();
             assert_eq!(report.expired_removed, 0);
@@ -3124,14 +1803,15 @@ mod tests {
         fn gc_honors_last_accessed_time() {
             let tmp = tempfile::TempDir::new().unwrap();
             let db = db_at(&tmp);
-            let fresh = tmp.path().join("fresh-access");
-            let stale = tmp.path().join("stale-access");
-            std::fs::create_dir(&fresh).unwrap();
-            std::fs::create_dir(&stale).unwrap();
+            // Real worktrees so both clear the delete gate; the age logic is
+            // what must decide between them.
+            let fresh = crate::test_support::deletable_linked_worktree(tmp.path(), "fresh-access");
+            let stale = crate::test_support::deletable_linked_worktree(tmp.path(), "stale-access");
+            let source = tmp.path().join("gate-source");
             let base = crate::db::WorktreeRecord {
                 id: String::new(),
                 path: std::path::PathBuf::new(),
-                source_repo: "/repo".into(),
+                source_repo: source.clone(),
                 repo_name: "repo".to_string(),
                 kind: WorktreeKind::Session,
                 creation_mode: "linked".to_string(),
@@ -3165,7 +1845,7 @@ mod tests {
                     max_age_secs: Some(0),
                     force: false,
                     dry_run: false,
-                },
+                ..Default::default() },
             )
             .unwrap();
 
@@ -3227,7 +1907,7 @@ mod tests {
                 max_age_secs: Some(0),
                 force: false,
                 dry_run: false,
-            };
+            ..Default::default() };
             let guarded = gc::gc_worktrees(&db, &opts).unwrap();
             assert_eq!(
                 guarded.skipped_alive, 1,
@@ -3250,17 +1930,19 @@ mod tests {
         #[test]
         fn gc_dry_run_with_max_age_does_not_remove_expired() {
             // An expired worktree whose dir exists must be previewed (counted)
-            // but never removed under dry_run.
+            // but never removed under dry_run. The fixture must be a real
+            // worktree that clears the delete gate (an empty dir reads as
+            // NoRepo under the gate, which is counted separately).
             let tmp = tempfile::TempDir::new().unwrap();
             let db = db_at(&tmp);
 
-            let dir = tmp.path().join("expired-wt");
-            std::fs::create_dir(&dir).unwrap();
+            let dir = crate::test_support::deletable_linked_worktree(tmp.path(), "expired-wt");
+            let source = tmp.path().join("gate-source");
 
             let record = crate::db::WorktreeRecord {
                 id: "expired-1".to_string(),
                 path: dir.clone(),
-                source_repo: "/repo".into(),
+                source_repo: source.clone(),
                 repo_name: "repo".to_string(),
                 kind: WorktreeKind::Session,
                 creation_mode: "linked".to_string(),
@@ -3281,7 +1963,7 @@ mod tests {
                     max_age_secs: Some(0),
                     force: true,
                     dry_run: true,
-                },
+                ..Default::default() },
             )
             .unwrap();
 
@@ -3328,7 +2010,7 @@ mod tests {
                     max_age_secs: Some(0),
                     force: true,
                     dry_run: true,
-                },
+                ..Default::default() },
             )
             .unwrap();
 
@@ -3344,21 +2026,22 @@ mod tests {
 
         #[test]
         fn gc_expired_failed_removal_keeps_record() {
-            // When the expired worktree can't be removed, expired_removed must
-            // NOT be counted and the DB record must survive (so it stays
-            // visible to a later gc).
+            // When an expired worktree cannot be reclaimed, the record must
+            // survive so a later pass can retry. Under the gate-based gc,
+            // "cannot be reclaimed" is a Kept verdict (here: a dirty
+            // worktree), which must neither count as removed nor unregister.
             let tmp = tempfile::TempDir::new().unwrap();
             let db = db_at(&tmp);
 
-            // A regular file makes remove_worktree's `remove_dir_all` fail
-            // (ENOTDIR) deterministically, even as root.
-            let path = tmp.path().join("doomed-wt");
-            std::fs::write(&path, b"not a dir").unwrap();
+            let path = crate::test_support::deletable_linked_worktree(tmp.path(), "doomed-wt");
+            let source = tmp.path().join("gate-source");
+            // Uncommitted work makes the gate keep the worktree.
+            std::fs::write(path.join("tracked.txt"), "uncommitted work\n").unwrap();
 
             let record = crate::db::WorktreeRecord {
                 id: "doomed-1".to_string(),
                 path: path.clone(),
-                source_repo: "/repo".into(),
+                source_repo: source.clone(),
                 repo_name: "repo".to_string(),
                 kind: WorktreeKind::Session,
                 creation_mode: "linked".to_string(),
@@ -3379,21 +2062,17 @@ mod tests {
                     max_age_secs: Some(0),
                     force: true,
                     dry_run: false,
-                },
+                ..Default::default() },
             )
             .unwrap();
 
             assert_eq!(
                 report.expired_removed, 0,
-                "a failed removal must not be counted"
-            );
-            assert_eq!(
-                report.remove_failed, 1,
-                "a failed removal must be surfaced in remove_failed"
+                "a kept worktree must not be counted as removed"
             );
             let all = db.list(&ListFilter::default()).unwrap();
-            assert_eq!(all.len(), 1, "record must survive a failed removal");
-            assert!(path.exists(), "the un-removable path is still present");
+            assert_eq!(all.len(), 1, "record must survive when the gate keeps the worktree");
+            assert!(path.exists(), "the kept worktree is still present");
         }
 
         /// True if a record with `path` exists in the DB (assert on our own
@@ -3507,12 +2186,15 @@ mod tests {
             let fx = crate::db::GrokHomeFixture::new();
             let db = WorktreeDb::open(&fx.home).unwrap();
 
-            let dir = fx.home.join("expired-wt");
-            std::fs::create_dir(&dir).unwrap();
+            // Real worktree that clears the delete gate (the gate requires a
+            // git worktree; an empty dir is judged NoRepo and never removed).
+            let root = fx.home.parent().unwrap().to_path_buf();
+            let dir = crate::test_support::deletable_linked_worktree(&root, "expired-wt");
+            let source = root.join("gate-source");
             let record = crate::db::WorktreeRecord {
                 id: "expired-del-1".to_string(),
                 path: dir.clone(),
-                source_repo: "/repo".into(),
+                source_repo: source.clone(),
                 repo_name: "repo".to_string(),
                 kind: WorktreeKind::Session,
                 creation_mode: "linked".to_string(),
@@ -3540,7 +2222,7 @@ mod tests {
                     max_age_secs: Some(0),
                     force: true,
                     dry_run: false,
-                },
+                ..Default::default() },
                 Some(delegate),
             )
             .unwrap();
@@ -3565,6 +2247,7 @@ mod tests {
                 expired_removed: 1,
                 skipped_alive: 2,
                 remove_failed: 4,
+                ..Default::default()
             };
             let json = serde_json::to_string(&report).unwrap();
             let deser: gc::GcReport = serde_json::from_str(&json).unwrap();
@@ -3580,7 +2263,7 @@ mod tests {
                 max_age_secs: Some(86400),
                 force: true,
                 dry_run: false,
-            };
+            ..Default::default() };
             let json = serde_json::to_string(&opts).unwrap();
             let deser: gc::GcOptions = serde_json::from_str(&json).unwrap();
             assert_eq!(deser.max_age_secs, Some(86400));

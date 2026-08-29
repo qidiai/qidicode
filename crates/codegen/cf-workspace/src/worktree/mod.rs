@@ -2414,6 +2414,10 @@ pub fn gc_worktrees_mgmt(
         max_age_secs,
         force,
         dry_run,
+        // Path-protect and per-kind TTL policies are driven by auto-GC config
+        // layers upstream; the manual management path keeps the defaults.
+        keep_worktrees_containing: Vec::new(),
+        max_age_by_kind: Default::default(),
     };
     fw_gc_worktrees(&db, &opts)
 }
