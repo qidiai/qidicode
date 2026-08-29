@@ -9,6 +9,8 @@
 //! 6. SQLite metadata tracking (behind `metadata` feature)
 
 mod api;
+#[cfg(feature = "metadata")]
+mod auto_gc;
 #[cfg(target_os = "linux")]
 pub mod btrfs;
 mod copy;
@@ -22,6 +24,9 @@ pub(crate) mod mount_info;
 #[cfg(target_os = "linux")]
 mod overlay;
 pub mod sync;
+#[cfg(test)]
+mod test_support;
+pub(crate) mod time;
 #[cfg(target_os = "linux")]
 pub(crate) mod util;
 mod worktree;
@@ -39,6 +44,12 @@ pub use api::{
     cleanup_worktrees_in_with_delegate, remove_worktree, remove_worktree_with_delegate,
 };
 #[cfg(feature = "metadata")]
+pub use auto_gc::{
+    AutoGcOutcome, AutoGcReport, ENV_AUTO_GC, ENV_AUTO_GC_DRY_RUN, ENV_AUTO_GC_MAX_AGE,
+    ENV_AUTO_GC_REBUILD, ResolvedWorktreeAutoGc, WorktreeAutoGcLayer, clear_auto_gc_env_for_test,
+    maybe_auto_gc, resolve_worktree_auto_gc_from_layers, run_auto_gc_pass,
+};
+#[cfg(feature = "metadata")]
 pub use db::{
     DbStats, ListFilter, WorktreeDb, WorktreeKind, WorktreeRecord, WorktreeStatus, id_from_path,
     now_epoch_secs, repo_name_from_path, resolve_grok_home,
@@ -47,6 +58,10 @@ pub use db::{
 pub use discovery::{RebuildReport, discover_worktrees, rebuild_worktree_db};
 pub use git::checkout::{
     rehydrate_worktree_from_ref, snapshot_worktree_to_ref, transfer_snapshot_to_repo,
+};
+pub use git::{
+    KeepReason, Reclaim, reclaimable_after_snapshot, remove_stale_worktree_registration,
+    remove_stale_worktree_registrations_under,
 };
 pub use sync::{SourceDirtyState, SyncReport, WorktreeSync, collect_source_dirty_state};
 #[cfg(target_os = "linux")]

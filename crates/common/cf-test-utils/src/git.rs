@@ -138,11 +138,43 @@ pub fn run_git_with_env(dir: &Path, args: &[&str], envs: &[(&str, &str)]) -> Str
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+/// Create a commit in `worktree` that no ref names (HEAD is reset past it), so
+/// the reflog names the discarded commit. `when` pins the author/committer date
+/// (e.g. to age the commit); `None` uses the current time. Returns the discarded
+/// commit's SHA and asserts no ref reaches it.
+pub fn reflog_only_commit(worktree: &Path, when: Option<&str>) -> String {
+    std::fs::write(worktree.join("tracked.txt"), "three hours of work\n").unwrap();
+    let dates = when.map(|w| [("GIT_AUTHOR_DATE", w), ("GIT_COMMITTER_DATE", w)]);
+    run_git_with_env(
+        worktree,
+        &["commit", "-am", "work only this worktree saw"],
+        dates.as_ref().map(|d| &d[..]).unwrap_or(&[]),
+    );
+    let discarded = run_git(worktree, &["rev-parse", "HEAD"]);
+    run_git(worktree, &["reset", "--hard", "HEAD~1"]);
+    assert_eq!(
+        run_git(
+            worktree,
+            &["rev-list", "--max-count=1", &discarded, "--not", "--all"]
+        ),
+        discarded,
+        "no ref names it, so only the reflog does"
+    );
+    discarded
+}
+
+/// Minimal `git init` seed used by worktree-safety fixtures: default branch
+/// `main` and a neutralized global excludes file, so a developer's
+/// `~/.config/git/ignore` cannot steer these tests.
+pub fn git_init_seed(dir: &Path) {
+    run_git(dir, &["init", "-b", "main"]);
+    run_git(dir, &["config", "core.excludesFile", "/dev/null"]);
+}
+
 /// Write a grouped fan-out tree of ~`files` files (`files_per_dir` per
 /// directory, directories bucketed 100 per group) under `dir`. No git
 /// operations — callers stage/commit as needed.
-pub fn write_fanout_tree(dir: &Path, files: usize, files_per_dir: usize) {
-    for d in 0..files.div_ceil(files_per_dir) {
+pub fn write_fanout_tree(dir: &Path, files: usize, files_per_dir: usize) {    for d in 0..files.div_ceil(files_per_dir) {
         let sub = dir.join(format!("g{}", d / 100)).join(format!("d{d}"));
         std::fs::create_dir_all(&sub).expect("create populated dir");
         for f in 0..files_per_dir {
