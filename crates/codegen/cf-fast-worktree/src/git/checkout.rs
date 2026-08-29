@@ -2,9 +2,11 @@
 
 use crate::api::{CopyReport, WorktreeReport};
 use anyhow::{Context, Result};
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 /// Environment variables set on every git command to suppress interactive prompts.
 pub const GIT_AUTH_SUPPRESSION_ENVS: [(&str, &str); 4] = [
@@ -158,27 +160,51 @@ pub(crate) fn worktree_at_ref(worktree_path: &Path, git_ref: &str) -> Result<boo
     )
 }
 
+/// Where git is told to look for hooks, so nothing a repository ships runs on
+/// a path nobody is watching. A directory that merely does not exist is the
+/// wrong answer: git-lfs runs `install` as it filters and created this path,
+/// outside any repository, with its four hooks in it. A device file cannot be
+/// created and cannot hold a hook.
+#[cfg(not(windows))]
+pub(crate) const NO_HOOKS: &str = "/dev/null";
+#[cfg(windows)]
+pub(crate) const NO_HOOKS: &str = "NUL";
+
 /// Run a git command inside `worktree_path` with `envs` applied on top of the
 /// base `git_command()` environment, returning trimmed stdout on success.
-fn git_capture_in(worktree_path: &Path, args: &[&str], envs: &[(&str, &str)]) -> Result<String> {
+///
+/// Bounded, and killed at the process group, so a filter git started cannot
+/// outlive the call and hold the worktree that is about to be deleted.
+fn git_capture_in<S: AsRef<OsStr>>(
+    worktree_path: &Path,
+    args: &[S],
+    envs: &[(&str, &OsStr)],
+) -> Result<String> {
     let mut cmd = git_command();
-    cmd.current_dir(worktree_path).args(args);
+    // Same reason the probes do it: the snapshot runs unattended, and the
+    // hooks are the worktree's own.
+    cmd.current_dir(worktree_path)
+        .args(["-c", &format!("core.hooksPath={NO_HOOKS}")])
+        .args(args);
+    // Before the caller's own, which is what carries the scratch index: the
+    // snapshot has to read the configuration the gate's probes read, or the
+    // two halves judge different repositories.
+    super::probe::forget_inherited_git_environment(&mut cmd);
     for &(key, val) in envs {
         cmd.env(key, val);
     }
 
-    let output = cmd.output().with_context(|| {
-        format!(
-            "failed to run git {} in {}",
-            args.join(" "),
-            worktree_path.display()
-        )
-    })?;
+    let shown = args
+        .iter()
+        .map(|a| a.as_ref().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let output = super::probe::run_with_timeout(cmd, Vec::new(), SNAPSHOT_TIMEOUT)
+        .with_context(|| format!("failed to run git {shown} in {}", worktree_path.display()))?;
 
     if !output.status.success() {
         anyhow::bail!(
-            "git {} failed in {}: {}",
-            args.join(" "),
+            "git {shown} failed in {}: {}",
             worktree_path.display(),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -186,6 +212,14 @@ fn git_capture_in(worktree_path: &Path, args: &[&str], envs: &[(&str, &str)]) ->
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
+
+/// How long one git call on the snapshot path may take before it is treated as
+/// hung. Generous, because it bounds a hang rather than policing a slow tree: a
+/// `git add -A` over a large working tree is minutes of honest work, and a
+/// clean filter that never returns is otherwise forever. It covers every call
+/// through [`git_capture_in`], which is the snapshot, the comparison, the
+/// transfer, and the `read-tree` that restores a worktree from a snapshot.
+const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Git config overrides (`-c key=val`, applied before the subcommand) used on
 /// every snapshot git call so capture is independent of the user's/enterprise
@@ -212,12 +246,17 @@ pub(crate) const SNAPSHOT_GIT_CONFIG: &[&str] = &[
 /// Like [`git_capture_in`], but prepends [`SNAPSHOT_GIT_CONFIG`] so the call is
 /// insulated from the ambient git config. Scoped to the snapshot path; other
 /// fast-worktree operations keep the plain `git_command()` behavior.
-fn snapshot_git(worktree_path: &Path, args: &[&str], envs: &[(&str, &str)]) -> Result<String> {
-    let full: Vec<&str> = SNAPSHOT_GIT_CONFIG
+fn snapshot_git<S: AsRef<OsStr>>(
+    worktree_path: &Path,
+    args: &[S],
+    envs: &[(&str, &OsStr)],
+) -> Result<String> {
+    let mut full: Vec<OsString> = SNAPSHOT_GIT_CONFIG
         .iter()
         .copied()
-        .chain(args.iter().copied())
+        .map(OsString::from)
         .collect();
+    full.extend(args.iter().map(|arg| arg.as_ref().to_os_string()));
     git_capture_in(worktree_path, &full, envs)
 }
 
@@ -301,32 +340,19 @@ fn snapshot_worktree_to_ref_inner(
     message: &str,
 ) -> Result<String> {
     // Synthetic identity scoped to this call so it is never written to git config.
-    const NAME: &str = "Grok Snapshot";
-    const EMAIL: &str = "grok-snapshot@example.com";
+    const NAME: &str = "QIDI Snapshot";
+    const EMAIL: &str = "qidi-snapshot@example.com";
 
     // Stage against a throwaway index so the worktree's real index is untouched.
-    let scratch = ScratchIndexGuard {
-        path: scratch_index_path(),
-    };
-    let scratch_str = scratch.path.to_string_lossy();
-    let index_env = [("GIT_INDEX_FILE", scratch_str.as_ref())];
-
-    // Seed the scratch index from HEAD first so files tracked in HEAD but also
-    // matching a .gitignore rule (e.g. a committed-then-ignored config) survive:
-    // `add -A` never re-ignores already-tracked files. `add -A` then layers on
-    // working-tree changes (modifications, deletions, untracked-non-ignored
-    // additions); `write-tree` yields the full-state tree.
-    snapshot_git(worktree_path, &["read-tree", "HEAD"], &index_env)?;
-    snapshot_git(worktree_path, &["add", "-A"], &index_env)?;
-    let tree = snapshot_git(worktree_path, &["write-tree"], &index_env)?;
+    let tree = write_worktree_tree(worktree_path, IndexSeed::Head)?;
 
     // commit-tree takes the tree directly (no index) and needs an author/
     // committer; supply the identity per-call via env vars. HEAD is the parent.
-    let ident = [
-        ("GIT_AUTHOR_NAME", NAME),
-        ("GIT_AUTHOR_EMAIL", EMAIL),
-        ("GIT_COMMITTER_NAME", NAME),
-        ("GIT_COMMITTER_EMAIL", EMAIL),
+    let ident: [(&str, &std::ffi::OsStr); 4] = [
+        ("GIT_AUTHOR_NAME", NAME.as_ref()),
+        ("GIT_AUTHOR_EMAIL", EMAIL.as_ref()),
+        ("GIT_COMMITTER_NAME", NAME.as_ref()),
+        ("GIT_COMMITTER_EMAIL", EMAIL.as_ref()),
     ];
     let snap = snapshot_git(
         worktree_path,
@@ -343,6 +369,63 @@ fn snapshot_worktree_to_ref_inner(
         "snapshot worktree to ref"
     );
     Ok(snap)
+}
+
+/// Where the scratch index starts before `add -A` layers the working tree on.
+enum IndexSeed {
+    /// `HEAD`'s tree, so a file that is tracked but also matches a `.gitignore`
+    /// rule survives: `add -A` never re-ignores what is already tracked. It
+    /// carries no stat cache, so every tracked file is hashed.
+    Head,
+    /// A copy of the worktree's own index, whose stat cache means `add -A`
+    /// hashes only what changed: ten seconds on a monorepo checkout rather
+    /// than two minutes.
+    WorktreeIndex,
+}
+
+/// Stage the whole working state into a throwaway index and write out its tree,
+/// leaving the worktree's real index untouched. `add -A` layers modifications,
+/// deletions and untracked additions on top of `seed`.
+fn write_worktree_tree(worktree_path: &Path, seed: IndexSeed) -> Result<String> {
+    let scratch = ScratchIndexGuard {
+        path: scratch_index_path(),
+    };
+    let index_env = [("GIT_INDEX_FILE", scratch.path.as_os_str())];
+    match seed {
+        IndexSeed::Head => {
+            snapshot_git(worktree_path, &["read-tree", "HEAD"], &index_env)?;
+        }
+        IndexSeed::WorktreeIndex => {
+            let git_dir = snapshot_git(worktree_path, &["rev-parse", "--absolute-git-dir"], &[])?;
+            std::fs::copy(Path::new(&git_dir).join("index"), &scratch.path)?;
+        }
+    }
+    snapshot_git(worktree_path, &["add", "-A"], &index_env)?;
+    snapshot_git(worktree_path, &["write-tree"], &index_env)
+}
+
+/// Whether the working state is still the one `snapshot` holds. A caller that
+/// snapshots, decides, and then deletes leaves a window in between; anything
+/// written during it is in no ref, and this is what sees it.
+///
+/// The two seeds can disagree only about a file that is ignored and staged, or
+/// ignored and unstaged, which reads here as a change and keeps the worktree.
+/// Erring that way is the point.
+pub(crate) fn worktree_matches_snapshot(worktree_path: &Path, snapshot: &str) -> Result<bool> {
+    let snapshot_tree = snapshot_git(
+        worktree_path,
+        &["rev-parse", "--verify", &format!("{snapshot}^{{tree}}")],
+        &[],
+    )
+    .with_context(|| format!("failed to resolve snapshot {snapshot} to a tree"))?;
+    let current =
+        write_worktree_tree(worktree_path, IndexSeed::WorktreeIndex).with_context(|| {
+            format!(
+                "failed to re-read the working state of {}",
+                worktree_path.display()
+            )
+        })?;
+    Ok(current == snapshot_tree)
 }
 
 /// Make a snapshot `ref_name` (created by [`snapshot_worktree_to_ref`] in
@@ -1056,11 +1139,11 @@ mod tests {
         // depending on gc to prune a real base.
         let snap = snapshot_worktree_to_ref(&wt, "refs/grok/snapshots/orphan-src", "src").unwrap();
         let tree = git_capture_in(&wt, &["rev-parse", &format!("{snap}^{{tree}}")], &[]).unwrap();
-        let ident = [
-            ("GIT_AUTHOR_NAME", "T"),
-            ("GIT_AUTHOR_EMAIL", "t@example.com"),
-            ("GIT_COMMITTER_NAME", "T"),
-            ("GIT_COMMITTER_EMAIL", "t@example.com"),
+        let ident: [(&str, &std::ffi::OsStr); 4] = [
+            ("GIT_AUTHOR_NAME", std::ffi::OsStr::new("T")),
+            ("GIT_AUTHOR_EMAIL", std::ffi::OsStr::new("t@example.com")),
+            ("GIT_COMMITTER_NAME", std::ffi::OsStr::new("T")),
+            ("GIT_COMMITTER_EMAIL", std::ffi::OsStr::new("t@example.com")),
         ];
         let orphan = git_capture_in(&wt, &["commit-tree", &tree, "-m", "orphan"], &ident).unwrap();
         assert!(
