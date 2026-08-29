@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use cf_sqlite_journal::JournalMode;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorktreeKind {
     Session,
@@ -305,6 +305,40 @@ impl WorktreeDb {
     /// Returns the number of records marked.
     pub fn sweep_dead(&self) -> Result<u64> {
         queries::sweep_dead(&self.conn)
+    }
+
+    /// Read a value from the `meta` table. `Ok(None)` when the key is absent.
+    pub fn get_meta(&self, key: &str) -> Result<Option<String>> {
+        match self
+            .conn
+            .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
+        {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e).context(format!("failed to read meta key {key}")),
+        }
+    }
+
+    /// Insert or replace a `meta` table value.
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+                rusqlite::params![key, value],
+            )
+            .context(format!("failed to write meta key {key}"))?;
+        Ok(())
+    }
+
+    /// Test-only: run raw SQL (e.g. drop tables to force fail-closed paths).
+    #[cfg(test)]
+    pub(crate) fn execute_batch_for_test(&self, sql: &str) -> Result<()> {
+        self.conn
+            .execute_batch(sql)
+            .context("execute_batch_for_test failed")?;
+        Ok(())
     }
 }
 

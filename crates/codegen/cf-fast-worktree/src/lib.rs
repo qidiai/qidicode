@@ -21,6 +21,11 @@ pub mod discovery;
 mod git;
 #[cfg(target_os = "linux")]
 pub(crate) mod mount_info;
+#[cfg(unix)]
+mod nfs;
+#[cfg(not(unix))]
+#[path = "nfs_stub.rs"]
+mod nfs;
 #[cfg(target_os = "linux")]
 mod overlay;
 pub mod sync;

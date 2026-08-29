@@ -74,7 +74,7 @@ pub struct WorktreeAutoGcLayer {
     pub dry_run: Option<bool>,
     pub include_orphan_snapshots: Option<bool>,
     pub max_age_by_kind: BTreeMap<WorktreeKind, Option<u64>>,
-    /// Optional discovery rebuild + qidi-scoped stale `.git/worktrees/` scrub (default off).
+    /// Optional discovery rebuild + grok-scoped stale `.git/worktrees/` scrub (default off).
     pub include_rebuild: Option<bool>,
     /// Independent rebuild throttle; absent ⇒ 24h.
     pub rebuild_min_interval_secs: Option<u64>,
