@@ -19,6 +19,32 @@ use std::sync::OnceLock;
 use crate::host::HostOs;
 use crate::terminal::{TerminalName, terminal_context};
 
+/// Windows-only: whether the console output code page is UTF-8 (65001).
+///
+/// The pager emits UTF-8 chrome (braille logo/spinners, box-drawing,
+/// Powerline icons, ellipses). If the console code page is a legacy OEM
+/// page (e.g. 936/GBK, 437), every multi-byte UTF-8 sequence is
+/// misinterpreted byte-by-byte and renders as garbled "floating"
+/// characters — exactly the symptom of running `qidi.exe` from a plain
+/// cmd.exe window without `chcp 65001`. Non-Windows hosts are always
+/// UTF-8-native, so this returns `true` there and never triggers the
+/// ASCII fallback.
+#[cfg(windows)]
+fn windows_output_cp_is_utf8() -> bool {
+    unsafe extern "system" {
+        fn GetConsoleOutputCP() -> u32;
+    }
+    // SAFETY: `GetConsoleOutputCP` is a plain Win32 query with no
+    // arguments and no pointer state; it cannot fail in a way that
+    // requires cleanup.
+    unsafe { GetConsoleOutputCP() == 65001 }
+}
+
+#[cfg(not(windows))]
+fn windows_output_cp_is_utf8() -> bool {
+    true
+}
+
 /// `"❯ "` normally, `"> "` on legacy ConHost. Always 2 columns wide.
 pub fn prompt_arrow() -> &'static str {
     if is_legacy_windows_console() {
@@ -447,6 +473,16 @@ pub fn is_legacy_windows_console() -> bool {
             // `Unknown`, but `brand` optimistically becomes `WindowsTerminal`
             // on native Windows. Font capability needs the raw detection so
             // legacy consoles still get the ASCII glyph fallback.
+            //
+            // Code page check: even a detected modern terminal (Windows
+            // Terminal, VS Code…) cannot render UTF-8 chrome correctly while
+            // the console output code page is a legacy OEM page (936/GBK,
+            // 437) — every multi-byte sequence is garbled. Treat that as
+            // legacy too, so the UI stays readable instead of showing
+            // "floating" mojibake characters.
+            if !windows_output_cp_is_utf8() {
+                return true;
+            }
             decide_legacy_windows_console(HostOs::current(), terminal_context().env_brand)
         })
     })
