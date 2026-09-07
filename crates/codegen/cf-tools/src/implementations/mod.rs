@@ -11,6 +11,7 @@ pub mod read_file;
 pub mod search_tool;
 pub mod skills;
 pub mod task_output;
+pub mod think;
 pub mod use_tool;
 pub mod web_search;
 pub use qidi_build::bash::{BashError, BashToolInput};
@@ -25,5 +26,6 @@ pub use opencode::{
     OpenCodeSkillTool, OpenCodeTodoWriteTool, OpenCodeWriteTool,
 };
 pub use search_tool::SearchTool;
+pub use think::ThinkImpl;
 pub use use_tool::{UseTool, UseToolInput};
 pub use web_search::WebSearchConfig;

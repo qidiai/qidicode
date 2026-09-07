@@ -694,6 +694,10 @@ impl AgentBuilder {
             )));
         }
         if definition.inject_default_tools {
+            {
+                use cf_tools::implementations::think;
+                tool_config.tools.push((&think::ThinkImpl).into());
+            }
             if self.memory_backend.is_some() {
                 use cf_tools::implementations::memory;
                 tool_config

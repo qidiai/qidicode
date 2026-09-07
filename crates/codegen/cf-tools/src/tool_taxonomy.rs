@@ -68,6 +68,7 @@ impl ToolKind {
             ToolKind::UseTool => "Use Tool",
             ToolKind::Monitor => "Monitor",
             ToolKind::GoalUpdate => "Update Goal",
+            ToolKind::Think => "Think",
             ToolKind::Other => "Tool",
         }
     }
@@ -88,7 +89,8 @@ impl ToolKind {
             | ToolKind::WebFetch
             | ToolKind::EnterPlan
             | ToolKind::ExitPlan
-            | ToolKind::AskUser => true,
+            | ToolKind::AskUser
+            | ToolKind::Think => true,
             ToolKind::Edit
             | ToolKind::Delete
             | ToolKind::Write
