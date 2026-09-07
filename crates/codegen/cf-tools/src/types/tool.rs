@@ -120,6 +120,7 @@ pub enum ToolKind {
     UseTool,
     Monitor,
     GoalUpdate,
+    Think,
     #[serde(other)]
     Other,
 }
