@@ -1,4 +1,4 @@
-//! First-party tool normalization — the `ToolInput`-coupled projection on top
+﻿//! First-party tool normalization — the `ToolInput`-coupled projection on top
 //! of the [`crate::tool_taxonomy`] leaf. Projects the agent's **typed**
 //! [`ToolInput`] into the canonical input dict ([`canonical_input`]) and
 //! resolves identity from registered metadata ([`tool_identity_of`]). The typed
@@ -118,6 +118,7 @@ pub fn canonical_input(input: &ToolInput) -> Option<serde_json::Value> {
         | ToolInput::MemorySearch(_)
         | ToolInput::MemoryGet(_)
         | ToolInput::SearchTool(_)
+        | ToolInput::Think(_)
         | ToolInput::UseTool(_)
         | ToolInput::EnterPlanMode(_)
         | ToolInput::ExitPlanMode(_)

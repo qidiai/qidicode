@@ -1,4 +1,4 @@
-//! `think` tool — external reasoning scratchpad (`Tool` trait).
+﻿//! `think` tool — external reasoning scratchpad (`Tool` trait).
 //!
 //! Inspired by omp's externalThinking: when a provider's hidden reasoning
 //! channel is unavailable (or disabled), the model can write its analysis
@@ -7,6 +7,7 @@
 //! transcript like any other tool call.
 
 use super::types::ThinkInput;
+use super::THINK_TOOL_NAME;
 use crate::types::output::ToolOutput;
 use crate::types::tool::{ToolKind, ToolNamespace};
 
@@ -39,7 +40,7 @@ impl cf_tool_runtime::Tool for ThinkImpl {
     type Output = ToolOutput;
 
     fn id(&self) -> cf_tool_protocol::ToolId {
-        cf_tool_protocol::ToolId::new("think").expect("valid tool id")
+        cf_tool_protocol::ToolId::new(THINK_TOOL_NAME).expect("valid tool id")
     }
 
     fn description(
@@ -47,7 +48,7 @@ impl cf_tool_runtime::Tool for ThinkImpl {
         _ctx: &::cf_tool_runtime::ListToolsContext,
     ) -> cf_tool_types::ToolDescription {
         cf_tool_types::ToolDescription::new(
-            "think",
+            THINK_TOOL_NAME,
             crate::types::tool_metadata::ToolMetadata::description_template(self),
         )
     }

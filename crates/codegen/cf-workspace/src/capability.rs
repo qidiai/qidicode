@@ -1,4 +1,4 @@
-//! Capability-mode filtering for session toolsets.
+﻿//! Capability-mode filtering for session toolsets.
 
 use cf_tools::registry::types::{ToolConfig, ToolServerConfig};
 use cf_tools::types::tool::ToolKind;
@@ -214,6 +214,7 @@ mod tests {
             test_support::tc("bg", Some(ToolKind::BackgroundTaskAction)),
             test_support::tc("plan", Some(ToolKind::Plan)),
             test_support::tc("ask", Some(ToolKind::AskUser)),
+            test_support::tc("think", Some(ToolKind::Think)),
             test_support::tc("other", Some(ToolKind::Other)),
         ]);
 
@@ -222,25 +223,25 @@ mod tests {
         };
 
         let ro = CapabilityMode::ReadOnly.filter(&cfg);
-        assert_eq!(names(&ro), vec!["read", "search", "inspect", "plan", "ask"]);
+        assert_eq!(names(&ro), vec!["read", "search", "inspect", "plan", "ask", "think"]);
 
         let rw = CapabilityMode::ReadWrite.filter(&cfg);
         assert_eq!(
             names(&rw),
-            vec!["read", "search", "inspect", "edit", "write", "plan", "ask"]
+            vec!["read", "search", "inspect", "edit", "write", "plan", "ask", "think"]
         );
 
         let ex = CapabilityMode::Execute.filter(&cfg);
         assert_eq!(
             names(&ex),
-            vec!["read", "search", "inspect", "bash", "bg", "plan", "ask"]
+            vec!["read", "search", "inspect", "bash", "bg", "plan", "ask", "think"]
         );
 
         let all = CapabilityMode::All.filter(&cfg);
         assert_eq!(
             names(&all),
             vec![
-                "read", "search", "inspect", "edit", "write", "bash", "bg", "plan", "ask", "other"
+                "read", "search", "inspect", "edit", "write", "bash", "bg", "plan", "ask", "think", "other"
             ]
         );
     }

@@ -1,4 +1,4 @@
-use crate::{
+﻿use crate::{
     computer::types::{AsyncFileSystem, TerminalBackend},
     implementations::{
         codex, qidi_build, qidi_build_concise, qidi_build_hashline, opencode,
@@ -761,6 +761,7 @@ impl ToolRegistryBuilder {
         b.register::<crate::implementations::memory::search_tool::MemorySearchImpl>();
         b.register::<crate::implementations::memory::get_tool::MemoryGetImpl>();
         b.register::<crate::implementations::search_tool::SearchTool>();
+        b.register::<crate::implementations::think::ThinkImpl>();
         b.register_with_params::<
                 crate::implementations::use_tool::UseTool,
                 crate::implementations::use_tool::UseToolParams,

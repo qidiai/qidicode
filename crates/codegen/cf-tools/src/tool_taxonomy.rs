@@ -1,4 +1,4 @@
-//! Tool taxonomy — the harness-independent vocabulary, identity, and canonical
+﻿//! Tool taxonomy — the harness-independent vocabulary, identity, and canonical
 //! `_meta` envelope.
 //!
 //! Depends only on `ToolKind`/`ToolNamespace` + `serde`/`serde_json` (no
@@ -257,6 +257,8 @@ mod tests {
         assert!(ToolKind::Read.is_read_only());
         assert!(ToolKind::Search.is_read_only());
         assert!(ToolKind::List.is_read_only());
+        // Think: external reasoning scratchpad, zero side effects.
+        assert!(ToolKind::Think.is_read_only());
         assert!(!ToolKind::Edit.is_read_only());
         assert!(!ToolKind::Execute.is_read_only());
         assert!(!ToolKind::Delete.is_read_only());
