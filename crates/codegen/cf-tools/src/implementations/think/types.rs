@@ -1,4 +1,7 @@
-//! Input/output types for the think tool.
+﻿//! Input types for the think tool.
+//!
+//! The tool's output is a plain `ToolOutput::Text` acknowledgement, so no
+//! dedicated output type is needed.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -12,9 +15,3 @@ pub struct ThinkInput {
     pub thought: String,
 }
 
-/// Output schema for `think` (used for JSON Schema generation only).
-#[derive(Debug, JsonSchema)]
-pub struct ThinkOutput {
-    /// Acknowledgement text.
-    pub ack: String,
-}

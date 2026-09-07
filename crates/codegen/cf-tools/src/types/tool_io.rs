@@ -1,4 +1,4 @@
-//! New tool I/O types for the spec architecture.
+﻿//! New tool I/O types for the spec architecture.
 //!
 //! These types exist alongside the old `tool_input::ToolInput` and
 //! `output::ToolOutput`. They will replace the old types once all tool
@@ -33,6 +33,7 @@ use crate::implementations::lsp::LspToolInput;
 use crate::implementations::memory::types::{MemoryGetInput, MemorySearchInput};
 use crate::implementations::opencode::write::WriteInput;
 use crate::implementations::search_tool::SearchToolInput;
+use crate::implementations::think::types::ThinkInput;
 use crate::implementations::skills::skill::SkillInput;
 use crate::implementations::use_tool::UseToolInput;
 use serde::{Deserialize, Serialize};
@@ -85,6 +86,7 @@ pub enum ToolInput {
     MemorySearch(MemorySearchInput),
     MemoryGet(MemoryGetInput),
     SearchTool(SearchToolInput),
+    Think(ThinkInput),
     UseTool(UseToolInput),
     EnterPlanMode(EnterPlanModeInput),
     ExitPlanMode(ExitPlanModeInput),
