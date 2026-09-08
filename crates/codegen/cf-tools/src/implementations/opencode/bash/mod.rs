@@ -448,7 +448,9 @@ impl cf_tool_runtime::Tool for BashTool {
             timed_out: result.timed_out,
             description: Some(input.description),
             current_dir: cwd.to_string_lossy().to_string(),
-            output_file: output_file.to_string_lossy().to_string(),
+            // Normalize separators for the wire/display string (Windows
+            // PathBuf renders backslashes; clients expect forward slashes).
+            output_file: output_file.to_string_lossy().replace('\\', "/"),
             total_bytes: result.total_bytes,
             output_delta: None,
             was_bare_echo: false,

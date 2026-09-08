@@ -370,9 +370,23 @@ pub(crate) async fn run_read_file(
                     "Error: {} is a directory, not a file.",
                     display_path.display()
                 )),
-                Some(std::io::ErrorKind::PermissionDenied) => ReadFileOutput::PermissionDenied(
-                    format!("Permission denied: {}", display_path.display()),
-                ),
+                Some(std::io::ErrorKind::PermissionDenied) => {
+                    // Opening a directory on Windows surfaces as
+                    // ERROR_ACCESS_DENIED, never as IsADirectory:
+                    // re-check the path kind so directories get the
+                    // structured error on every platform.
+                    if path.is_dir() {
+                        ReadFileOutput::IsADirectory(format!(
+                            "Error: {} is a directory, not a file.",
+                            display_path.display()
+                        ))
+                    } else {
+                        ReadFileOutput::PermissionDenied(format!(
+                            "Permission denied: {}",
+                            display_path.display()
+                        ))
+                    }
+                }
                 _ => ReadFileOutput::FileReadError(format!(
                     "Failed to read file: {}, {e}",
                     display_path.display()

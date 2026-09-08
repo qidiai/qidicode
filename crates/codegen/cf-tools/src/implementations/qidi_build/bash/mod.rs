@@ -3423,7 +3423,9 @@ mod tests {
         let (args, cmd) =
             BashTool::get_prefixed_command(&Some("env FOO=bar".to_string()), "echo hi");
         let composed = BashTool::compose_prefixed_command(&args, cmd);
-        assert_eq!(composed, "env FOO=bar echo hi");
+        // shlex quote-if-needed includes `=`, so the env assignment is
+        // re-quoted on every platform; both forms are equivalent shell.
+        assert_eq!(composed, "env 'FOO=bar' echo hi");
     }
 
     #[tokio::test]

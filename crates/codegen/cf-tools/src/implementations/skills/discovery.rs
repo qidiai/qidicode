@@ -1397,10 +1397,15 @@ model: test-model
 
         let paths = find_skill_paths(&cursor_dir);
         let strs: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-        assert!(
-            strs.iter().any(|p| p.contains("skills/mine")),
-            "standard skills/ layout must still be found: {strs:?}"
-        );
+        // Match path *components*, not display separators: on Windows
+        // `display()` renders `\` and a literal "skills/mine" substring
+        // never matches even though the skill was found.
+        let has_mine = paths.iter().any(|p| {
+            p.file_name().and_then(|f| f.to_str()) == Some("SKILL.md")
+                && p.parent().and_then(|f| f.file_name()).and_then(|f| f.to_str())
+                    == Some("mine")
+        });
+        assert!(has_mine, "standard skills/ layout must still be found: {strs:?}");
         assert!(
             !strs.iter().any(|p| p.contains("skills-cursor")),
             "skills-cursor layout must no longer be scanned: {strs:?}"
@@ -1467,20 +1472,25 @@ model: test-model
         )
         .unwrap();
         // Same name under /.qidi/ → kept (user content).
-        let grok_shell = tmp.path().join(".grok").join("skills").join("shell");
-        std::fs::create_dir_all(&grok_shell).unwrap();
+        let qidi_shell = tmp.path().join(".qidi").join("skills").join("shell");
+        std::fs::create_dir_all(&qidi_shell).unwrap();
         std::fs::write(
-            grok_shell.join("SKILL.md"),
+            qidi_shell.join("SKILL.md"),
             "---\nname: shell\ndescription: user content\n---\n",
         )
         .unwrap();
 
         let skills = parse_skill_files(vec![
             (cursor_shell.join("SKILL.md"), SkillScope::User),
-            (grok_shell.join("SKILL.md"), SkillScope::User),
+            (qidi_shell.join("SKILL.md"), SkillScope::User),
         ]);
         assert_eq!(skills.len(), 1, "cursor builtin must be dropped");
-        assert!(skills[0].path.contains("/.qidi/"));
+        // Separator-agnostic: display() renders backslashes on Windows.
+    assert!(
+        skills[0].path.contains(".qidi"),
+        "kept path must live under .qidi: {}",
+        skills[0].path
+    );
     }
 
     #[test]
