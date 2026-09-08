@@ -430,7 +430,12 @@ pub(crate) fn resolve_plan_file_path(res: &Resources) -> (Option<PathBuf>, Strin
     } else {
         PathBuf::from(PLAN_FILE_RELATIVE_PATH)
     };
-    let display = path.display().to_string();
+    // Normalize separators for the client-facing display string: on
+    // Windows Path::display renders backslashes, which mixes with the
+    // forward slashes inside PLAN_FILE_RELATIVE_PATH and leaks a mangled
+    // path to the model. Forward slashes are valid in Windows path APIs,
+    // so this normalization is display-only and lossless.
+    let display = path.display().to_string().replace('\\', "/");
     let absolute_target = path.is_absolute().then_some(path);
     (absolute_target, display)
 }
@@ -485,15 +490,22 @@ pub fn resolve_model_path(
     let input = sanitize_model_path_arg(input);
     let expanded = shellexpand::tilde(input);
     let input_path = std::path::Path::new(expanded.as_ref());
+    // Model-emitted paths are always POSIX-style, regardless of the host
+    // OS: a leading `/` marks an absolute worktree path even on Windows
+    // (where `Path::is_absolute` would return false without a drive
+    // letter and silently disable the worktree rewrite below).
+    // Tilde-expanded paths are host-absolute (e.g. C:/Users/... on
+    // Windows) and must keep taking the absolute branch below.
+    let model_absolute = input.starts_with('/') || input_path.is_absolute();
     if let Some(display) = display_cwd
-        && input_path.is_absolute()
+        && model_absolute
     {
         if let Ok(suffix) = input_path.strip_prefix(display) {
             return cwd.join(suffix);
         }
         return input_path.to_path_buf();
     }
-    if !input_path.is_absolute() && !expanded.is_empty() {
+    if !model_absolute && !expanded.is_empty() {
         let as_absolute = std::path::PathBuf::from(format!("/{}", expanded.as_ref()));
         let effective_base = display_cwd.unwrap_or(cwd);
         if as_absolute.starts_with(effective_base)
@@ -1259,7 +1271,7 @@ mod tests {
         assert_eq!(result, std::path::PathBuf::from("/worktree/abc/:"));
     }
     /// Kimi sent ":/testbed/cache/cache.go" — colon before display path.
-    /// This is NOT absolute (doesn't start with '/'), so treated as relative.
+    /// This is NOT absolute (doesn't start with "/"), so treated as relative.
     #[test]
     fn resolve_model_path_colon_prefixed_display_path() {
         let cwd = std::path::Path::new("/worktree/abc");

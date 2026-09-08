@@ -438,7 +438,13 @@ mod tests {
                 ..
             } => {
                 assert!(plan_content.contains("Do X then Y"));
-                assert_eq!(plan_file_path, &plan_file.display().to_string());
+                // The tool normalizes separators to forward slashes in
+                // its client-facing display string (see
+                // resolve_plan_file_path); mirror that here.
+                assert_eq!(
+                    plan_file_path,
+                    &plan_file.display().to_string().replace('\\', "/")
+                );
             }
             other => panic!("Expected PlanReady, got {:?}", other),
         }

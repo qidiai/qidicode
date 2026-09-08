@@ -107,7 +107,11 @@ mod tests {
         let gi = build_gitignore(Path::new("."), &["node_modules/", "*.log"]);
         let abs_path = Path::new("/Users/someone/home/AGENTS.md");
 
-        // Proves the raw crate panics with these inputs.
+        // The raw crate panics on POSIX hosts (absolute path outside
+        // root); on Windows "/Users/..." has no drive letter so it is
+        // not absolute and the crate may accept it -- do not assert
+        // the panic there.
+        #[cfg(not(windows))]
         assert!(
             std::panic::catch_unwind(|| {
                 gi.matched_path_or_any_parents(abs_path, false);
