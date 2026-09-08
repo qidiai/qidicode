@@ -1,4 +1,4 @@
-﻿//! Tool taxonomy — the harness-independent vocabulary, identity, and canonical
+//! Tool taxonomy — the harness-independent vocabulary, identity, and canonical
 //! `_meta` envelope.
 //!
 //! Depends only on `ToolKind`/`ToolNamespace` + `serde`/`serde_json` (no

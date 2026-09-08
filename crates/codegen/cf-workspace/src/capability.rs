@@ -1,4 +1,4 @@
-﻿//! Capability-mode filtering for session toolsets.
+//! Capability-mode filtering for session toolsets.
 
 use cf_tools::registry::types::{ToolConfig, ToolServerConfig};
 use cf_tools::types::tool::ToolKind;

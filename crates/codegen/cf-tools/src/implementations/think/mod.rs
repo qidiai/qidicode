@@ -1,4 +1,4 @@
-﻿//! `think` tool — external reasoning scratchpad.
+//! `think` tool — external reasoning scratchpad.
 //!
 //! Gives the model a dedicated, side-effect-free tool to write its reasoning
 //! into tool-call parameters, which are always visible to the harness — unlike
