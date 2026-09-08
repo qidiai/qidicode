@@ -938,6 +938,9 @@ mod tests {
     }
 
     #[test]
+    /// HOME env override is ineffective on Windows (dirs::home_dir
+    /// uses the known-folder API), so this POSIX-env fixture is unix-only.
+    #[cfg(unix)]
     fn decide_inputs_flags_home_key_unrecordable() {
         // Case-2 wiring: with cwd == $HOME (git-init'd so workspace_key discovers
         // it as the home git root), the gather flags key_recordable=false and

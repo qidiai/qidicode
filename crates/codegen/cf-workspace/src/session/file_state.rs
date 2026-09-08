@@ -895,7 +895,7 @@ impl FileStateTracker {
             .values()
             .map(|p| {
                 let mut normalized = p.clone();
-                normalized.normalize_to_relative(root);
+                normalized.normalize_to_relative(&root);
                 normalized
             })
             .collect();
@@ -1076,7 +1076,7 @@ mod tests {
     #[tokio::test]
     async fn test_rewind_point_creation() {
         let tracker = FileStateTracker::new();
-        let cwd = AbsPathBuf::new(PathBuf::from("/test")).unwrap();
+        let cwd = AbsPathBuf::new(std::env::temp_dir().join("qidi-file-state-test")).unwrap();
         let fs = Arc::new(MockFs::new(cwd.to_path_buf()));
         let fs_wrapper = crate::file_system::AsyncFsWrapper::new(fs);
         let ctx = ToolContext::new_local_context(cwd.to_path_buf(), fs_wrapper, Arc::new(()));
@@ -1098,7 +1098,7 @@ mod tests {
     #[tokio::test]
     async fn test_truncate_from() {
         let tracker = FileStateTracker::new();
-        let cwd = AbsPathBuf::new(PathBuf::from("/test")).unwrap();
+        let cwd = AbsPathBuf::new(std::env::temp_dir().join("qidi-file-state-test")).unwrap();
         let fs = Arc::new(MockFs::new(cwd.to_path_buf()));
         let fs_wrapper = crate::file_system::AsyncFsWrapper::new(fs);
         let ctx = ToolContext::new_local_context(cwd.to_path_buf(), fs_wrapper, Arc::new(()));
@@ -1222,26 +1222,27 @@ mod tests {
 
     #[test]
     fn test_deserialize_file_snapshot_with_absolute_path() {
-        // Simulate JSON from an older session that stored absolute paths
-        let json = r#"{
-            "path": "/home/user/project/src/main.rs",
+        // Simulate JSON from an older session that stored absolute paths;
+        // build platform-absolute paths so `is_relative()` semantics hold
+        // on Windows too (POSIX "/..." has no drive letter there).
+        let abs_main = std::env::temp_dir().join("qidi-fs-snap/src/main.rs");
+        let root = std::env::temp_dir().join("qidi-fs-snap");
+        let json = serde_json::json!({
+            "path": abs_main.to_string_lossy(),
             "content": "fn main() {}",
             "captured_at": "2024-01-01T00:00:00Z"
-        }"#;
+        })
+        .to_string();
 
-        let snapshot: FileSnapshot = serde_json::from_str(json).unwrap();
+        let snapshot: FileSnapshot = serde_json::from_str(&json).unwrap();
 
         // Should deserialize successfully with an absolute path
         assert!(!snapshot.path.is_relative());
-        assert_eq!(
-            snapshot.path.as_path(),
-            Path::new("/home/user/project/src/main.rs")
-        );
+        assert_eq!(snapshot.path.as_path(), abs_main.as_path());
         assert_eq!(snapshot.content, Some("fn main() {}".into()));
 
         // Should be able to normalize it to relative
-        let root = Path::new("/home/user/project");
-        let normalized = snapshot.normalize_to_relative(root);
+        let normalized = snapshot.normalize_to_relative(&root);
         assert!(normalized.path.is_relative());
         assert_eq!(normalized.path.as_path(), Path::new("src/main.rs"));
     }
@@ -1264,26 +1265,32 @@ mod tests {
 
     #[test]
     fn test_deserialize_rewind_point_with_absolute_paths() {
-        // Simulate JSON from an older session with absolute paths in the hashmap keys
-        let json = r#"{
+        // Simulate JSON from an older session with absolute paths in the
+        // hashmap keys; use platform-absolute paths so `is_relative()`
+        // semantics hold on Windows (POSIX "/..." is relative there).
+        let root = std::env::temp_dir().join("qidi-rewind-abs");
+        let abs_main = root.join("src").join("main.rs");
+        let abs_lib = root.join("src").join("lib.rs");
+        let mut snapshots = serde_json::Map::new();
+        for (path, content) in [(&abs_main, "fn main() {}"), (&abs_lib, "pub mod foo;")] {
+            snapshots.insert(
+                path.to_string_lossy().into_owned(),
+                serde_json::json!({
+                    "path": path.to_string_lossy(),
+                    "content": content,
+                    "captured_at": "2024-01-01T00:00:00Z"
+                }),
+            );
+        }
+        let json = serde_json::json!({
             "prompt_index": 0,
             "created_at": "2024-01-01T00:00:00Z",
-            "file_snapshots": {
-                "/home/user/project/src/main.rs": {
-                    "path": "/home/user/project/src/main.rs",
-                    "content": "fn main() {}",
-                    "captured_at": "2024-01-01T00:00:00Z"
-                },
-                "/home/user/project/src/lib.rs": {
-                    "path": "/home/user/project/src/lib.rs",
-                    "content": "pub mod foo;",
-                    "captured_at": "2024-01-01T00:00:00Z"
-                }
-            },
+            "file_snapshots": snapshots,
             "after_snapshots": {}
-        }"#;
+        })
+        .to_string();
 
-        let point: RewindPoint = serde_json::from_str(json).unwrap();
+        let point: RewindPoint = serde_json::from_str(&json).unwrap();
 
         // Should deserialize successfully
         assert_eq!(point.prompt_index, 0);
@@ -1299,9 +1306,8 @@ mod tests {
         }
 
         // After normalization, paths should be relative
-        let root = Path::new("/home/user/project");
         let mut normalized_point = point.clone();
-        normalized_point.normalize_to_relative(root);
+        normalized_point.normalize_to_relative(&root);
 
         for (path, snapshot) in &normalized_point.file_snapshots {
             assert!(path.is_relative(), "Expected relative path, got {:?}", path);
@@ -1321,33 +1327,43 @@ mod tests {
 
     #[test]
     fn test_deserialize_rewind_point_with_mixed_paths() {
-        // Simulate JSON with a mix of absolute and relative paths (edge case)
-        let json = r#"{
+        // Simulate JSON with a mix of absolute and relative paths (edge
+        // case); the absolute entry uses a platform-absolute path so
+        // `is_relative()` semantics hold on Windows.
+        let root = std::env::temp_dir().join("qidi-rewind-mixed");
+        let abs_old = root.join("src").join("old.rs");
+        let mut snapshots = serde_json::Map::new();
+        snapshots.insert(
+            abs_old.to_string_lossy().into_owned(),
+            serde_json::json!({
+                "path": abs_old.to_string_lossy(),
+                "content": "// old file",
+                "captured_at": "2024-01-01T00:00:00Z"
+            }),
+        );
+        snapshots.insert(
+            "src/new.rs".to_owned(),
+            serde_json::json!({
+                "path": "src/new.rs",
+                "content": "// new file",
+                "captured_at": "2024-01-01T00:00:00Z"
+            }),
+        );
+        let json = serde_json::json!({
             "prompt_index": 1,
             "created_at": "2024-01-01T00:00:00Z",
-            "file_snapshots": {
-                "/home/user/project/src/old.rs": {
-                    "path": "/home/user/project/src/old.rs",
-                    "content": "// old file",
-                    "captured_at": "2024-01-01T00:00:00Z"
-                },
-                "src/new.rs": {
-                    "path": "src/new.rs",
-                    "content": "// new file",
-                    "captured_at": "2024-01-01T00:00:00Z"
-                }
-            },
+            "file_snapshots": snapshots,
             "after_snapshots": {}
-        }"#;
+        })
+        .to_string();
 
-        let point: RewindPoint = serde_json::from_str(json).unwrap();
+        let point: RewindPoint = serde_json::from_str(&json).unwrap();
 
         assert_eq!(point.file_snapshots.len(), 2);
 
-        // Normalize
-        let root = Path::new("/home/user/project");
+        // Normalize (root was derived from the fixture above)
         let mut normalized = point.clone();
-        normalized.normalize_to_relative(root);
+        normalized.normalize_to_relative(&root);
 
         // All should now be relative
         for path in normalized.file_snapshots.keys() {
