@@ -716,9 +716,12 @@ mod tests {
             "fixture_str_replace",
         );
         register_fixture(&toolset, "Delete", ToolKind::Delete, "fixture_delete");
+        // A snake_case name that does NOT shadow a reserved built-in
+        // (registering an MCP tool named `run_terminal_cmd` is rejected
+        // by the reserved-name guard since the hub-merge).
         register_fixture(
             &toolset,
-            "run_terminal_cmd",
+            "fixture_terminal_cmd",
             ToolKind::Execute,
             "fixture_run_terminal_cmd",
         );
@@ -727,7 +730,7 @@ mod tests {
         assert_eq!(bridge.tool_kind("StrReplace"), Some(ToolKind::Edit));
         assert_eq!(bridge.tool_kind("Delete"), Some(ToolKind::Delete));
         assert_eq!(
-            bridge.tool_kind("run_terminal_cmd"),
+            bridge.tool_kind("fixture_terminal_cmd"),
             Some(ToolKind::Execute)
         );
 

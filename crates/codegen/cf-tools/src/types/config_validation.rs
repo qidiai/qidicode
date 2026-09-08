@@ -77,6 +77,21 @@ pub fn validate_name_override(index: usize, tool_id: &str, name: Option<&str>, _
                 },
             ));
         }
+        // Reject anything outside the tool-id charset (`[a-zA-Z0-9_-]+`):
+        // name overrides become client-facing tool names, so they must be
+        // valid tool ids themselves (spaces, dots, `:` separators and
+        // non-ASCII would collide with the wire/tool-registry grammar).
+        if cf_tool_protocol::ToolId::new(n.to_string()).is_err() {
+            return Err(ToolConfigEntryError::new(
+                index,
+                tool_id.to_string(),
+                ToolConfigEntryErrorKind::NameOverrideInvalid {
+                    name: n.to_string(),
+                    error: "name override must be a valid tool id (charset [a-zA-Z0-9_-])"
+                        .to_string(),
+                },
+            ));
+        }
     }
     Ok(())
 }

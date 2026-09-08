@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn name_override_valid_tool_id_charset_is_accepted() {
-        for name in ["search", "cf_tools::grep", "a-b_C9"] {
+        for name in ["search", "grep", "a-b_C9"] {
             let mut e = entry("cf_tools::grep");
             e.name_override = Some(name.to_owned());
             let cfg = tool_config_from_entry(0, e).unwrap();

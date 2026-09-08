@@ -1,4 +1,4 @@
-﻿//! Input types for the think tool.
+//! Input types for the think tool.
 //!
 //! The tool's output is a plain `ToolOutput::Text` acknowledgement, so no
 //! dedicated output type is needed.

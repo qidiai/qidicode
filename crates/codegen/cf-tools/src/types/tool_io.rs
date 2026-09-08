@@ -1,4 +1,4 @@
-﻿//! New tool I/O types for the spec architecture.
+//! New tool I/O types for the spec architecture.
 //!
 //! These types exist alongside the old `tool_input::ToolInput` and
 //! `output::ToolOutput`. They will replace the old types once all tool

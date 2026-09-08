@@ -4628,14 +4628,14 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn build_session_routed_handlers_skips_invalid_client_name_without_panic() {
         let handle = make_handle();
-        let mut renamed = tc("cf_tools::read_file", Some(ToolKind::Read));
+        let mut renamed = tc("QidiBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some("bad name!".to_owned());
         let session = handle
             .create_session_with_config(
                 "sess-invalid-name",
                 None,
                 Some(ToolServerConfig {
-                    tools: vec![renamed, tc("cf_tools::grep", Some(ToolKind::Read))],
+                    tools: vec![renamed, tc("QidiBuild:grep", Some(ToolKind::Read))],
                     behavior_preset: None,
                 }),
                 CapabilityMode::All,
@@ -4680,7 +4680,7 @@ pub(crate) mod tests {
             .iter()
             .map(|h| h.tool_id().as_str().to_owned())
             .collect();
-        let mut renamed = tc("cf_tools::read_file", Some(ToolKind::Read));
+        let mut renamed = tc("QidiBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some("non_catalog_tool".to_owned());
         let session = handle
             .create_session_with_config(
@@ -4759,7 +4759,7 @@ pub(crate) mod tests {
                 .all(|n| n != "renamed_read"),
             "precondition: the default toolset must not carry the override name"
         );
-        let mut renamed = tc("cf_tools::read_file", Some(ToolKind::Read));
+        let mut renamed = tc("QidiBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some("renamed_read".to_owned());
         let cfg = ToolServerConfig {
             tools: vec![renamed],
@@ -4788,7 +4788,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn rebind_without_explicit_toolset_reuses_existing() {
         let handle = make_handle();
-        let mut renamed = tc("cf_tools::read_file", Some(ToolKind::Read));
+        let mut renamed = tc("QidiBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some("renamed_read".to_owned());
         let cfg = ToolServerConfig {
             tools: vec![renamed],
@@ -4827,7 +4827,7 @@ pub(crate) mod tests {
         let session = handle
             .create_session_with_config("racy", None, None, CapabilityMode::All, None, false)
             .expect("create session");
-        let mut renamed = tc("cf_tools::read_file", Some(ToolKind::Read));
+        let mut renamed = tc("QidiBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some("renamed_read".to_owned());
         let cfg_b = ToolServerConfig {
             tools: vec![renamed],
@@ -4840,7 +4840,7 @@ pub(crate) mod tests {
             .expect("session exists");
         assert_eq!(outcome, RebindOutcome::Reresolved);
         let fp_a = serde_json::to_value(&ToolServerConfig {
-            tools: vec![tc("cf_tools::list_dir", Some(ToolKind::ListDir))],
+            tools: vec![tc("QidiBuild:list_dir", Some(ToolKind::ListDir))],
             behavior_preset: None,
         })
         .ok();
@@ -5211,7 +5211,7 @@ pub(crate) mod tests {
             .get()
     }
     fn explicit_cfg(name_override: &str) -> ToolServerConfig {
-        let mut renamed = tc("cf_tools::read_file", Some(ToolKind::Read));
+        let mut renamed = tc("QidiBuild:read_file", Some(ToolKind::Read));
         renamed.name_override = Some(name_override.to_owned());
         ToolServerConfig {
             tools: vec![renamed],
@@ -5223,13 +5223,13 @@ pub(crate) mod tests {
     pub(crate) fn background_capable_cfg() -> ToolServerConfig {
         ToolServerConfig {
             tools: vec![
-                tc("cf_tools::read_file", Some(ToolKind::Read)),
-                tc("cf_tools::run_terminal_cmd", Some(ToolKind::Execute)),
+                tc("QidiBuild:read_file", Some(ToolKind::Read)),
+                tc("QidiBuild:run_terminal_cmd", Some(ToolKind::Execute)),
                 tc(
-                    "cf_tools::get_task_output",
+                    "QidiBuild:get_task_output",
                     Some(ToolKind::BackgroundTaskAction),
                 ),
-                tc("cf_tools::kill_task", Some(ToolKind::KillTaskAction)),
+                tc("QidiBuild:kill_task", Some(ToolKind::KillTaskAction)),
             ],
             behavior_preset: None,
         }
@@ -5333,7 +5333,7 @@ pub(crate) mod tests {
         let out_dir = tempfile::tempdir().expect("temp dir");
         let bg = start_background_sleep(&session, out_dir.path(), "snapshot-bg").await;
         handle.shared.mcp_tools_snapshot.store(Arc::new(vec![tc(
-            "cf_tools::read_file",
+            "QidiBuild:read_file",
             Some(ToolKind::Read),
         )]));
         let rebuilt = handle
@@ -5403,7 +5403,7 @@ pub(crate) mod tests {
             "precondition: the installed toolset's Terminal must be external"
         );
         handle.shared.mcp_tools_snapshot.store(Arc::new(vec![tc(
-            "cf_tools::read_file",
+            "QidiBuild:read_file",
             Some(ToolKind::Read),
         )]));
         handle
@@ -6736,7 +6736,7 @@ pub(crate) mod tests {
         let child_ids: Vec<String> = child_baseline.tools.iter().map(|t| t.id.clone()).collect();
         assert_eq!(child_ids, parent_ids);
         let new_parent_baseline = ToolServerConfig {
-            tools: vec![tc("cf_tools::read_file", Some(ToolKind::Read))],
+            tools: vec![tc("QidiBuild:read_file", Some(ToolKind::Read))],
             behavior_preset: None,
         };
         let factory = handle.shared.session_factory.clone();
@@ -6774,8 +6774,8 @@ pub(crate) mod tests {
         let handle = make_handle();
         let custom = ToolServerConfig {
             tools: vec![
-                tc("cf_tools::read_file", Some(ToolKind::Read)),
-                tc("cf_tools::list_dir", Some(ToolKind::ListDir)),
+                tc("QidiBuild:read_file", Some(ToolKind::Read)),
+                tc("QidiBuild:list_dir", Some(ToolKind::ListDir)),
             ],
             behavior_preset: None,
         };
@@ -6801,7 +6801,7 @@ pub(crate) mod tests {
     async fn fork_session_uses_main_session_when_parent_session_id_is_none() {
         let handle = make_handle();
         let marker_config = ToolServerConfig {
-            tools: vec![tc("cf_tools::read_file", Some(ToolKind::Read))],
+            tools: vec![tc("QidiBuild:read_file", Some(ToolKind::Read))],
             behavior_preset: None,
         };
         let main = handle.session("main").expect("main present");
@@ -6839,13 +6839,13 @@ pub(crate) mod tests {
             .iter()
             .map(|t| t.id.clone())
             .collect();
-        assert_eq!(baseline_ids, vec!["cf_tools::read_file".to_string()]);
+        assert_eq!(baseline_ids, vec!["QidiBuild:read_file".to_string()]);
     }
     #[tokio::test]
     async fn fork_session_uses_named_parent_when_parent_session_id_is_set() {
         let handle = make_handle();
         let custom = ToolServerConfig {
-            tools: vec![tc("cf_tools::read_file", Some(ToolKind::Read))],
+            tools: vec![tc("QidiBuild:read_file", Some(ToolKind::Read))],
             behavior_preset: None,
         };
         handle
@@ -7164,7 +7164,7 @@ pub(crate) mod tests {
             .await
             .expect("subB ok");
         let mut rx = handle.shared.events.subscribe();
-        let mcp_tool = tc("cf_tools::read_file", Some(ToolKind::Read));
+        let mcp_tool = tc("QidiBuild:read_file", Some(ToolKind::Read));
         let rebuilt = handle.on_mcp_snapshot_changed(vec![mcp_tool]);
         assert_eq!(rebuilt, 3, "main + 2 subagents");
         let mut got: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -8014,7 +8014,7 @@ pub(crate) mod tests {
         let resolved = resolver(
             cf_tool_protocol::SessionId::new("bind-e2e-tools").unwrap(),
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "cf_tools::read_file" }] },
+                { "metadata" : { "tools" : [{ "id" : "QidiBuild:read_file" }] },
                 }
             )),
         )
@@ -8058,7 +8058,7 @@ pub(crate) mod tests {
         let first = resolver(
             sid.clone(),
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "cf_tools::read_file" }] },
+                { "metadata" : { "tools" : [{ "id" : "QidiBuild:read_file" }] },
                 }
             )),
         )
@@ -8068,8 +8068,8 @@ pub(crate) mod tests {
         let second = resolver(
             sid,
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "cf_tools::read_file",
-                "params_json" : "{not json" }] }, }
+                { "metadata" : { "tools" : [{ "id" : "QidiBuild:read_file",
+                "paramsJson" : "{not json" }] }, }
             )),
         )
         .await
@@ -8093,7 +8093,7 @@ pub(crate) mod tests {
         let first = resolver(
             sid.clone(),
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "cf_tools::read_file" }] },
+                { "metadata" : { "tools" : [{ "id" : "QidiBuild:read_file" }] },
                 }
             )),
         )
@@ -8132,7 +8132,7 @@ pub(crate) mod tests {
         let second = resolver(
             sid,
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "cf_tools::read_file" }] },
+                { "metadata" : { "tools" : [{ "id" : "QidiBuild:read_file" }] },
                 }
             )),
         )
@@ -8153,8 +8153,8 @@ pub(crate) mod tests {
     fn owner_full_bind_metadata() -> serde_json::Value {
         serde_json::json!(
             { "metadata" : { "capability_mode" : "all", "tools" : [{ "id" :
-            "cf_tools::read_file" }, { "id" : "cf_tools::search_replace" }, { "id" :
-            "cf_tools::grep" }, { "id" : "cf_tools::list_dir" },], }, }
+            "QidiBuild:read_file" }, { "id" : "QidiBuild:search_replace" }, { "id" :
+            "QidiBuild:grep" }, { "id" : "QidiBuild:list_dir" },], }, }
         )
     }
     const OWNER_TOOLS: [&str; 4] = ["read_file", "search_replace", "grep", "list_dir"];
@@ -8332,9 +8332,9 @@ pub(crate) mod tests {
         let resolver = bind_resolver_fixture(&handle);
         let sid = cf_tool_protocol::SessionId::new("bind-e2e-bg").unwrap();
         let bg_metadata = serde_json::json!(
-            { "metadata" : { "tools" : [{ "id" : "cf_tools::read_file" }, { "id" :
-            "cf_tools::run_terminal_cmd" }, { "id" : "cf_tools::get_task_output" }, {
-            "id" : "cf_tools::kill_task" },] }, }
+            { "metadata" : { "tools" : [{ "id" : "QidiBuild:read_file" }, { "id" :
+            "QidiBuild:run_terminal_cmd" }, { "id" : "QidiBuild:get_task_output" }, {
+            "id" : "QidiBuild:kill_task" },] }, }
         );
         let first = resolver(sid.clone(), Some(bg_metadata.clone()))
             .await
@@ -8374,7 +8374,7 @@ pub(crate) mod tests {
         let swapped = resolver(
             sid,
             Some(serde_json::json!(
-                { "metadata" : { "tools" : [{ "id" : "cf_tools::read_file" }] },
+                { "metadata" : { "tools" : [{ "id" : "QidiBuild:read_file" }] },
                 }
             )),
         )

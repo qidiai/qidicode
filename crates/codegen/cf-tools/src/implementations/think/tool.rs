@@ -1,4 +1,4 @@
-﻿//! `think` tool — external reasoning scratchpad (`Tool` trait).
+//! `think` tool — external reasoning scratchpad (`Tool` trait).
 //!
 //! Inspired by omp's externalThinking: when a provider's hidden reasoning
 //! channel is unavailable (or disabled), the model can write its analysis

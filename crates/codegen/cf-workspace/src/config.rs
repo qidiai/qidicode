@@ -442,10 +442,10 @@ mod bind_config_tests {
     #[test]
     fn tools_entries_resolve_to_tool_server_config() {
         let v = serde_json::json!(
-            { "preset" : "explore", "tools" : [{ "id" : "cf_tools::grep", "params_json" :
-            "{\"max_results\":50}", "name_override" : "search", "params_name_overrides" :
-            { "pattern" : "query" }, "behavior_version" : "legacy-0.4.10",
-            "description_override" : "Search the codebase", }, { "id" :
+            { "preset" : "explore", "tools" : [{ "id" : "cf_tools::grep", "paramsJson" :
+            "{\"max_results\":50}", "nameOverride" : "search", "paramsNameOverrides" :
+            { "pattern" : "query" }, "behaviorVersion" : "legacy-0.4.10",
+            "descriptionOverride" : "Search the codebase", }, { "id" :
             "cf_tools::read_file" },], }
         );
         let cfg = WorkspaceBindConfig::from_metadata(&v);
@@ -528,7 +528,7 @@ mod bind_config_tests {
     #[test]
     fn invalid_tools_entry_fails_closed() {
         let v = serde_json::json!(
-            { "preset" : "explore", "tools" : [{ "id" : "bad:tool", "params_json" :
+            { "preset" : "explore", "tools" : [{ "id" : "bad:tool", "paramsJson" :
             "{not json" }], }
         );
         let cfg = WorkspaceBindConfig::from_metadata(&v);
@@ -543,8 +543,8 @@ mod bind_config_tests {
     #[test]
     fn invalid_name_override_fails_closed() {
         let v = serde_json::json!(
-            { "tools" : [{ "id" : "wire:ok", "name_override" : "fine_name" }, { "id" :
-            "wire:bad", "name_override" : "not a tool id!" },], }
+            { "tools" : [{ "id" : "wire:ok", "nameOverride" : "fine_name" }, { "id" :
+            "wire:bad", "nameOverride" : "not a tool id!" },], }
         );
         let cfg = WorkspaceBindConfig::from_metadata(&v);
         match cfg.resolve(&all_known, true) {
@@ -583,7 +583,7 @@ mod bind_config_tests {
     #[test]
     fn invalid_entry_error_reports_wire_index_after_unknown_drop() {
         let v = serde_json::json!(
-            { "tools" : [{ "id" : "wire:unknown" }, { "id" : "wire:bad", "params_json" :
+            { "tools" : [{ "id" : "wire:unknown" }, { "id" : "wire:bad", "paramsJson" :
             "{not json" },], }
         );
         let cfg = WorkspaceBindConfig::from_metadata(&v);
@@ -602,7 +602,7 @@ mod bind_config_tests {
     #[test]
     fn valid_name_overrides_resolve_intact() {
         let v = serde_json::json!(
-            { "tools" : [{ "id" : "wire:a", "name_override" : "renamed_a" }, { "id" :
+            { "tools" : [{ "id" : "wire:a", "nameOverride" : "renamed_a" }, { "id" :
             "wire:b" },], }
         );
         let cfg = WorkspaceBindConfig::from_metadata(&v);
