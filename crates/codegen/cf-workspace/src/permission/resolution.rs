@@ -1736,6 +1736,9 @@ mod tests {
     }
 
     #[test]
+    /// HOME env override is ineffective on Windows (dirs::home_dir
+    /// uses the known-folder API), so this POSIX-env fixture is unix-only.
+    #[cfg(unix)]
     fn project_claude_absent_when_home_is_git_repo() {
         // Home-is-a-git-repo (dotfiles in $HOME): for a cwd under home, the
         // repo-root walk must NOT reach $HOME and treat `~/.claude` as

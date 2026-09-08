@@ -2691,7 +2691,11 @@ mod tests {
     fn test_effective_worktree_cwd_single_level_offset() {
         let result =
             effective_worktree_cwd("/home/user/.qidi/worktrees/repo/ab-123-a", Path::new("src"));
-        assert_eq!(result, "/home/user/.qidi/worktrees/repo/ab-123-a/src");
+        // Path compare: the joined result renders native separators.
+        assert_eq!(
+            Path::new(&result),
+            Path::new("/home/user/.qidi/worktrees/repo/ab-123-a/src")
+        );
     }
     #[test]
     fn test_effective_worktree_cwd_nested_offset() {
@@ -2699,9 +2703,10 @@ mod tests {
             "/home/user/.qidi/worktrees/repo/ab-123-b",
             Path::new("packages/frontend/src"),
         );
+        // Path compare: the joined result renders native separators.
         assert_eq!(
-            result,
-            "/home/user/.qidi/worktrees/repo/ab-123-b/packages/frontend/src"
+            Path::new(&result),
+            Path::new("/home/user/.qidi/worktrees/repo/ab-123-b/packages/frontend/src")
         );
     }
     #[test]
@@ -2774,7 +2779,11 @@ mod tests {
         let (offset, _git_root) = compute_subdir_offset(&sub.to_string_lossy());
         let worktree_root = "/home/user/.qidi/worktrees/myrepo/ab-test-a";
         let effective = effective_worktree_cwd(worktree_root, &offset);
-        assert_eq!(effective, format!("{}/src/lib", worktree_root));
+        // Path compare: the joined result renders native separators.
+        assert_eq!(
+            Path::new(&effective),
+            Path::new(worktree_root).join("src").join("lib")
+        );
     }
     #[test]
     fn test_find_git_root_from_repo_root() {

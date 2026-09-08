@@ -230,6 +230,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    #[cfg(unix)]
     fn test_simple_export() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(".envrc"), "export FOO=bar\n").unwrap();
@@ -239,6 +240,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_variable_expansion() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(".envrc"), "export MY_DIR=$PWD/subdir\n").unwrap();
@@ -255,6 +257,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_path_add() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(".envrc"), "PATH_add bin\n").unwrap();
@@ -265,6 +268,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_conditional() {
         let dir = TempDir::new().unwrap();
         fs::write(
