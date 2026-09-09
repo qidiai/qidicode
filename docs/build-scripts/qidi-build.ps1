@@ -11,16 +11,33 @@
 param(
     [switch]$Release,
     [switch]$Test,          # 指定测试过滤器, 如 -Test think
-    [switch]$SkipCheck
+    [switch]$SkipCheck,
+    # Machine paths are overridable; defaults match the original author box (user 28970).
+    # SelfCont auto-derives from the CURRENT user's rustup when not passed.
+    [string]$MingwBin  = 'C:\mingw-tools\mingw64\bin',
+    [string]$Src       = 'G:\qidi-src',
+    [string]$TargetDir = 'G:\qidi-target',
+    [string]$SelfCont  = ''
 )
 
 $ErrorActionPreference = "Stop"
 
 # ---- 三件套环境（缺一不可，见文档第 4 节） ----
-$MINGW    = "C:\mingw-tools\mingw64\bin"
-$SELFCONT = "C:\Users\28970\.rustup\toolchains\stable-x86_64-pc-windows-gnu\lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained"
-$SRC      = "G:\qidi-src"       # junction -> G:\程序开发\qidicode\qidicode-src
-$TARGET   = "G:\qidi-target"    # 强制 ASCII，防中文路径坑
+$MINGW    = $MingwBin
+$SELFCONT = $SelfCont
+if (-not $SelfCont) {
+    # Auto-derive from the current user's rustup (the historic hardcoded path
+    # pointed at another machine's profile). Override with -SelfCont if needed.
+    $rustupHome = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $env:USERPROFILE '.rustup' }
+    $scRel = 'lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained'
+    $toolchains = Join-Path $rustupHome 'toolchains'
+    $tc = @('stable-x86_64-pc-windows-gnu') + (Get-ChildItem $toolchains -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }) |
+          Where-Object { Test-Path (Join-Path (Join-Path $toolchains $_) $scRel) } | Select-Object -First 1
+    if (-not $tc) { Write-Host "[X] self-contained dir not found under $toolchains -- pass -SelfCont explicitly" -ForegroundColor Red; exit 1 }
+    $SELFCONT = Join-Path (Join-Path $toolchains $tc) $scRel
+}
+$SRC      = $Src       # junction -> G:\程序开发\qidicode\qidicode-src
+$TARGET   = $TargetDir    # 强制 ASCII，防中文路径坑
 
 if (-not (Test-Path $MINGW)) {
     Write-Host "[X] $MINGW 不存在——先跑 get_mingw_binutils.py / get_mingw_gcc.py 装工具链" -ForegroundColor Red
