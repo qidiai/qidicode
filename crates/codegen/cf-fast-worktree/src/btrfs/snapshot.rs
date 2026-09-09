@@ -179,17 +179,17 @@ pub fn create_snapshot_with_symlink(btrfs_info: &BtrfsInfo, dest: &Path) -> Resu
     create_snapshot(snapshot_source, &snapshot_path)?;
 
     // When the snapshot is inside the source (subvol mount case), the snapshot
-    // contains an empty .grok-snapshots/ directory (btrfs excludes nested subvolumes
+    // contains an empty .qidi-snapshots/ directory (btrfs excludes nested subvolumes
     // from snapshots, leaving only empty directory placeholders). Remove it to
     // keep the worktree clean.
-    let stale_snapshots_dir = snapshot_path.join(".grok-snapshots");
+    let stale_snapshots_dir = snapshot_path.join(".qidi-snapshots");
     if stale_snapshots_dir.exists()
         && let Err(e) = std::fs::remove_dir(&stale_snapshots_dir)
     {
         tracing::debug!(
             path = %stale_snapshots_dir.display(),
             error = %e,
-            "failed to remove stale .grok-snapshots placeholder from snapshot"
+            "failed to remove stale .qidi-snapshots placeholder from snapshot"
         );
     }
 
@@ -224,7 +224,7 @@ pub fn create_snapshot_with_symlink(btrfs_info: &BtrfsInfo, dest: &Path) -> Resu
 /// worktree `dest`.
 ///
 /// When the btrfs mount IS the source repo (subvol mount without a separate
-/// root mount), snapshots go under `.grok-snapshots/` to stay hidden from git;
+/// root mount), snapshots go under `.qidi-snapshots/` to stay hidden from git;
 /// otherwise they go under `worktrees/`.
 ///
 /// Name is `<basename>-<hash of full dest>`: basename alone collides when two repos
@@ -234,7 +234,7 @@ pub fn create_snapshot_with_symlink(btrfs_info: &BtrfsInfo, dest: &Path) -> Resu
 /// the identical layout.
 pub fn snapshot_dest_path(btrfs_mount: &Path, subvolume_root: &Path, dest: &Path) -> PathBuf {
     let subdir = if btrfs_mount == subvolume_root {
-        BTRFS_SNAPSHOT_SUBDIRS[1] // ".grok-snapshots"
+        BTRFS_SNAPSHOT_SUBDIRS[1] // ".qidi-snapshots"
     } else {
         BTRFS_SNAPSHOT_SUBDIRS[0] // "worktrees"
     };
@@ -349,7 +349,7 @@ pub fn delete_snapshot(path: &Path) -> Result<()> {
 ///   delete to a subvolume elsewhere),
 /// - lives directly inside a snapshot-storage directory — its real,
 ///   canonicalized parent's final component is one of [`BTRFS_SNAPSHOT_SUBDIRS`]
-///   (`worktrees` or `.grok-snapshots`),
+///   (`worktrees` or `.qidi-snapshots`),
 /// - and that directory sits **directly under a real btrfs mount point** (from
 ///   the live mount table), anchoring the delete to grok-managed storage rather
 ///   than any directory that merely happens to be named `worktrees`.
@@ -394,7 +394,7 @@ fn is_safe_snapshot_delete_target_in(snapshot_path: &Path, btrfs_mounts: &[PathB
     let Ok(canonical_parent) = dunce::canonicalize(parent) else {
         return false;
     };
-    // Parent must be a snapshot-storage dir (`worktrees` / `.grok-snapshots`)...
+    // Parent must be a snapshot-storage dir (`worktrees` / `.qidi-snapshots`)...
     let named_ok = canonical_parent
         .file_name()
         .and_then(|n| n.to_str())
@@ -431,9 +431,9 @@ pub const BTRFS_META_SUFFIX: &str = ".btrfs-meta.json";
 /// Subdirectory names used to store btrfs snapshots inside a btrfs mount point.
 ///
 /// `"worktrees"` is used when a separate btrfs root mount exists (common case).
-/// `".grok-snapshots"` is used when the btrfs mount IS the repo subvolume
+/// `".qidi-snapshots"` is used when the btrfs mount IS the repo subvolume
 /// (dot-prefixed to stay hidden from git).
-pub const BTRFS_SNAPSHOT_SUBDIRS: &[&str] = &["worktrees", ".grok-snapshots"];
+pub const BTRFS_SNAPSHOT_SUBDIRS: &[&str] = &["worktrees", ".qidi-snapshots"];
 
 /// Compute the sibling metadata file path for a snapshot directory.
 pub fn btrfs_meta_path(snapshot_path: &Path) -> Option<PathBuf> {
@@ -736,13 +736,13 @@ mod tests {
 
     #[test]
     fn test_snapshot_dest_path_subvol_mount() {
-        // btrfs mount IS the subvolume root → snapshots under .grok-snapshots/.
+        // btrfs mount IS the subvolume root → snapshots under .qidi-snapshots/.
         let mount = Path::new("/workspace/repo");
         let dest = Path::new("/home/user/.qidi/worktrees/repo/session/wt-xyz");
         let got = snapshot_dest_path(mount, mount, dest);
         assert_eq!(
             got.parent().unwrap(),
-            Path::new("/workspace/repo/.grok-snapshots")
+            Path::new("/workspace/repo/.qidi-snapshots")
         );
         assert_hashed_name(got.file_name().unwrap().to_str().unwrap(), "wt-xyz");
     }

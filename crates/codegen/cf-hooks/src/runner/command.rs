@@ -1205,7 +1205,7 @@ mod tests {
     async fn test_tilde_expansion_runs_via_shell() {
         let tmp = tempfile::tempdir().unwrap();
         // Create the script at <tmp>/.grok-test-hooks-gb856/tilde-test.sh
-        let hook_dir = tmp.path().join(".grok-test-hooks-gb856");
+        let hook_dir = tmp.path().join(".qidi-test-hooks-gb856");
         std::fs::create_dir_all(&hook_dir).unwrap();
         let script = hook_dir.join("tilde-test.sh");
         std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();

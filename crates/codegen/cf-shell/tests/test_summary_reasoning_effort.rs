@@ -61,7 +61,7 @@ async fn test_fresh_session_persists_reasoning_effort() {
         // `--effort` would populate).
         let home = tempfile::TempDir::new().expect("create temp home");
         let grok_dir = home.path().join(".qidi");
-        std::fs::create_dir_all(&grok_dir).expect("create .grok dir");
+        std::fs::create_dir_all(&grok_dir).expect("create .qidi dir");
         std::fs::write(
             grok_dir.join("config.toml"),
             r#"

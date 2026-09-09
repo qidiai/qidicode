@@ -1795,7 +1795,7 @@ mod tests {
 
     #[test]
     fn skill_entry_source_maps_scopes() {
-        let home = Path::new("/home/u/.grok");
+        let home = Path::new("/home/u/.qidi");
 
         let s = skill_fixture("a", "/repo/.qidi/skills/a/SKILL.md", SkillScope::Local);
         assert!(matches!(
@@ -1837,7 +1837,7 @@ mod tests {
     /// else keeps its real source.
     #[test]
     fn skill_entry_source_relabels_extracted_bundled_skills() {
-        let home = Path::new("/home/u/.grok");
+        let home = Path::new("/home/u/.qidi");
 
         let s = skill_fixture(
             "help",
@@ -1895,7 +1895,7 @@ mod tests {
     /// over the scope fallback.
     #[test]
     fn skill_entry_source_prefers_stamped_config_source() {
-        let home = Path::new("/home/u/.grok");
+        let home = Path::new("/home/u/.qidi");
         let mut s = skill_fixture("cfg", "/team/skills/cfg/SKILL.md", SkillScope::User);
         s.config_source = Some(ConfigSource::ConfigToml {
             path: PathBuf::from("/team/skills/cfg/SKILL.md"),

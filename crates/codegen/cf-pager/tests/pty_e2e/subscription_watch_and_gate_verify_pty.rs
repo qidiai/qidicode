@@ -153,7 +153,7 @@ fn pump_until(
 /// resolves this entry.
 fn seed_fake_oauth_local_issuer(content: &ContentController, user: &str) {
     let grok_home = content.home().join(".qidi");
-    std::fs::create_dir_all(&grok_home).expect("create temp .grok");
+    std::fs::create_dir_all(&grok_home).expect("create temp .qidi");
     std::fs::write(
         grok_home.join("auth.json"),
         format!(

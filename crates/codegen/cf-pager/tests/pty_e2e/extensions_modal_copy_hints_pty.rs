@@ -23,7 +23,7 @@ fn seed_plugins_for_copy_hints(content: &ContentController) {
         )
         .expect("write plugin.json");
     }
-    std::fs::create_dir_all(&grok_home).expect("create .grok");
+    std::fs::create_dir_all(&grok_home).expect("create .qidi");
     // User plugins default to disabled unless listed under enabled.
     let config = format!(
         "[plugins]\nenabled = [\"{ENABLED_PLUGIN}\"]\ndisabled = [\"{DISABLED_PLUGIN}\"]\n"

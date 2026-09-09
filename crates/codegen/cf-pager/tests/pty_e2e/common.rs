@@ -412,14 +412,14 @@ pub(crate) const MOUSE_OFF_HINT_PROMPT: &str =
 /// `seed_mouse_reporting_toggle_config` uses; call before spawning the pager.
 pub(crate) fn seed_ui_config(content: &ContentController, ui_body: &str) {
     let grok_home = content.home().join(".qidi");
-    std::fs::create_dir_all(&grok_home).expect("create .grok");
+    std::fs::create_dir_all(&grok_home).expect("create .qidi");
     let config = format!("[ui]\n{ui_body}\n");
     std::fs::write(grok_home.join("config.toml"), config).expect("write config.toml");
 }
 
 pub(crate) fn seed_mouse_reporting_toggle_config(content: &ContentController, enabled: bool) {
     let grok_home = content.home().join(".qidi");
-    std::fs::create_dir_all(&grok_home).expect("create .grok");
+    std::fs::create_dir_all(&grok_home).expect("create .qidi");
     // Minimal opt-in only — matches load_config's `{QIDI_HOME|HOME}/.qidi/config.toml`.
     let config = if enabled {
         "[ui]\nmouse_reporting_toggle = true\n"
@@ -433,7 +433,7 @@ pub(crate) fn seed_mouse_reporting_toggle_config(content: &ContentController, en
 /// Seed `[ui] keep_text_selection = "hold"` under the content controller's home.
 pub(crate) fn seed_keep_text_selection_config(content: &ContentController) {
     let grok_home = content.home().join(".qidi");
-    std::fs::create_dir_all(&grok_home).expect("create .grok");
+    std::fs::create_dir_all(&grok_home).expect("create .qidi");
     std::fs::write(
         grok_home.join("config.toml"),
         "[ui]\nkeep_text_selection = \"hold\"\n",

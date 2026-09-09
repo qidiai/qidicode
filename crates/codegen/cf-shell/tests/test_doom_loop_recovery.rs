@@ -539,7 +539,7 @@ async fn headless_config_enables_doom_loop_check_header() {
     let home = tempfile::TempDir::new().unwrap();
 
     let grok_home = home.path().join(".qidi");
-    std::fs::create_dir_all(&grok_home).expect("create .grok home");
+    std::fs::create_dir_all(&grok_home).expect("create .qidi home");
     std::fs::write(
         grok_home.join("config.toml"),
         "[doom_loop_recovery]\nenabled = true\n",

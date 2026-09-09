@@ -364,7 +364,7 @@ fn watch_cwd_dirs(debouncer: &mut Debouncer<AccessFilteredWatcher>, cwd: &Path) 
     {
         log_watch_error(
             &e,
-            "failed to watch project .grok directory (non-recursive)",
+            "failed to watch project .qidi directory (non-recursive)",
         );
     }
 }
@@ -378,7 +378,7 @@ fn unwatch_cwd_dirs(debouncer: &mut Debouncer<AccessFilteredWatcher>, cwd: &Path
     }
     let grok_dir = cwd.join(".qidi");
     if let Err(e) = debouncer.watcher().unwatch(&grok_dir) {
-        tracing::debug!(error = %e, "failed to unwatch project .grok directory");
+        tracing::debug!(error = %e, "failed to unwatch project .qidi directory");
     }
 }
 

@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn override_socket_path_wins_over_ws_url_derivation() {
-        let root = Path::new("/home/u/.grok");
+        let root = Path::new("/home/u/.qidi");
         let override_sock = PathBuf::from("/home/u/.qidi/leader-branch.sock");
 
         // With an override, the path is taken verbatim and the WS-URL suffix is
@@ -358,7 +358,7 @@ mod tests {
 
     #[test]
     fn no_override_falls_back_to_ws_url_derivation() {
-        let root = Path::new("/home/u/.grok");
+        let root = Path::new("/home/u/.qidi");
         // Default (empty) ws_url → bare leader.sock / leader.lock under root.
         assert_eq!(
             resolve_socket_path(None, root, ""),

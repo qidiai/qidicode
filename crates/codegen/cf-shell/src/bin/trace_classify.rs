@@ -160,10 +160,10 @@ mod tests {
             "--trace",
             "foo.json",
             "--grok-home",
-            "/tmp/scratch-grok",
+            "/tmp/scratch-qidi",
         ])
         .expect("parse");
-        assert_eq!(cli.grok_home, Some(PathBuf::from("/tmp/scratch-grok")));
+        assert_eq!(cli.grok_home, Some(PathBuf::from("/tmp/scratch-qidi")));
     }
 
     #[test]
