@@ -697,6 +697,40 @@ impl ToolRegistryBuilder {
     pub fn has_tool_id(&self, id: &str) -> bool {
         self.tools.contains_key(id) || self.legacy_lookup(id).is_some()
     }
+
+    /// Registry entry for a tool-config id, with the same legacy-id
+    /// fallback validate_config applies (finalize indexes with this so
+    /// toolsets pinned with pre-migration `cf_tools::X` ids keep
+    /// working end to end, not just at validation).
+    /// The canonical registry key for a (possibly legacy `cf_tools::X`)
+    /// tool-config id: the id itself when present, else the same legacy
+    /// fallback [`Self::lookup_entry`] applies. Used where the entry is
+    /// MOVED out of the registry (`HashMap::remove`) and the borrow
+    /// checker forbids returning the entry.
+    fn canonical_id(&self, id: &str) -> String {
+        if self.tools.contains_key(id) {
+            return id.to_string();
+        }
+        if let Some(short) = id
+            .strip_prefix("cf_tools::")
+            .or_else(|| id.strip_prefix("cf_tools:"))
+        {
+            for ns in ["QidiBuild", "QidiBuildHashline"] {
+                let candidate = format!("{ns}:{short}");
+                if self.tools.contains_key(&candidate) {
+                    return candidate;
+                }
+            }
+        }
+        id.to_string()
+    }
+
+    fn lookup_entry(&self, id: &str) -> &ToolEntry {
+        self.tools
+            .get(id)
+            .or_else(|| self.legacy_lookup(id))
+            .unwrap_or_else(|| panic!("registry entry missing for tool id {id:?} (no legacy fallback)"))
+    }
     pub fn known_tool_ids(&self) -> std::collections::HashSet<String> {
         self.tools.keys().cloned().collect()
     }
@@ -1018,13 +1052,13 @@ impl ToolRegistryBuilder {
         }
         let mut kind_to_name: HashMap<ToolKind, String> = HashMap::new();
         for tool_config in &config.tools {
-            let entry = &self.tools[&tool_config.id];
+            let entry = self.lookup_entry(&tool_config.id);
             let client_name = tool_config.resolve_client_name(&entry.id);
             kind_to_name.entry(entry.kind).or_insert(client_name);
         }
         let mut kind_params: HashMap<ToolKind, HashMap<String, String>> = HashMap::new();
         for tool_config in &config.tools {
-            let entry = &self.tools[&tool_config.id];
+            let entry = self.lookup_entry(&tool_config.id);
             let map = kind_params.entry(entry.kind).or_default();
             if let Some(props) = entry
                 .input_schema
@@ -1153,7 +1187,8 @@ impl ToolRegistryBuilder {
         let preset_name = config.behavior_preset.as_deref().unwrap_or("current");
         let local_registry = self.shared_local_registry.take().unwrap_or_default();
         for tool_config in &config.tools {
-            let entry = self.tools.remove(&tool_config.id).unwrap();
+            let real_id = self.canonical_id(&tool_config.id);
+            let entry = self.tools.remove(&real_id).unwrap();
             (entry.register_in_local)(&local_registry);
             let contract_version = crate::versions::resolve_version(
                 preset_name,

@@ -9353,7 +9353,10 @@ pub(crate) mod tests {
     /// reaches the queue before the queue drain runs: the producer enqueues an
     /// item the unreachable test queue can never upload, so `unfinished == 1`
     /// is only observable if the enqueue landed before phase 2 concluded.
-    #[tokio::test]
+    /// start_paused: the 100ms producer sleep must deterministically
+    /// finish within the 1.5s drain budget (auto-advance keeps the
+    /// wall clock from flaking the `produced` assert under load).
+    #[tokio::test(start_paused = true)]
     async fn two_phase_drain_waits_for_producer_then_drains_queue() {
         use std::sync::atomic::Ordering;
         let factory = Arc::new(TestSessionContextFactory::new());
