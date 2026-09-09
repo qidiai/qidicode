@@ -715,6 +715,7 @@ impl ToolRegistryBuilder {
             .strip_prefix("cf_tools::")
             .or_else(|| id.strip_prefix("cf_tools:"))
         {
+            // MUST stay in lockstep with legacy_lookup's fallback chain.
             for ns in ["QidiBuild", "QidiBuildHashline"] {
                 let candidate = format!("{ns}:{short}");
                 if self.tools.contains_key(&candidate) {
@@ -1188,7 +1189,13 @@ impl ToolRegistryBuilder {
         let local_registry = self.shared_local_registry.take().unwrap_or_default();
         for tool_config in &config.tools {
             let real_id = self.canonical_id(&tool_config.id);
-            let entry = self.tools.remove(&real_id).unwrap();
+            let entry = self.tools.remove(&real_id).unwrap_or_else(|| {
+                panic!(
+                    "registry entry missing for tool id {:?} (canonical {:?}); \
+                     duplicate config entry?",
+                    tool_config.id, real_id
+                )
+            });
             (entry.register_in_local)(&local_registry);
             let contract_version = crate::versions::resolve_version(
                 preset_name,

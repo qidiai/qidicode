@@ -311,7 +311,7 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
         }
     }
     // Project `.qidi/lsp.json`.
-    if cwd.join(".grok").join("lsp.json").is_file() {
+    if cwd.join(".qidi").join("lsp.json").is_file() {
         hit!("lsp");
     }
     // Project `.cursor/mcp.json` — vendor MCP loading is default-on and tagged
@@ -346,7 +346,7 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     // resolve trusted and run ungated. Presence mirrors discovery's "something to
     // gate" check.
     let hook_root = chain.git_root.as_deref().unwrap_or(cwd);
-    if hook_root.join(".grok").join("hooks").is_dir()
+    if hook_root.join(".qidi").join("hooks").is_dir()
         || hook_root.join(".cursor").join("hooks.json").is_file()
     {
         hit!("hooks");
@@ -524,7 +524,7 @@ mod tests {
     #[test]
     fn repo_configs_present_detects_grok_config_mcp_servers() {
         let tmp = repo_tmp();
-        let grok = tmp.path().join(".grok");
+        let grok = tmp.path().join(".qidi");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(grok.join("config.toml"), "[mcp_servers.x]\ncommand=\"y\"\n").unwrap();
         assert!(repo_configs_present(tmp.path()));
@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn repo_configs_present_detects_grok_lsp_json() {
         let tmp = repo_tmp();
-        let grok = tmp.path().join(".grok");
+        let grok = tmp.path().join(".qidi");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(grok.join("lsp.json"), "{}").unwrap();
         assert!(repo_configs_present(tmp.path()));
@@ -606,7 +606,7 @@ mod tests {
         // A hooks-only repo (no MCP/LSP configs) must still be gated, so its
         // project hooks don't run ungated when the folder is untrusted.
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".grok").join("hooks")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".qidi").join("hooks")).unwrap();
         assert!(repo_configs_present(tmp.path()));
     }
 
@@ -616,7 +616,7 @@ mod tests {
         // the gate must still fire because discovery resolves hooks from the root
         // (the cwd-relative check this regresses would miss it).
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".grok").join("hooks")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".qidi").join("hooks")).unwrap();
         let subdir = tmp.path().join("crates").join("inner");
         std::fs::create_dir_all(&subdir).unwrap();
         assert!(repo_configs_present(&subdir));
@@ -647,7 +647,7 @@ mod tests {
         // A project config whose `[mcp_servers]` table is empty has nothing to
         // gate, so it must not trip the gate.
         let tmp = repo_tmp();
-        let grok = tmp.path().join(".grok");
+        let grok = tmp.path().join(".qidi");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(grok.join("config.toml"), "[mcp_servers]\n").unwrap();
         assert!(!repo_configs_present(tmp.path()));
@@ -659,7 +659,7 @@ mod tests {
         // dir, no MCP/LSP/hooks) must still be gated: those paths load as
         // auto-trusted ConfigPath plugins, so an ungated clone is a live RCE.
         let tmp = repo_tmp();
-        let grok = tmp.path().join(".grok");
+        let grok = tmp.path().join(".qidi");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./x\"]\n").unwrap();
         assert!(repo_configs_present(tmp.path()));
@@ -670,7 +670,7 @@ mod tests {
         // An empty `[plugins].paths` (or a `[plugins]` table without `paths`)
         // contributes no plugin code-exec, so it must not trip the gate.
         let tmp = repo_tmp();
-        let grok = tmp.path().join(".grok");
+        let grok = tmp.path().join(".qidi");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(grok.join("config.toml"), "[plugins]\npaths = []\n").unwrap();
         assert!(!repo_configs_present(tmp.path()));
@@ -689,7 +689,7 @@ mod tests {
         std::fs::create_dir_all(qidi.join("agents")).unwrap();
         // [plugins].paths is read from `<root>/.grok/config.toml`
         // (see load_project_config), unlike the agents dir SSOT.
-        let grok = tmp.path().join(".grok");
+        let grok = tmp.path().join(".qidi");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./x\"]\n").unwrap();
         let claude = tmp.path().join(".claude");

@@ -3300,7 +3300,7 @@ impl MvpAgent {
             if servers.is_empty() {
                 let user_path = cf_tools::util::grok_home::grok_home()
                     .join("lsp.json");
-                let project_path = tool_ctx.cwd.as_path().join(".grok").join("lsp.json");
+                let project_path = tool_ctx.cwd.as_path().join(".qidi").join("lsp.json");
                 tracing::warn!(
                     cwd = % tool_ctx.cwd, user_lsp_path = % user_path.display(),
                     project_lsp_path = % project_path.display(),

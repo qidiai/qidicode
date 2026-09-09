@@ -627,7 +627,7 @@ fn grok_home() -> std::path::PathBuf {
     cf_fast_worktree::resolve_grok_home().unwrap_or_else(|_| {
         dirs::home_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-            .join(".grok")
+            .join(".qidi")
     })
 }
 

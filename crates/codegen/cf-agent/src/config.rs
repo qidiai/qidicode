@@ -2231,7 +2231,7 @@ description: Test default tool config
         let bundled = tmp
             .path()
             .join("nested")
-            .join(".grok")
+            .join(".qidi")
             .join("bundled")
             .join("agents")
             .join("bundled-agent.md");

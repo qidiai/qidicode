@@ -37,7 +37,7 @@ impl LeaderCluster {
             .context("start content controller")?;
         // One shared QIDI_HOME => one leader; the socket lives beneath it so
         // every client (sharing the same env) elects/attaches to the same one.
-        let grok_home = content.home().join(".grok");
+        let grok_home = content.home().join(".qidi");
         std::fs::create_dir_all(&grok_home).context("create grok home")?;
         let socket = grok_home.join("leader-e2e.sock");
         let binary = pager_binary().context("resolve pager binary")?;
@@ -82,7 +82,7 @@ impl LeaderCluster {
     /// The cluster's sessions root: `QIDI_HOME/sessions` (layout below is
     /// `sessions/<encoded-cwd>/<session-id>/updates.jsonl`).
     fn sessions_dir(&self) -> PathBuf {
-        self.content.home().join(".grok").join("sessions")
+        self.content.home().join(".qidi").join("sessions")
     }
 
     /// The session-update payload of every record across every `updates.jsonl`

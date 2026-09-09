@@ -152,7 +152,7 @@ fn pump_until(
 /// `QIDI_LOCAL_AUTH=1` in the spawn env so the shell's scope-key lookup
 /// resolves this entry.
 fn seed_fake_oauth_local_issuer(content: &ContentController, user: &str) {
-    let grok_home = content.home().join(".grok");
+    let grok_home = content.home().join(".qidi");
     std::fs::create_dir_all(&grok_home).expect("create temp .grok");
     std::fs::write(
         grok_home.join("auth.json"),

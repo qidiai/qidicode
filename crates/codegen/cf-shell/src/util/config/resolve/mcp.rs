@@ -436,8 +436,8 @@ mod max_mcp_output_bytes_tests {
         // Make it a git repo so the chain walks subdir → root.
         git2::Repository::init(root).unwrap();
         let sub = root.join("crates").join("thing");
-        std::fs::create_dir_all(sub.join(".grok")).unwrap();
-        std::fs::create_dir_all(root.join(".grok")).unwrap();
+        std::fs::create_dir_all(sub.join(".qidi")).unwrap();
+        std::fs::create_dir_all(root.join(".qidi")).unwrap();
         std::fs::write(
             root.join(".qidi/config.toml"),
             "[mcp]\nmax_output_bytes = 30000\n",

@@ -851,7 +851,7 @@ pub fn discover_skills_for_paths(
 ) -> Vec<SkillInfo> {
     // `.grok` and `.agents` are always scanned; `.claude` is gated on the
     // claude-vendor skills cell. (`.cursor` is excluded here by design — see fn docs.)
-    let mut config_dir_names: Vec<&str> = vec![".grok", ".agents"];
+    let mut config_dir_names: Vec<&str> = vec![".qidi", ".agents"];
     if compat.claude.skills {
         config_dir_names.push(".claude");
     }
@@ -1533,7 +1533,7 @@ model: test-model
             "---\nname: claude-dyn\n---\n",
         )
         .unwrap();
-        let grok_skill = sub.join(".grok").join("skills").join("grok-dyn");
+        let grok_skill = sub.join(".qidi").join("skills").join("grok-dyn");
         std::fs::create_dir_all(&grok_skill).unwrap();
         std::fs::write(grok_skill.join("SKILL.md"), "---\nname: grok-dyn\n---\n").unwrap();
 

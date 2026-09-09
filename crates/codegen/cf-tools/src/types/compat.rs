@@ -1,7 +1,7 @@
 //! Vendor compatibility configuration for third-party agent surfaces
 //! (skills, rules, agents, MCPs, hooks, sessions).
 //!
-//! Historically the agent hard-coded the dir lists `[".grok", ".agents",
+//! Historically the agent hard-coded the dir lists `[".qidi", ".agents",
 //! ".claude", ".cursor"]` (and `RULES_DIRS` / `AGENT_FILENAMES`) across ~6
 //! call sites in three crates. This module now owns the canonical cell registry
 //! used by runtime resolution and diagnostics (env var → config TOML → remote
@@ -361,11 +361,11 @@ impl CompatConfig {
     /// priority order. `.grok` and `.agents` are always included; `.claude`
     /// and `.cursor` are gated on their respective `skills` cell.
     ///
-    /// Replaces the hard-coded `[".grok", ".agents", ".claude", ".cursor"]`
+    /// Replaces the hard-coded `[".qidi", ".agents", ".claude", ".cursor"]`
     /// in `collect_skill_config_dirs`. When all cells are on, the returned
     /// list is identical to the historical constant.
     pub fn skill_config_dirs(&self) -> Vec<&'static str> {
-        let mut dirs = vec![".grok", ".agents"];
+        let mut dirs = vec![".qidi", ".agents"];
         if self.claude.skills {
             dirs.push(".claude");
         }
@@ -511,10 +511,10 @@ mod tests {
 
     #[test]
     fn skill_config_dirs_all_on_matches_legacy_constant() {
-        // Historical constant was `[".grok", ".agents", ".claude", ".cursor"]`.
+        // Historical constant was `[".qidi", ".agents", ".claude", ".cursor"]`.
         assert_eq!(
             CompatConfig::default().skill_config_dirs(),
-            vec![".grok", ".agents", ".claude", ".cursor"]
+            vec![".qidi", ".agents", ".claude", ".cursor"]
         );
     }
 
@@ -522,15 +522,15 @@ mod tests {
     fn skill_config_dirs_gates_each_vendor() {
         let mut c = CompatConfig::default();
         c.cursor.skills = false;
-        assert_eq!(c.skill_config_dirs(), vec![".grok", ".agents", ".claude"]);
+        assert_eq!(c.skill_config_dirs(), vec![".qidi", ".agents", ".claude"]);
 
         c.claude.skills = false;
-        assert_eq!(c.skill_config_dirs(), vec![".grok", ".agents"]);
+        assert_eq!(c.skill_config_dirs(), vec![".qidi", ".agents"]);
 
         // Only the `cursor` cell on (`claude` off): `cursor` still appended last.
         let mut c2 = CompatConfig::default();
         c2.claude.skills = false;
-        assert_eq!(c2.skill_config_dirs(), vec![".grok", ".agents", ".cursor"]);
+        assert_eq!(c2.skill_config_dirs(), vec![".qidi", ".agents", ".cursor"]);
     }
 
     #[test]

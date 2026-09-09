@@ -536,7 +536,7 @@ impl ScriptedScenarioRunner {
         }
 
         if let Some(config_toml) = &scenario.environment.config_toml {
-            let grok_home = content.home().join(".grok");
+            let grok_home = content.home().join(".qidi");
             fs::create_dir_all(&grok_home)
                 .with_context(|| format!("create scenario QIDI_HOME {}", grok_home.display()))?;
             fs::write(grok_home.join("config.toml"), config_toml)

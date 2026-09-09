@@ -1096,7 +1096,7 @@ pub fn user_config_path() -> PathBuf {
 
 /// Path to a project-level config file (`<dir>/.qidi/config.toml`).
 pub fn project_config_path(dir: &std::path::Path) -> PathBuf {
-    dir.join(".grok").join("config.toml")
+    dir.join(".qidi").join("config.toml")
 }
 
 /// True when the config file at `path` defines `[mcp_servers.<name>]`.
@@ -1658,7 +1658,7 @@ expose_image_base64 = true
     #[test]
     fn mcp_json_all_toml_names_includes_disabled() {
         let tmp = tempfile::tempdir().unwrap();
-        let grok_dir = tmp.path().join(".grok");
+        let grok_dir = tmp.path().join(".qidi");
         std::fs::create_dir_all(&grok_dir).unwrap();
         std::fs::write(
             grok_dir.join("config.toml"),

@@ -357,7 +357,7 @@ fn watch_cwd_dirs(debouncer: &mut Debouncer<AccessFilteredWatcher>, cwd: &Path) 
     if let Err(e) = debouncer.watcher().watch(cwd, RecursiveMode::NonRecursive) {
         log_watch_error(&e, "failed to watch project cwd (non-recursive)");
     }
-    let grok_dir = cwd.join(".grok");
+    let grok_dir = cwd.join(".qidi");
     if let Err(e) = debouncer
         .watcher()
         .watch(&grok_dir, RecursiveMode::NonRecursive)
@@ -376,7 +376,7 @@ fn unwatch_cwd_dirs(debouncer: &mut Debouncer<AccessFilteredWatcher>, cwd: &Path
     if let Err(e) = debouncer.watcher().unwatch(cwd) {
         tracing::debug!(error = %e, "failed to unwatch project cwd");
     }
-    let grok_dir = cwd.join(".grok");
+    let grok_dir = cwd.join(".qidi");
     if let Err(e) = debouncer.watcher().unwatch(&grok_dir) {
         tracing::debug!(error = %e, "failed to unwatch project .grok directory");
     }
@@ -443,7 +443,7 @@ fn is_global_config_dir(dir: &Path, grok_home: &Path) -> bool {
 /// Vendor config dir names that sit directly under `$HOME` and carry large
 /// non-skill trees. Kept in sync with the home-level dirs added by
 /// `collect_skill_config_dirs`.
-const HOME_VENDOR_DIRS: &[&str] = &[".grok", ".agents", ".claude", ".cursor"];
+const HOME_VENDOR_DIRS: &[&str] = &[".qidi", ".agents", ".claude", ".cursor"];
 
 /// Testable core of [`is_global_config_dir`] with `$HOME` injected.
 fn is_global_config_dir_impl(dir: &Path, grok_home: &Path, home: Option<&Path>) -> bool {
@@ -572,7 +572,7 @@ mod tests {
     fn is_global_config_dir_matches_only_grok_home_and_vendor_dirs() {
         let home = TempDir::new().unwrap();
         let home = home.path();
-        let grok_home = home.join(".grok");
+        let grok_home = home.join(".qidi");
 
         let g = |dir: &Path| is_global_config_dir_impl(dir, &grok_home, Some(home));
 
@@ -586,7 +586,7 @@ mod tests {
         assert!(!g(&home.join("my-skills")));
         assert!(!g(&home.join(".config")));
         // A project/repo config dir (parent isn't $HOME): NOT global.
-        assert!(!g(&home.join("repo").join(".grok")));
+        assert!(!g(&home.join("repo").join(".qidi")));
     }
 
     /// Regression for the ~/.qidi inotify-exhaustion / worktree-noise bug: a
@@ -607,7 +607,7 @@ mod tests {
         let wt_skill = global
             .join("worktrees")
             .join("wt1")
-            .join(".grok")
+            .join(".qidi")
             .join("skills")
             .join("beta");
         fs::create_dir_all(&wt_skill).unwrap();
@@ -845,7 +845,7 @@ mod tests {
     fn project_cwd_toml_triggers_reload() {
         let grok_home = TempDir::new().unwrap();
         let cwd = TempDir::new().unwrap();
-        let project_grok = cwd.path().join(".grok");
+        let project_grok = cwd.path().join(".qidi");
         fs::create_dir_all(&project_grok).unwrap();
         // Seed the file before the watcher starts so we observe the
         // modification rather than the creation event.
@@ -983,7 +983,7 @@ mod tests {
     fn watch_path_dynamic_registration() {
         let grok_home = TempDir::new().unwrap();
         let new_cwd = TempDir::new().unwrap();
-        let project_grok = new_cwd.path().join(".grok");
+        let project_grok = new_cwd.path().join(".qidi");
         fs::create_dir_all(&project_grok).unwrap();
         fs::write(project_grok.join("config.toml"), "").unwrap();
 

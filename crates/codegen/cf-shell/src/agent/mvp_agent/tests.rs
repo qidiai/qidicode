@@ -843,7 +843,7 @@ fn resolve_agent_definition_agent_profile_with_model_override() {
         std::env::remove_var("QIDI_AGENT");
     }
     let tmp = tempfile::tempdir().unwrap();
-    let agents_dir = tmp.path().join(".grok").join("agents");
+    let agents_dir = tmp.path().join(".qidi").join("agents");
     std::fs::create_dir_all(&agents_dir).unwrap();
     std::fs::write(
             agents_dir.join("test-architect.md"),

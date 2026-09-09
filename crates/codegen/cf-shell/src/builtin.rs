@@ -280,7 +280,7 @@ mod tests {
         extract_bundled_files(home);
 
         let workspace = tmp.path().join("workspace");
-        std::fs::create_dir_all(workspace.join(".grok").join("skills").join("help")).unwrap();
+        std::fs::create_dir_all(workspace.join(".qidi").join("skills").join("help")).unwrap();
         std::fs::copy(
             home.join("skills/help/SKILL.md"),
             workspace.join(".qidi/skills/help/SKILL.md"),

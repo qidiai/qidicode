@@ -41,7 +41,7 @@ async fn campaign_leader_mode_remote_dismiss_on_model_pick() {
     // Seed config.toml with the user's own default model; a fixed leader
     // socket under the shared QIDI_HOME so every spawn elects/attaches to the
     // same leader (mirrors `LeaderCluster`).
-    let grok_home = content.home().join(".grok");
+    let grok_home = content.home().join(".qidi");
     std::fs::create_dir_all(&grok_home).expect("create QIDI_HOME");
     std::fs::write(
         grok_home.join("config.toml"),
