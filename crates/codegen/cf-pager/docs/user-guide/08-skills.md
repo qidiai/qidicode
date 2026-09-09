@@ -18,19 +18,19 @@ Grok discovers skills from these directories, in priority order:
 
 | Location | Scope | Priority | Notes |
 |----------|-------|----------|-------|
-| `./.grok/skills/`, `./.grok/commands/` | Local (CWD) | Highest | Current directory skills / legacy command markdown |
-| `<repo_root>/.grok/skills/`, `…/commands/` | Repo | Medium | Shared across the repo |
+| `./.qidi/skills/`, `./.qidi/commands/` | Local (CWD) | Highest | Current directory skills / legacy command markdown |
+| `<repo_root>/.qidi/skills/`, `…/commands/` | Repo | Medium | Shared across the repo |
 | `~/.qidi/skills/`, `~/.qidi/commands/` | User | Lowest | Personal skills for all projects |
 | `~/.claude/skills/`, `~/.claude/commands/` | User | Lowest | Claude Code compatibility (configurable) |
 | `./.claude/skills/`, `./.claude/commands/` | Local / Repo | High | Project Claude skills and legacy custom slash commands |
 | `~/.cursor/skills/` | User | Lowest | Cursor compatibility (configurable) |
 | `./.cursor/skills/` | Local / Repo | High | Project Cursor skills (when cursor compat skills are enabled) |
 
-Grok deduplicates skills by name -- a higher-priority location overrides a lower one. Grok also scans `.agents/skills/` (and `commands/`) at each tier (alongside `.grok/`) and walks every directory between your working directory and the repo root.
+Grok deduplicates skills by name -- a higher-priority location overrides a lower one. Grok also scans `.agents/skills/` (and `commands/`) at each tier (alongside `.qidi/`) and walks every directory between your working directory and the repo root.
 
 Flat `*.md` files under a `commands/` directory become user-invocable slash commands (filename stem = command name), matching Claude Code's legacy custom-command layout.
 
-Skill and command discovery does **not** use `.gitignore`. Paths under known skill roots (`.grok/`, `.agents/`, `.claude/`, `.cursor/`) always load when present on disk — teams often ignore `.claude/**` as local-only config while still expecting `/frontend`-style project commands to work. To hide a skill, use `[skills] ignore` in config (not repo ignore rules).
+Skill and command discovery does **not** use `.gitignore`. Paths under known skill roots (`.qidi/`, `.agents/`, `.claude/`, `.cursor/`) always load when present on disk — teams often ignore `.claude/**` as local-only config while still expecting `/frontend`-style project commands to work. To hide a skill, use `[skills] ignore` in config (not repo ignore rules).
 
 Grok scans the Claude and Cursor skill directories by default. To stop scanning a vendor, set its `skills` cell to `false` under `[compat.cursor]` or `[compat.claude]` in `~/.qidi/config.toml`, or set the `GROK_CURSOR_SKILLS_ENABLED` or `GROK_CLAUDE_SKILLS_ENABLED` environment variable to `false`. See [Configuration](05-configuration.md#harness-compatibility) for details. Grok always filters out known vendor-shipped default skills (such as Cursor's `shell`, `canvas`, and `statusline`), regardless of these settings.
 
@@ -127,7 +127,7 @@ When you run `/create-skill`, Grok:
 
 2. **Drafts the description.** Grok writes a `description` that states what the skill does, the phrases that trigger it, and the slash command name. You approve or edit the draft before continuing.
 
-3. **Creates the skill directory.** Grok creates the `<scope>/.grok/skills/<name>/` directory, plus `scripts/` or `references/` subdirectories when the skill needs them.
+3. **Creates the skill directory.** Grok creates the `<scope>/.qidi/skills/<name>/` directory, plus `scripts/` or `references/` subdirectories when the skill needs them.
 
 4. **Writes SKILL.md.** Grok writes the frontmatter (`name` and `description`) and a markdown body of instructions, along with any supporting files.
 
@@ -137,7 +137,7 @@ When you run `/create-skill`, Grok:
 
 Grok asks where to save the skill:
 
-- **Project** (`<repo_root>/.grok/skills/<name>/`) -- available only in this repository and shareable with teammates through version control. Grok recommends this scope inside a git repository.
+- **Project** (`<repo_root>/.qidi/skills/<name>/`) -- available only in this repository and shareable with teammates through version control. Grok recommends this scope inside a git repository.
 - **User** (`~/.qidi/skills/<name>/`) -- available across all your projects.
 
 The new skill appears in the slash menu within a few seconds, because Grok reloads skills when files change on disk.
@@ -168,7 +168,7 @@ To browse your skills, type `/` to open the slash-command menu. Grok lists every
 When a skill's name collides with another skill or a built-in command, Grok advertises a qualified name prefixed by the skill's scope -- `local:`, `repo:`, `user:`, or the plugin name. Use the qualified form to choose a specific skill:
 
 ```
-/local:commit        # The "commit" skill from ./.grok/skills/
+/local:commit        # The "commit" skill from ./.qidi/skills/
 /user:commit         # The "commit" skill from ~/.qidi/skills/
 ```
 
@@ -217,6 +217,6 @@ See the [Plugins guide](09-plugins.md) for more on installing plugins that provi
 
 4. **Keep skills focused.** Write one skill per workflow. A "deploy" skill and a "rollback" skill work better than a single "deploy-and-rollback" skill.
 
-5. **Version-control project skills.** Commit `.grok/skills/` to your repository so the whole team benefits. User skills in `~/.qidi/skills/` stay personal and unshared.
+5. **Version-control project skills.** Commit `.qidi/skills/` to your repository so the whole team benefits. User skills in `~/.qidi/skills/` stay personal and unshared.
 
 6. **Test by running it.** Invoke `/name` and confirm the skill works before you rely on automatic invocation.

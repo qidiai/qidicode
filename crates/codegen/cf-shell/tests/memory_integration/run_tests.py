@@ -166,9 +166,9 @@ class IsolatedEnv:
     """Creates a fully isolated grok environment with custom $HOME.
 
     The agent subprocess gets a fake $HOME with:
-      ~/.grok/auth.json   (copied from real home)
-      ~/.grok/memory/     (pre-populated by tests)
-      ~/.grok/logs/       (memory.log appears here)
+      ~/.qidi/auth.json   (copied from real home)
+      ~/.qidi/memory/     (pre-populated by tests)
+      ~/.qidi/logs/       (memory.log appears here)
 
     And a workspace directory used as cwd when spawning the agent.
     """
@@ -180,20 +180,20 @@ class IsolatedEnv:
         os.makedirs(self.fake_home)
         os.makedirs(self.workspace)
 
-        # Create .grok dirs in fake home
-        self.grok_home = os.path.join(self.fake_home, ".grok")
+        # Create .qidi dirs in fake home
+        self.grok_home = os.path.join(self.fake_home, ".qidi")
         self.memory_dir = os.path.join(self.grok_home, "memory")
         self.logs_dir = os.path.join(self.grok_home, "logs")
         os.makedirs(self.memory_dir)
         os.makedirs(self.logs_dir)
 
         # Copy auth from real home
-        real_auth = os.path.expanduser("~/.grok/auth.json")
+        real_auth = os.path.expanduser("~/.qidi/auth.json")
         if os.path.isfile(real_auth):
             shutil.copy2(real_auth, os.path.join(self.grok_home, "auth.json"))
 
     def write_config(self, toml_str):
-        """Write global ~/.grok/config.toml (where the agent reads config)."""
+        """Write global ~/.qidi/config.toml (where the agent reads config)."""
         with open(os.path.join(self.grok_home, "config.toml"), "w") as f:
             f.write(toml_str)
 
@@ -272,7 +272,7 @@ class IsolatedEnv:
             sys.exit(1)
         env = os.environ.copy()
         env["HOME"] = self.fake_home
-        env["GROK_MEMORY"] = "1"
+        env["QIDI_MEMORY"] = "1"
         env["RUST_LOG"] = "warn"
         # Disable leader mode
         env["GROK_NO_LEADER"] = "1"
@@ -919,7 +919,7 @@ def test_memory_disabled():
 enabled = false
 """)
         env.write_global_memory("# Should not be indexed\n")
-        client = env.spawn_agent(extra_env={"GROK_MEMORY": "0"})
+        client = env.spawn_agent(extra_env={"QIDI_MEMORY": "0"})
         init_session(client)
         time.sleep(2)
 
@@ -949,7 +949,7 @@ def test_memory_disabled_no_config():
         # Config with no memory section at all
         env.write_config("")
         env.write_global_memory("# Should not be indexed\n")
-        client = env.spawn_agent(extra_env={"GROK_MEMORY": "0"})
+        client = env.spawn_agent(extra_env={"QIDI_MEMORY": "0"})
         init_session(client)
         time.sleep(2)
 
@@ -972,7 +972,7 @@ def test_memory_enabled_env_override():
         # Config enables memory
         env.write_config(INDEXING_ONLY_CONFIG)
         env.write_global_memory("# Env test content\n* Key value here\n")
-        client = env.spawn_agent(extra_env={"GROK_MEMORY": "1"})
+        client = env.spawn_agent(extra_env={"QIDI_MEMORY": "1"})
         init_session(client)
         time.sleep(3)
 
@@ -1344,13 +1344,13 @@ def test_multiple_workspace_isolation():
         beta_workspace = os.path.join(env1.root, "workspace", "project-beta")
         os.makedirs(beta_workspace, exist_ok=True)
 
-        # Config is already in global ~/.grok/config.toml from env1.write_config
+        # Config is already in global ~/.qidi/config.toml from env1.write_config
 
         # Start agent in workspace beta (reuse env1's fake home)
         binary = os.environ.get("GROK_BINARY", "grok")
         env_vars = os.environ.copy()
         env_vars["HOME"] = env1.fake_home
-        env_vars["GROK_MEMORY"] = "1"
+        env_vars["QIDI_MEMORY"] = "1"
         env_vars["RUST_LOG"] = "warn"
         env_vars["GROK_NO_LEADER"] = "1"
         proc2 = subprocess.Popen(

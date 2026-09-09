@@ -49,7 +49,7 @@ To block specific files (e.g. `.env` or credential paths) on top of a profile, d
 
 ## Custom Profiles
 
-Create custom sandbox profiles in `~/.qidi/sandbox.toml` (global) or `.grok/sandbox.toml` (per-project):
+Create custom sandbox profiles in `~/.qidi/sandbox.toml` (global) or `.qidi/sandbox.toml` (per-project):
 
 ```toml
 [profiles.project]

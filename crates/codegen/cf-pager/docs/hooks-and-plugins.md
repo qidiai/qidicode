@@ -22,7 +22,7 @@ Hooks are shell commands (or HTTP calls) that run automatically on events like `
 
 Hooks are grouped by source:
 - **Global hooks** — from `~/.qidi/hooks/`
-- **Project hooks** — from `.grok/hooks/` in your repo
+- **Project hooks** — from `.qidi/hooks/` in your repo
 - **Plugin hooks** — bundled with installed plugins
 - **Custom hooks** — added manually via a path
 

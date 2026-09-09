@@ -36,3 +36,7 @@ bin/bin/
 tools/media-gen-agent/agnes_config.json
 tools/media-gen-agent/agnes_config.json.*
 
+
+# 2026-09-09 audit: local runtime dirs, never commit
+.qidi/
+.worktree-backups-*/
