@@ -17,7 +17,7 @@ async fn reasoning_efforts_from_config_toml_menu() {
 
     // Seed `~/.qidi/config.toml` with a per-model reasoning-effort menu.
     let grok_home = content.home().join(".qidi");
-    std::fs::create_dir_all(&grok_home).expect("create .grok");
+    std::fs::create_dir_all(&grok_home).expect("create .qidi");
     // Quote the dotted model id: bare `[model.grok-4.5]` is TOML key-path syntax (model.grok-4.5), not the id "grok-4.5".
     std::fs::write(
         grok_home.join("config.toml"),

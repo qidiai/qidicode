@@ -86,7 +86,7 @@ pub fn inference_request_count(content: &ContentController) -> usize {
 /// mock server accepts any bearer. Pair with [`oauth_env_for_pager`].
 pub fn seed_fake_oauth(content: &ContentController, user: &str) {
     let grok_home = content.home().join(".qidi");
-    std::fs::create_dir_all(&grok_home).expect("create temp .grok");
+    std::fs::create_dir_all(&grok_home).expect("create temp .qidi");
     std::fs::write(
         grok_home.join("auth.json"),
         format!(

@@ -47,7 +47,7 @@ async fn minimal_transcript_expands_collapsed_thinking() {
 
     // Thinking blocks explicitly ON (ingestion is gated on this toggle; the
     // sandbox `$HOME` starts with no config at all).
-    std::fs::create_dir_all(content.home().join(".qidi")).expect("mk .grok");
+    std::fs::create_dir_all(content.home().join(".qidi")).expect("mk .qidi");
     std::fs::write(
         content.home().join(".qidi/config.toml"),
         "[ui]\nshow_thinking_blocks = true\n",

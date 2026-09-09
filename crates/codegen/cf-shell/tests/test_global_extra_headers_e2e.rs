@@ -32,7 +32,7 @@ async fn global_models_config_reaches_inference_request() {
     let home = tempfile::TempDir::new().unwrap();
 
     let grok_home = home.path().join(".qidi");
-    std::fs::create_dir_all(&grok_home).expect("create .grok home");
+    std::fs::create_dir_all(&grok_home).expect("create .qidi home");
     std::fs::write(
         grok_home.join("config.toml"),
         r#"[models]

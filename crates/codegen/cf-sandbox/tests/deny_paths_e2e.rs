@@ -340,7 +340,7 @@ fn run_deny_case(
         .map(|p| format!("\"{p}\""))
         .collect::<Vec<_>>()
         .join(", ");
-    fs::create_dir_all(tmp.join(".qidi")).expect("mkdir .grok");
+    fs::create_dir_all(tmp.join(".qidi")).expect("mkdir .qidi");
     fs::write(
         tmp.join(".qidi").join("sandbox.toml"),
         format!("[profiles.{profile}]\nextends = \"workspace\"\ndeny = [{deny_list}]\n"),
