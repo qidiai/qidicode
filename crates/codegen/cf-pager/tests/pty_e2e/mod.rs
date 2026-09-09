@@ -82,6 +82,7 @@ mod folder_trust_feature_off_shows_no_question;
 mod folder_trust_home_git_repo_subdir_keys_on_subdir;
 mod folder_trust_question_renders_and_accept_persists_grant;
 mod forced_wheel_mode_env_scrolls_exact_rows;
+mod garbage_storm_keeps_input_reader_alive;
 mod image_chip_preview_path_free_pty;
 mod initial_prompt_positional_auto_submits;
 mod input_echoes_at_idle_prompt;

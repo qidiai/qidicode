@@ -1141,16 +1141,34 @@ pub(crate) async fn run(
                 Err(e) => {
                     // VTE terminals / SSH PTYs can emit garbage that crossterm's
                     // parser rejects; skip transient errors rather than kill the
-                    // TUI (ratatui#1275), bailing only if they never stop.
+                    // TUI (ratatui#1275). Sustained error storms (late startup
+                    // probe replies, PTY desync) no longer exit the reader: a
+                    // dead reader permanently kills keyboard+mouse input for a
+                    // live TUI with no self-healing. Each crossterm read()
+                    // parses independently, so backing off and retrying once
+                    // the garbage subsides is safe.
                     consecutive_event_errors += 1;
                     if consecutive_event_errors >= 50 {
+                        let tiers = (consecutive_event_errors - 50).min(6);
+                        let backoff = POLL_TIMEOUT * (1u32 << tiers);
                         tracing::error!(
-                            "crossterm read returned {consecutive_event_errors} \
-                             consecutive errors, exiting reader: {e}"
+                            "crossterm read error storm ({consecutive_event_errors} \
+                             consecutive), backing off {backoff:?} then retrying: {e}"
                         );
-                        break;
+                        let mut remaining = backoff;
+                        while remaining > Duration::ZERO {
+                            if input_tx.is_closed()
+                                || reader_paused.load(Ordering::Acquire)
+                            {
+                                break;
+                            }
+                            let slice = remaining.min(POLL_TIMEOUT);
+                            std::thread::sleep(slice);
+                            remaining -= slice;
+                        }
+                    } else {
+                        tracing::warn!("crossterm read error (skipping): {e}");
                     }
-                    tracing::warn!("crossterm read error (skipping): {e}");
                 }
             }
         }

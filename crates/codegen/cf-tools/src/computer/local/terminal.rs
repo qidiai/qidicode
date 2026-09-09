@@ -2041,12 +2041,23 @@ impl LocalTerminalBackend {
         search_shadows: SearchShadowConfig,
         scope: crate::util::ProcessScope,
     ) -> Self {
+        Self::new_local_with_scope_and_ttl(search_shadows, scope, COMPLETED_TASK_TTL)
+    }
+
+    /// Like [ew_local_with_scope\] with an explicit completed-task TTL
+    /// (tests assert the Arc-drop timing of TTL-based eviction).
+    #[cfg(test)]
+    pub(crate) fn new_local_with_scope_and_ttl(
+        search_shadows: SearchShadowConfig,
+        scope: crate::util::ProcessScope,
+        completed_task_ttl: Duration,
+    ) -> Self {
         Self::new_with_ttl(
             None,
             true,
             false,
             search_shadows,
-            COMPLETED_TASK_TTL,
+            completed_task_ttl,
             FOREGROUND_BLOCK_BUDGET,
             MAX_OUTPUT_FILE_BYTES,
             scope,
@@ -4158,9 +4169,14 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local.block_on(&rt, async {
             let scope = crate::util::ProcessScope::new();
-            let backend = LocalTerminalBackend::new_local_with_scope(
+            // Short completed-task TTL: on the Windows backend the Arc
+            // drops at TTL-based eviction (not at completion), so a tiny
+            // TTL lets the 1 -> 0 transition happen promptly. The scope-
+            // injecting constructor keeps the assertions on OUR scope.
+            let backend = LocalTerminalBackend::new_local_with_scope_and_ttl(
                 SearchShadowConfig::default(),
                 scope.clone(),
+                Duration::from_millis(50),
             );
 
             // A brief sleep (not `true`): it must still be running when we read
@@ -4192,14 +4208,24 @@ mod tests {
                 "background `sleep 1` was never reaped"
             );
 
-            // The reap sweep runs in the same poll tick that sets exit_status, so
-            // by the time get_task reports completed the Arc is already dropped —
-            // kill_all() would be a no-op and can't killpg a reused pid.
-            assert_eq!(
-                scope.live_count(),
-                0,
-                "a reaped child must leave no live group enrolled in the scope"
-            );
+            // The reap sweep runs in the same poll tick that sets exit_status
+            // on Unix; on Windows the Arc drops at TTL eviction, so poll the
+            // count down to zero with a generous deadline instead of asserting
+            // immediately. Either way, the group MUST eventually leave the
+            // scope (kill_all can't killpg a reused pid).
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                if scope.live_count() == 0 {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "a reaped child must eventually leave no live group enrolled \
+                     in the scope (still {} live)",
+                    scope.live_count()
+                );
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
         });
     }
 
