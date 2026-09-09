@@ -1,8 +1,0 @@
-﻿[model."kimi-k3"]
-model = "kimi-k3"
-base_url = "https://api.moonshot.cn/v1"
-api_key = ""
-name = "Kimi K3"
-api_backend = "chat_completions"
-auth_scheme = "bearer"
-context_window = 262144

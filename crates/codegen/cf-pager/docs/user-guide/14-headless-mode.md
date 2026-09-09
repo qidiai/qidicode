@@ -531,9 +531,9 @@ QIDI Code stores data in `~/.qidi` (override with `QIDI_HOME`; see [Environment 
 | `trace-exports/`         | Session trace exports                 |
 | `worktrees/`             | Git worktree metadata                 |
 
-### Read-Only `~/.grok`
+### Read-Only `~/.qidi`
 
-For containers or CI, mount `~/.grok` read-only:
+For containers or CI, mount `~/.qidi` read-only:
 
 - Pre-populate `auth.json` or use `XAI_API_KEY`
 - Session persistence fails silently (ephemeral)

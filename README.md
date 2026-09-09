@@ -95,7 +95,7 @@ export GROK_API_KEY="xai-..."  # 旧版别名
 
 ### 自定义模型端点（base_url 覆盖）
 
-在 `~/.qidi/config.toml`（或项目级 `.grok/config.toml`）中通过 `[model.<id>]` 节可以覆盖内置模型的 `base_url`，或新增一个自定义模型条目。典型场景：把 OpenAI 兼容请求指向本机 AI Bridge 反代网关。
+在 `~/.qidi/config.toml`（或项目级 `.qidi/config.toml`）中通过 `[model.<id>]` 节可以覆盖内置模型的 `base_url`，或新增一个自定义模型条目。典型场景：把 OpenAI 兼容请求指向本机 AI Bridge 反代网关。
 
 ```toml
 # 通过 AI Bridge 反代网关使用模型

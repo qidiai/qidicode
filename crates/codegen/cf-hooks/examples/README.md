@@ -1,6 +1,6 @@
 # Hook Examples
 
-Sample hooks for QIDI Code. Copy to `~/.qidi/hooks/` to enable globally, or to `<project>/.grok/hooks/` for project-scoped hooks (requires `/hooks-trust`).
+Sample hooks for QIDI Code. Copy to `~/.qidi/hooks/` to enable globally, or to `<project>/.qidi/hooks/` for project-scoped hooks (requires `/hooks-trust`).
 
 ## Available Examples
 

@@ -31,7 +31,7 @@ In addition to AGENTS.md files, Grok scans for `*.md` files in rules directories
 
 | Location | Notes |
 |----------|-------|
-| `<dir>/.grok/rules/` | Always scanned |
+| `<dir>/.qidi/rules/` | Always scanned |
 | `<dir>/.claude/rules/` | Claude compatibility (configurable) |
 | `<dir>/.cursor/rules/` | Cursor compatibility (configurable) |
 
@@ -179,22 +179,22 @@ Files ignored by `.gitignore` are skipped during discovery. To keep personal ove
 CLAUDE.local.md
 ```
 
-As top-level instruction files, Grok discovers only the recognized filenames listed under [Supported File Names](#supported-file-names) — not custom names such as `AGENTS.local.md` or `notes.md`. (Inside a rules directory such as `.grok/rules/`, every `*.md` file is loaded regardless of name.)
+As top-level instruction files, Grok discovers only the recognized filenames listed under [Supported File Names](#supported-file-names) — not custom names such as `AGENTS.local.md` or `notes.md`. (Inside a rules directory such as `.qidi/rules/`, every `*.md` file is loaded regardless of name.)
 
 ---
 
-## The .grok/ Project Directory
+## The .qidi/ Project Directory
 
-Beyond AGENTS.md files, the `.grok/` directory in your project root can contain additional project-level configuration:
+Beyond AGENTS.md files, the `.qidi/` directory in your project root can contain additional project-level configuration:
 
 | Path | Purpose |
 |------|---------|
-| `.grok/config.toml` | Project-scoped MCP servers, plugins, and permission rules (other settings load only from `~/.qidi/config.toml`) |
-| `.grok/skills/` | Project-scoped skill definitions |
-| `.grok/plugins/` | Project-scoped plugins |
-| `.grok/agents/` | Project-scoped agent definitions |
-| `.grok/hooks/` | Project-scoped lifecycle hooks |
-| `.grok/lsp.json` | LSP server configuration |
+| `.qidi/config.toml` | Project-scoped MCP servers, plugins, and permission rules (other settings load only from `~/.qidi/config.toml`) |
+| `.qidi/skills/` | Project-scoped skill definitions |
+| `.qidi/plugins/` | Project-scoped plugins |
+| `.qidi/agents/` | Project-scoped agent definitions |
+| `.qidi/hooks/` | Project-scoped lifecycle hooks |
+| `.qidi/lsp.json` | LSP server configuration |
 
 These are all optional. See the respective guides for details on each.
 

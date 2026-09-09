@@ -1348,7 +1348,7 @@ Reference: [Language Server Protocol](https://microsoft.github.io/language-serve
 
 Grok looks for server definitions in:
 
-- project config: `<repo>/.grok/lsp.json`
+- project config: `<repo>/.qidi/lsp.json`
 - user config: `~/.qidi/lsp.json`
 
 If the same server name appears in both places, the project config wins.
@@ -1497,8 +1497,8 @@ Grok discovers skills from these directories (in priority order):
 
 | Location                    | Scope | Priority |
 | --------------------------- | ----- | -------- |
-| `./.grok/skills/`           | Local | Highest  |
-| `<repo_root>/.grok/skills/` | Repo  | Medium   |
+| `./.qidi/skills/`           | Local | Highest  |
+| `<repo_root>/.qidi/skills/` | Repo  | Medium   |
 | `~/.qidi/skills/`           | User  | Lowest   |
 | `~/.claude/skills/`         | User  | Lowest   |
 
@@ -1576,7 +1576,7 @@ Users can reference skills as `/skill-name` (e.g., `/commit`). When you see this
 
 Agent profiles control the system prompt, toolset, and behavior of a session. A profile is a `.md` file with YAML frontmatter, or a named agent discovered from disk.
 
-Grok discovers agent definitions from `.grok/agents/` (project), `~/.qidi/agents/` (user), and built-in agents. Priority (highest wins):
+Grok discovers agent definitions from `.qidi/agents/` (project), `~/.qidi/agents/` (user), and built-in agents. Priority (highest wins):
 
 1. `--agent-profile <PATH>` CLI flag
 2. `[agent]` section in `config.toml`
@@ -1641,14 +1641,14 @@ Roles define reusable capability/model defaults. Personas layer tone and behavio
 description = "Deep research agent"
 default_capability_mode = "read-only"
 model = "grok-build"
-prompt_file = ".grok/prompts/researcher.md"
+prompt_file = ".qidi/prompts/researcher.md"
 
 [subagents.personas.concise]
 instructions = "Be extremely concise. No filler words."
-# instructions_file = ".grok/personas/concise.md"  # or load from file
+# instructions_file = ".qidi/personas/concise.md"  # or load from file
 ```
 
-Both are also discovered from `.grok/roles/*.toml` and `.grok/personas/*.toml` files respectively. If a requested persona is not found, the spawn fails (fail-closed).
+Both are also discovered from `.qidi/roles/*.toml` and `.qidi/personas/*.toml` files respectively. If a requested persona is not found, the spawn fails (fail-closed).
 
 ---
 
@@ -1660,7 +1660,7 @@ Plugins extend Grok with additional tools, skills, and MCP servers from external
 
 | Location                    | Scope   |
 | --------------------------- | ------- |
-| `.grok/plugins/`            | Project |
+| `.qidi/plugins/`            | Project |
 | `~/.qidi/plugins/`          | User    |
 | `--plugin-dir <PATH>` (CLI) | Session |
 
@@ -1681,7 +1681,7 @@ Manage plugins at runtime with `/plugins list`, `/plugins reload`, or `/plugins 
 
 Hooks run project scripts on tool and session lifecycle events (pre/post-tool-use, session start/end). Projects must be explicitly trusted before their hooks execute.
 
-Grok discovers hooks from `.grok/hooks/` in the project directory. Manage them with:
+Grok discovers hooks from `.qidi/hooks/` in the project directory. Manage them with:
 
 ```
 /hooks-list              # show hooks loaded in this session
@@ -1878,28 +1878,28 @@ tool_timeouts = { create_issue = 120, search = 30 }  # Per-tool timeout override
 
 ### Project-Scoped MCP Servers
 
-MCP servers can also be configured per-project in `.grok/config.toml`. Grok walks from the current directory up to the git repo root, loading `.grok/config.toml` at each level:
+MCP servers can also be configured per-project in `.qidi/config.toml`. Grok walks from the current directory up to the git repo root, loading `.qidi/config.toml` at each level:
 
 | Location                        | Scope             | Priority |
 | ------------------------------- | ----------------- | -------- |
 | `~/.qidi/config.toml`           | All projects      | Lowest   |
-| `<repo-root>/.grok/config.toml` | This repository   | ↑        |
-| `<cwd>/.grok/config.toml`       | Current directory | Highest  |
+| `<repo-root>/.qidi/config.toml` | This repository   | ↑        |
+| `<cwd>/.qidi/config.toml`       | Current directory | Highest  |
 
 If a project defines a server with the same name as a global one, the project version **replaces** it entirely (fields are not merged — omitted fields get defaults, not the global values). Servers defined only in the global config are unaffected.
 
-**Example:** commit a `.grok/config.toml` in your repo to share MCP servers across the team:
+**Example:** commit a `.qidi/config.toml` in your repo to share MCP servers across the team:
 
 ```
 my-project/
-├── .grok/
+├── .qidi/
 │   └── config.toml
 ├── src/
 └── ...
 ```
 
 ```toml
-# .grok/config.toml
+# .qidi/config.toml
 [mcp_servers.linear]
 command = "npx"
 args = ["-y", "mcp-remote", "https://mcp.linear.app/mcp"]
@@ -1907,7 +1907,7 @@ args = ["-y", "mcp-remote", "https://mcp.linear.app/mcp"]
 
 If you also have a `linear` server in `~/.qidi/config.toml`, the project version replaces it entirely.
 
-> **Note:** Only `[mcp_servers]` is supported in project-scoped `.grok/config.toml`. Other config sections (models, shortcuts, etc.) are only read from `~/.qidi/config.toml`.
+> **Note:** Only `[mcp_servers]` is supported in project-scoped `.qidi/config.toml`. Other config sections (models, shortcuts, etc.) are only read from `~/.qidi/config.toml`.
 
 ### Tool Naming
 
@@ -2125,7 +2125,7 @@ write-protected regardless of profile.
 
 ### Custom Profiles
 
-Create `~/.qidi/sandbox.toml` (global) or `.grok/sandbox.toml` (per-project):
+Create `~/.qidi/sandbox.toml` (global) or `.qidi/sandbox.toml` (per-project):
 
 ```toml
 [profiles.devbox]
@@ -2194,7 +2194,7 @@ grok inspect --json   # machine-readable JSON
 The output shows all loaded configuration organized by type:
 
 - **Project Instructions** — AGENTS.md / CLAUDE.md files with token counts
-- **Skills** — from `.grok/skills/`, `~/.qidi/skills/`, plugins, and config paths
+- **Skills** — from `.qidi/skills/`, `~/.qidi/skills/`, plugins, and config paths
 - **Agents** — built-in, user-defined, and plugin-provided subagents
 - **Plugins** — discovered plugins with what each provides (skills, agents, hooks, MCPs)
 - **MCP Servers** — from `config.toml`, plugins, `~/.claude.json`, and `.mcp.json`
@@ -2208,13 +2208,13 @@ Plugin-provided components appear in their respective sections with a `[plugin: 
 
 ## Claude Code Compatibility
 
-Grok automatically discovers configuration from Claude Code directories alongside native `.grok/` paths. No extra setup is needed.
+Grok automatically discovers configuration from Claude Code directories alongside native `.qidi/` paths. No extra setup is needed.
 
 ### What is picked up
 
 | Component         | Claude Code location                                 | How Grok uses it                 |
 | ----------------- | ---------------------------------------------------- | -------------------------------- |
-| **Skills**        | `.claude/skills/`, `~/.claude/skills/`               | Loaded as skills (same as `.grok/skills/`) |
+| **Skills**        | `.claude/skills/`, `~/.claude/skills/`               | Loaded as skills (same as `.qidi/skills/`) |
 | **Agents**        | `.claude/agents/`, `~/.claude/agents/`               | Loaded as subagents              |
 | **Plugins**       | `.claude/plugins/`, `~/.claude/plugins/`             | Discovered with all components   |
 | **Installed plugins** | `~/.claude/plugins/installed_plugins.json`        | Each `installPath` is loaded     |
@@ -2370,12 +2370,12 @@ The agent persists all session updates automatically. Clients can reconnect and 
 | `~/.qidi/skills/`     | User-scoped skill definitions                       |
 | `~/.qidi/plugins/`    | User-scoped plugins                                 |
 | `~/.qidi/agents/`     | User-scoped agent definitions                       |
-| `.grok/config.toml`   | Project-scoped config (MCP servers)                 |
-| `.grok/skills/`       | Project-scoped skill definitions                    |
-| `.grok/plugins/`      | Project-scoped plugins                              |
-| `.grok/agents/`       | Project-scoped agent definitions                    |
-| `.grok/hooks/`        | Project-scoped hooks                                |
-| `.grok/lsp.json`      | LSP server configuration                            |
+| `.qidi/config.toml`   | Project-scoped config (MCP servers)                 |
+| `.qidi/skills/`       | Project-scoped skill definitions                    |
+| `.qidi/plugins/`      | Project-scoped plugins                              |
+| `.qidi/agents/`       | Project-scoped agent definitions                    |
+| `.qidi/hooks/`        | Project-scoped hooks                                |
+| `.qidi/lsp.json`      | LSP server configuration                            |
 | `~/.claude/skills/`   | User-scoped skills (Claude Code compat)             |
 | `~/.claude/plugins/`  | User-scoped plugins (Claude Code compat)            |
 | `~/.claude.json`      | MCP servers (Claude Code compat)                    |
@@ -2438,7 +2438,7 @@ grok completions bash > ~/.qidi/completions/bash/grok.bash
 Add to `~/.bashrc`:
 
 ```bash
-[[ -r "$HOME/.grok/completions/bash/grok.bash" ]] && source "$HOME/.grok/completions/bash/grok.bash"
+[[ -r "$HOME/.qidi/completions/bash/grok.bash" ]] && source "$HOME/.qidi/completions/bash/grok.bash"
 ```
 
 ### Zsh
@@ -2468,7 +2468,7 @@ grok completions zsh > ~/.qidi/completions/zsh/_grok
 Add to `~/.zshrc`:
 
 ```zsh
-fpath=("$HOME/.grok/completions/zsh" $fpath)
+fpath=("$HOME/.qidi/completions/zsh" $fpath)
 autoload -Uz compinit
 compinit
 ```

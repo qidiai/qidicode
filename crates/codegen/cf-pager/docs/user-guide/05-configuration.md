@@ -305,9 +305,9 @@ url = "https://mcp.example.com/api/mcp"  # HTTP/SSE transport
 headers = { "x-mcp-session-id" = "{{session_id}}" }
 ```
 
-MCP servers can also be configured per-project in `.grok/config.toml`. Project-scoped config contributes `[mcp_servers]`, `[plugins]`, and `[permission]` rules; other sections load only from `~/.qidi/config.toml`.
+MCP servers can also be configured per-project in `.qidi/config.toml`. Project-scoped config contributes `[mcp_servers]`, `[plugins]`, and `[permission]` rules; other sections load only from `~/.qidi/config.toml`.
 
-Priority for `[mcp_servers]` and `[plugins]`: `.grok/config.toml` (current dir) > `<repo-root>/.grok/config.toml` > `~/.qidi/config.toml`. `[permission]` rules are not overridden by priority; they merge across all files with `deny` > `ask` > `allow` (see [22-permissions-and-safety.md](22-permissions-and-safety.md)).
+Priority for `[mcp_servers]` and `[plugins]`: `.qidi/config.toml` (current dir) > `<repo-root>/.qidi/config.toml` > `~/.qidi/config.toml`. `[permission]` rules are not overridden by priority; they merge across all files with `deny` > `ask` > `allow` (see [22-permissions-and-safety.md](22-permissions-and-safety.md)).
 
 ### Memory
 
@@ -792,27 +792,27 @@ Key environment variables. See the README for the complete list.
 | `~/.qidi/agents/` | User-scoped agent definitions |
 | `~/.qidi/lsp.json` | LSP server configuration (user-scoped) |
 | `~/.qidi/logs/` | Internal log files (for example `unified.jsonl`, MCP server logs) |
-| `.grok/config.toml` | Project-scoped MCP servers, plugins, and permission rules |
-| `.grok/skills/` | Project-scoped skill definitions |
-| `.grok/plugins/` | Project-scoped plugins |
-| `.grok/agents/` | Project-scoped agent definitions |
-| `.grok/hooks/` | Project-scoped hooks |
-| `.grok/lsp.json` | LSP server configuration |
+| `.qidi/config.toml` | Project-scoped MCP servers, plugins, and permission rules |
+| `.qidi/skills/` | Project-scoped skill definitions |
+| `.qidi/plugins/` | Project-scoped plugins |
+| `.qidi/agents/` | Project-scoped agent definitions |
+| `.qidi/hooks/` | Project-scoped hooks |
+| `.qidi/lsp.json` | LSP server configuration |
 
 ---
 
 ## Project-Scoped Configuration
 
-Some configuration can be set per-project by placing files in `.grok/` within your repository:
+Some configuration can be set per-project by placing files in `.qidi/` within your repository:
 
 | File | What it configures |
 |------|--------------------|
-| `.grok/config.toml` | MCP servers, plugins, permission rules, and the `[mcp] max_output_bytes` tool-result cap (other sections load only from `~/.qidi/config.toml`) |
-| `.grok/skills/` | Project-specific skills |
-| `.grok/hooks/` | Project-specific lifecycle hooks |
-| `.grok/agents/` | Project-specific agent definitions |
-| `.grok/lsp.json` | LSP server configuration |
-| `.grok/sandbox.toml` | Custom sandbox profiles |
+| `.qidi/config.toml` | MCP servers, plugins, permission rules, and the `[mcp] max_output_bytes` tool-result cap (other sections load only from `~/.qidi/config.toml`) |
+| `.qidi/skills/` | Project-specific skills |
+| `.qidi/hooks/` | Project-specific lifecycle hooks |
+| `.qidi/agents/` | Project-specific agent definitions |
+| `.qidi/lsp.json` | LSP server configuration |
+| `.qidi/sandbox.toml` | Custom sandbox profiles |
 | `AGENTS.md` | Project instructions (system prompt) |
 
 Project-scoped MCP servers override global ones with the same name (full replacement, not merge).
@@ -826,12 +826,12 @@ Language servers power passive diagnostics and the optional `lsp` tool (see the 
 | Source | Location | Scope |
 |--------|----------|-------|
 | User | `~/.qidi/lsp.json` | All projects |
-| Project | `.grok/lsp.json` | Current repository |
+| Project | `.qidi/lsp.json` | Current repository |
 | Plugin | A trusted plugin's `.lsp.json` file, or an inline `lspServers` block in its `plugin.json` | Wherever the plugin is enabled |
 
 When the same server name is defined by more than one source, it is resolved in this order (highest priority first):
 
-1. **Project** -- `.grok/lsp.json`
+1. **Project** -- `.qidi/lsp.json`
 2. **User** -- `~/.qidi/lsp.json`
 3. **Plugins** -- file-based `.lsp.json`, then inline `lspServers`, in plugin load order
 
