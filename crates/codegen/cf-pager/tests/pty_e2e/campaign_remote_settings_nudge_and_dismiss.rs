@@ -39,7 +39,7 @@ async fn campaign_remote_settings_nudge_and_dismiss() {
     }));
 
     // Seed config.toml with the user's own default model.
-    let grok_home = content.home().join(".grok");
+    let grok_home = content.home().join(".qidi");
     std::fs::create_dir_all(&grok_home).expect("create QIDI_HOME");
     std::fs::write(
         grok_home.join("config.toml"),

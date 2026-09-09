@@ -163,7 +163,7 @@ pub fn test_env_cmd_tokio(
         // its per-test mock-server URL) then poisons every later test's
         // prompt (the windows-x86_64 lifecycle "prompt timed out" failure).
         // Mirrors `leader.rs` and the pty-harness `env_for_pager`.
-        .env("QIDI_HOME", home.join(".grok"))
+        .env("QIDI_HOME", home.join(".qidi"))
         .env("QIDI_CLI_CHAT_PROXY_BASE_URL", mock_url)
         .env("QIDI_XAI_API_BASE_URL", mock_url)
         .env("XAI_API_KEY", "test-key-for-ci")

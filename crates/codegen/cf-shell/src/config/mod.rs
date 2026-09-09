@@ -388,7 +388,7 @@ impl SubagentsConfig {
     /// Each file defines a single `SubagentPersona`. The file stem becomes
     /// the persona name. Inline config takes precedence.
     pub fn discover_personas(&mut self, cwd: &std::path::Path) {
-        let dir = cwd.join(".grok").join("personas");
+        let dir = cwd.join(".qidi").join("personas");
         self.discover_personas_in_dir(&dir);
     }
     /// Validate all role definitions. Returns a list of (role_name, error_message)
@@ -431,7 +431,7 @@ impl SubagentsConfig {
     ///
     /// Precedence: inline config roles override file-based roles with the same name.
     pub fn discover_roles(&mut self, cwd: &std::path::Path) {
-        let roles_dir = cwd.join(".grok").join("roles");
+        let roles_dir = cwd.join(".qidi").join("roles");
         self.discover_roles_in_dir(&roles_dir);
     }
     /// Resolve the final subagents config from all sources (in priority order):
@@ -1338,7 +1338,7 @@ pub fn apply_sandbox(
 /// Load `<cwd>/.qidi/config.toml` (with this layer's `[[version_overrides]]`
 /// applied). Empty table if the file is missing.
 pub fn load_project_config(cwd: &std::path::Path) -> std::io::Result<toml::Value> {
-    load_config_file(&cwd.join(".grok").join("config.toml"))
+    load_config_file(&cwd.join(".qidi").join("config.toml"))
 }
 pub use cf_workspace::project_config::find_project_configs;
 /// Resolve the effective `[plugins]` config for a working directory the same

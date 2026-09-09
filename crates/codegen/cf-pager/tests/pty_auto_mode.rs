@@ -49,7 +49,7 @@ fn dirs_next_home() -> Option<PathBuf> {
 /// auto-permission-mode feature gate pinned explicitly via `gate_on` so each
 /// test is self-contained and deterministic regardless of the runner's shell.
 fn prepare_sandbox(home: &Path, gate_on: bool) -> Vec<(String, String)> {
-    let grok = home.join(".grok");
+    let grok = home.join(".qidi");
     let _ = std::fs::create_dir_all(&grok);
     if let Some(src) = auth_json_source() {
         let dest = grok.join("auth.json");

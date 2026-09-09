@@ -78,7 +78,7 @@ pub(crate) fn find_project_configs_in(chain_dirs: &[PathBuf]) -> Vec<PathBuf> {
     chain_dirs
         .iter()
         .rev()
-        .map(|dir| dir.join(".grok").join("config.toml"))
+        .map(|dir| dir.join(".qidi").join("config.toml"))
         .filter(|config_path| config_path.is_file() && !is_user_grok_config_file(config_path))
         .collect()
 }
@@ -106,8 +106,8 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path().join("repo");
-        std::fs::create_dir_all(project.join(".grok")).unwrap();
-        std::fs::write(project.join(".grok").join("config.toml"), "# project\n").unwrap();
+        std::fs::create_dir_all(project.join(".qidi")).unwrap();
+        std::fs::write(project.join(".qidi").join("config.toml"), "# project\n").unwrap();
         let found = find_project_configs(&project);
         assert_eq!(found.len(), 1);
         assert!(!is_user_grok_config_file(&found[0]));

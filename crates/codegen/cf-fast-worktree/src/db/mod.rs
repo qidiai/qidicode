@@ -281,14 +281,20 @@ impl WorktreeDb {
         if id_or_path.contains('/') || id_or_path.contains('\\') {
             let canon = PathBuf::from(id_or_path);
             let canon = dunce::canonicalize(&canon).unwrap_or(canon);
-            queries::get_by_path(&self.conn, &canon)
-        } else {
-            let by_id = queries::get_by_id(&self.conn, id_or_path)?;
-            if by_id.is_some() {
-                return Ok(by_id);
+            let by_path = queries::get_by_path(&self.conn, &canon)?;
+            if by_path.is_some() {
+                return Ok(by_path);
             }
-            queries::get_by_label(&self.conn, id_or_path)
+            // A backslash-containing custom LABEL would land here with
+            // an empty path hit; fall through to the label branch so it
+            // still resolves instead of a silent Ok(None).
+            return queries::get_by_label(&self.conn, id_or_path);
         }
+        let by_id = queries::get_by_id(&self.conn, id_or_path)?;
+        if by_id.is_some() {
+            return Ok(by_id);
+        }
+        queries::get_by_label(&self.conn, id_or_path)
     }
 
     /// Look up a worktree by its label (stored in metadata JSON).
@@ -383,7 +389,7 @@ pub fn resolve_grok_home() -> Result<PathBuf> {
     // tree as trust/hooks even when it is symlinked. The dunce canonicalization
     // must stay in sync with cf_config::default_grok_home();
     // home resolution deliberately differs ($HOME here vs std::env::home_dir()).
-    Ok(dunce::canonicalize(&home).unwrap_or(home).join(".grok"))
+    Ok(dunce::canonicalize(&home).unwrap_or(home).join(".qidi"))
 }
 
 /// Serializes tests that mutate the process-global `QIDI_HOME` env var so they

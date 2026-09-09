@@ -174,7 +174,7 @@ pub fn discover_plugins(
 /// Returns `Value::Null` if the file does not exist or cannot be
 /// parsed. Non-fatal errors are logged.
 pub fn load_project_config(root_cwd: &Path) -> Value {
-    let config_path = root_cwd.join(".grok").join("config.toml");
+    let config_path = root_cwd.join(".qidi").join("config.toml");
     match cf_config::load_config_file(&config_path) {
         Ok(toml::Value::Table(ref t)) if t.is_empty() => {
             // The config loader returns an empty table when the file
@@ -276,7 +276,7 @@ mod tests {
     #[tokio::test]
     async fn discover_skills_finds_skill_md() {
         let tmp = tempfile::tempdir().unwrap();
-        let skills_dir = tmp.path().join(".grok").join("skills").join("my-skill");
+        let skills_dir = tmp.path().join(".qidi").join("skills").join("my-skill");
         fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
             skills_dir.join("SKILL.md"),
@@ -296,7 +296,7 @@ mod tests {
     #[tokio::test]
     async fn discover_skills_respects_ignore_config() {
         let tmp = tempfile::tempdir().unwrap();
-        let skills_dir = tmp.path().join(".grok").join("skills").join("ignored");
+        let skills_dir = tmp.path().join(".qidi").join("skills").join("ignored");
         fs::create_dir_all(&skills_dir).unwrap();
         fs::write(
             skills_dir.join("SKILL.md"),
@@ -324,7 +324,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let skills_dir = tmp
             .path()
-            .join(".grok")
+            .join(".qidi")
             .join("skills")
             .join("serialized-check");
         fs::create_dir_all(&skills_dir).unwrap();
@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn load_project_config_reads_toml_as_json() {
         let tmp = tempfile::tempdir().unwrap();
-        let grok_dir = tmp.path().join(".grok");
+        let grok_dir = tmp.path().join(".qidi");
         fs::create_dir_all(&grok_dir).unwrap();
         fs::write(
             grok_dir.join("config.toml"),

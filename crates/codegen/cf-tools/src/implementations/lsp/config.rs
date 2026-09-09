@@ -31,7 +31,7 @@ pub fn load_servers_with_plugins_sourced(
     );
 
     let user_path = crate::util::grok_home::grok_home().join("lsp.json");
-    let project_path = cwd.join(".grok").join("lsp.json");
+    let project_path = cwd.join(".qidi").join("lsp.json");
 
     // User-level servers
     let mut servers: BTreeMap<String, (LspServerConfig, ConfigSource)> = load_file(&user_path)
@@ -135,7 +135,7 @@ pub fn filter_project_lsp_when_untrusted(
 /// Project config overrides user config for the same server name.
 pub fn load_servers(cwd: &Path) -> BTreeMap<String, LspServerConfig> {
     let user_path = crate::util::grok_home::grok_home().join("lsp.json");
-    let project_path = cwd.join(".grok").join("lsp.json");
+    let project_path = cwd.join(".qidi").join("lsp.json");
 
     let mut merged = load_file(&user_path);
     let project = load_file(&project_path);

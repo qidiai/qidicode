@@ -733,7 +733,7 @@ pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> anyhow::Result<ImportResul
 
     if !plan.project_items.is_empty() {
         let project_root = find_project_root(cwd);
-        let project_path = project_root.join(".grok").join("config.toml");
+        let project_path = project_root.join(".qidi").join("config.toml");
         let count = apply_items_to_config(&project_path, &plan.project_items)?;
         result.project_count = count;
         if count > 0 {
@@ -742,7 +742,7 @@ pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> anyhow::Result<ImportResul
                 .push(project_path.to_string_lossy().to_string());
         }
 
-        let hooks_dir = project_root.join(".grok").join("hooks");
+        let hooks_dir = project_root.join(".qidi").join("hooks");
         let hook_count = apply_hooks_to_dir(&hooks_dir, &plan.project_items)?;
         result.project_count += hook_count;
         if hook_count > 0 {

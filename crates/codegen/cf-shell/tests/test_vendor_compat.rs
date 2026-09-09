@@ -63,7 +63,7 @@ fn write_skill(home: &Path, vendor_dir: &str, name: &str, marker: &str) {
 /// Populate a fake `$HOME` + repo cwd with the full vendor-compat fixture set.
 fn seed_fixtures(home: &Path, cwd: &Path) {
     // Skills (User scope, home-based).
-    write_skill(home, ".grok", "grok-skill", MARKER_QIDI_SKILL);
+    write_skill(home, ".qidi", "grok-skill", MARKER_QIDI_SKILL);
     write_skill(home, ".cursor", "my-cursor-skill", MARKER_CURSOR_SKILL);
     // `shell` is a Cursor vendor-default → must be denylisted under ~/.cursor.
     write_skill(home, ".cursor", "shell", MARKER_CURSOR_SHELL);

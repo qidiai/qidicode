@@ -81,7 +81,7 @@ impl ContentController {
         let grok_home = self
             .home
             .path()
-            .join(".grok")
+            .join(".qidi")
             .to_string_lossy()
             .into_owned();
         vec![
@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(get("HOME").as_deref(), content.home().to_str());
         assert_eq!(
             get("QIDI_HOME").as_deref(),
-            content.home().join(".grok").to_str()
+            content.home().join(".qidi").to_str()
         );
         assert_eq!(get("QIDI_CLI_CHAT_PROXY_BASE_URL"), Some(content.url()));
         assert_eq!(get("QIDI_XAI_API_BASE_URL"), Some(content.url()));

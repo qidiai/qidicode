@@ -23,7 +23,7 @@ async fn minimal_sticky_screen_mode_persists() {
 
     // The startup persist is fire-and-forget; poll the isolated config.toml
     // (pumping the PTY so the pager never blocks on a full buffer).
-    let config_path = content.home().join(".grok").join("config.toml");
+    let config_path = content.home().join(".qidi").join("config.toml");
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         let body = std::fs::read_to_string(&config_path).unwrap_or_default();

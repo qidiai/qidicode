@@ -395,7 +395,7 @@ pub fn merge_persona_lists(bundle: &BundleState, cwd: &Path) -> Vec<PersonaDetai
         }
     }
     let dirs = [
-        (ConfigFileScope::Project, cwd.join(".grok").join("personas")),
+        (ConfigFileScope::Project, cwd.join(".qidi").join("personas")),
         (ConfigFileScope::User, grok_home.join("personas")),
     ];
     for (scope, dir) in dirs {
@@ -510,7 +510,7 @@ pub fn sanitize_config_name(name: &str) -> Result<String, String> {
 fn personas_dir_for_scope(scope: ConfigFileScope, cwd: &Path) -> PathBuf {
     match scope {
         ConfigFileScope::User => cf_config::grok_home().join("personas"),
-        ConfigFileScope::Project => cwd.join(".grok").join("personas"),
+        ConfigFileScope::Project => cwd.join(".qidi").join("personas"),
     }
 }
 #[derive(serde::Serialize)]
@@ -567,7 +567,7 @@ fn config_path_is_user_or_project(path: &Path, subdir: &str) -> bool {
     let in_user = dunce::canonicalize(grok_home.join(subdir))
         .ok()
         .is_some_and(|d| canonical.starts_with(&d));
-    let project_suffix = std::path::Path::new(".grok").join(subdir);
+    let project_suffix = std::path::Path::new(".qidi").join(subdir);
     let in_project = canonical
         .ancestors()
         .any(|a| a.ends_with(project_suffix.as_path()));
@@ -2554,7 +2554,7 @@ mod tests {
     #[test]
     fn merge_persona_lists_appends_local_only() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let personas_dir = dir.path().join(".grok").join("personas");
+        let personas_dir = dir.path().join(".qidi").join("personas");
         std::fs::create_dir_all(&personas_dir).expect("mkdir");
         std::fs::write(
             personas_dir.join("local-only.toml"),
@@ -2619,7 +2619,7 @@ mod tests {
     #[test]
     fn persona_is_deletable_local_vs_bundled() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let local = dir.path().join(".grok").join("personas").join("p.toml");
+        let local = dir.path().join(".qidi").join("personas").join("p.toml");
         std::fs::create_dir_all(local.parent().unwrap()).unwrap();
         std::fs::write(&local, "instructions = \"x\"\n").unwrap();
         let local_detail = PersonaDetail {
@@ -2651,7 +2651,7 @@ mod tests {
     #[test]
     fn delete_persona_file_allows_project_persona() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join(".grok").join("personas").join("gone.toml");
+        let path = dir.path().join(".qidi").join("personas").join("gone.toml");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "instructions = \"bye\"\n").unwrap();
         delete_persona_file(&path).expect("delete");

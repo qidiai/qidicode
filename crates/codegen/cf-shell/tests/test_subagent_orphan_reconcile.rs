@@ -67,7 +67,7 @@ async fn resume_reconciles_orphaned_running_subagent() {
         // terminal write, no SubagentFinished) — exactly what a dead process
         // leaves behind.
         // GrokStdioClient sets HOME=<temp>; the binary uses <HOME>/.grok as QIDI_HOME.
-        let grok_home = shared_home.path().join(".grok");
+        let grok_home = shared_home.path().join(".qidi");
         let session_dir = locate_session_dir(&grok_home, session_id.0.as_ref());
         let sub_id = "sa-orphan";
         let meta_path = session_dir.join("subagents").join(sub_id).join("meta.json");

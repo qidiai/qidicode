@@ -243,7 +243,13 @@ impl PidFile {
         // `read_pidfile_pid` always fail during contention and made
         // takeover silently decline against a live holder. Keep an
         // unlocked readable copy next to the lock; best-effort only.
-        let _ = fs::write(pid_sidecar_path(path), &pid_text);
+        // tmp + rename so a concurrent takeover can never read a torn
+        // sidecar mid-write.
+        let sidecar = pid_sidecar_path(path);
+        let tmp_sidecar = pid_sidecar_path(path).with_extension("tmp");
+        if fs::write(&tmp_sidecar, &pid_text).is_ok() {
+            let _ = fs::rename(&tmp_sidecar, &sidecar);
+        }
 
         Ok(Some(Self { _file: file }))
     }
@@ -327,12 +333,23 @@ impl PidFile {
 /// Reads the unlocked sidecar copy written at acquire time: the main
 /// file is unreadable through the held flock on Windows.
 fn read_pidfile_pid(path: &Path) -> Option<u32> {
-    fs::read_to_string(pid_sidecar_path(path))
-        .ok()?
-        .trim()
-        .parse::<u32>()
+    let parse = |s: String| -> Option<u32> {
+        s.trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|&pid| pid > 0)
+    };
+    // Primary source: the unlocked sidecar copy (the locked main file
+    // is unreadable on Windows while held). Fallback: the main file,
+    // which IS readable on Unix and covers holders written by versions
+    // predating the sidecar.
+    if let Some(pid) = fs::read_to_string(pid_sidecar_path(path))
         .ok()
-        .filter(|&pid| pid > 0)
+        .and_then(parse)
+    {
+        return Some(pid);
+    }
+    fs::read_to_string(path).ok().and_then(parse)
 }
 
 /// Sibling file holding the readable pid copy (the lock file itself is

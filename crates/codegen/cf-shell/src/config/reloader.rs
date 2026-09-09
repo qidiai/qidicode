@@ -839,8 +839,8 @@ mod tests {
         let h2 = hash_project_mcp_config(&child).expect("readable");
         assert_ne!(h1, h2, "ancestor .mcp.json edit must change the hash");
 
-        std::fs::create_dir_all(tmp.path().join(".grok")).unwrap();
-        std::fs::write(tmp.path().join(".grok").join("config.toml"), "x = 1").unwrap();
+        std::fs::create_dir_all(tmp.path().join(".qidi")).unwrap();
+        std::fs::write(tmp.path().join(".qidi").join("config.toml"), "x = 1").unwrap();
         let h3 = hash_project_mcp_config(&child).expect("readable");
         assert_ne!(
             h2, h3,

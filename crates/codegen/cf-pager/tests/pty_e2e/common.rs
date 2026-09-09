@@ -236,7 +236,7 @@ pub(crate) fn trust_env(content: &ContentController, feature_on: bool) -> Vec<(S
 pub(crate) fn folder_is_trusted(content: &ContentController, repo: &std::path::Path) -> bool {
     let store_path = content
         .home()
-        .join(".grok")
+        .join(".qidi")
         .join(cf_workspace::trust::TRUST_FILE_NAME);
     let store = cf_workspace::trust::TrustStore::load_from(store_path);
     store.is_trusted(&cf_workspace::trust::workspace_key(repo))
@@ -272,7 +272,7 @@ pub(crate) fn seed_mcp_server_config(content: &ContentController) {
     #[cfg(windows)]
     let command = "cmd.exe";
 
-    let grok_home = content.home().join(".grok");
+    let grok_home = content.home().join(".qidi");
     std::fs::create_dir_all(&grok_home).expect("create fake QIDI_HOME");
     let config = format!(
         "[mcp_servers.{MCP_TEST_SERVER}]\ncommand = \"{command}\"\nargs = []\nstartup_timeout_sec = 2\n"
@@ -411,14 +411,14 @@ pub(crate) const MOUSE_OFF_HINT_PROMPT: &str =
 /// `"vim_mode = true"`). Same `{QIDI_HOME|HOME}/.qidi/config.toml` location
 /// `seed_mouse_reporting_toggle_config` uses; call before spawning the pager.
 pub(crate) fn seed_ui_config(content: &ContentController, ui_body: &str) {
-    let grok_home = content.home().join(".grok");
+    let grok_home = content.home().join(".qidi");
     std::fs::create_dir_all(&grok_home).expect("create .grok");
     let config = format!("[ui]\n{ui_body}\n");
     std::fs::write(grok_home.join("config.toml"), config).expect("write config.toml");
 }
 
 pub(crate) fn seed_mouse_reporting_toggle_config(content: &ContentController, enabled: bool) {
-    let grok_home = content.home().join(".grok");
+    let grok_home = content.home().join(".qidi");
     std::fs::create_dir_all(&grok_home).expect("create .grok");
     // Minimal opt-in only — matches load_config's `{QIDI_HOME|HOME}/.qidi/config.toml`.
     let config = if enabled {
@@ -432,7 +432,7 @@ pub(crate) fn seed_mouse_reporting_toggle_config(content: &ContentController, en
 
 /// Seed `[ui] keep_text_selection = "hold"` under the content controller's home.
 pub(crate) fn seed_keep_text_selection_config(content: &ContentController) {
-    let grok_home = content.home().join(".grok");
+    let grok_home = content.home().join(".qidi");
     std::fs::create_dir_all(&grok_home).expect("create .grok");
     std::fs::write(
         grok_home.join("config.toml"),

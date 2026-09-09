@@ -2044,7 +2044,7 @@ impl LocalTerminalBackend {
         Self::new_local_with_scope_and_ttl(search_shadows, scope, COMPLETED_TASK_TTL)
     }
 
-    /// Like [ew_local_with_scope\] with an explicit completed-task TTL
+    /// Like [new_local_with_scope\] with an explicit completed-task TTL
     /// (tests assert the Arc-drop timing of TTL-based eviction).
     #[cfg(test)]
     pub(crate) fn new_local_with_scope_and_ttl(
@@ -3675,6 +3675,9 @@ mod tests {
 
         let request = TerminalRunRequest {
             #[cfg(windows)]
+            // Note: PowerShell appends a CRLF to the emitted string
+            // (200002 bytes) where `head -c` emitted exactly 200000;
+            // the size guard trips long before that delta matters.
             command: "('x' * 200000)".to_string(),
             #[cfg(not(windows))]
             command: "head -c 200000 /dev/zero | tr '\\0' 'x'".to_string(),

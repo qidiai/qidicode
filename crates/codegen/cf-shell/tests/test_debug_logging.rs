@@ -48,7 +48,7 @@ where
 
 /// The per-session firehose directory under a pinned `$QIDI_HOME`.
 fn debug_dir(home: &Path) -> PathBuf {
-    home.join(".grok").join("debug")
+    home.join(".qidi").join("debug")
 }
 
 /// List firehose `*.txt` files under `~/.qidi/debug` (excluding the `latest.txt`
@@ -89,7 +89,7 @@ fn debug_cmd(
         .kill_on_drop(true);
     cf_test_support::env::test_env_cmd_tokio(&mut cmd, &server.url(), home);
     // Pin the home location and drop inherited firehose toggles for determinism.
-    cmd.env("QIDI_HOME", home.join(".grok"));
+    cmd.env("QIDI_HOME", home.join(".qidi"));
     cmd.env_remove("QIDI_DEBUG_LOG");
     cmd.env_remove("QIDI_LOG_FILE");
     cmd.env_remove("QIDI_LOG_SAMPLING");
@@ -183,7 +183,7 @@ async fn agent_session_writes_named_session_file() {
             .expect("start mock server");
         let workdir = git_workdir();
         let home = TempDir::new().expect("create temp home");
-        let grok_home = home.path().join(".grok");
+        let grok_home = home.path().join(".qidi");
         let grok_home_str = grok_home.to_string_lossy().into_owned();
 
         let client = GrokStdioClient::spawn_with_home_and_env(
@@ -232,7 +232,7 @@ async fn debug_flag_master_switch_enables_firehose() {
             .expect("start mock server");
         let workdir = git_workdir();
         let home = TempDir::new().expect("create temp home");
-        let grok_home = home.path().join(".grok");
+        let grok_home = home.path().join(".qidi");
         let grok_home_str = grok_home.to_string_lossy().into_owned();
 
         // Drive `grok --debug agent stdio`: the master switch (which runs before
