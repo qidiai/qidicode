@@ -107,7 +107,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path().join("repo");
         std::fs::create_dir_all(project.join(".grok")).unwrap();
-        std::fs::write(project.join(".qidi/config.toml"), "# project\n").unwrap();
+        std::fs::write(project.join(".grok").join("config.toml"), "# project\n").unwrap();
         let found = find_project_configs(&project);
         assert_eq!(found.len(), 1);
         assert!(!is_user_grok_config_file(&found[0]));

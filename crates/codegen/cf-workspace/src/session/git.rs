@@ -4148,11 +4148,12 @@ mod restore_code_tests {
             outcome.stash_ref.is_none(),
             "the stash must be popped back, leaving nothing orphaned"
         );
-        assert_eq!(
-            std::fs::read_to_string(tmp.path().join("README.md")).unwrap(),
-            "dirty edit\n",
-            "dirty work must be restored to the working tree"
-        );
+        // Windows checkouts restore with CRLF (core.autocrlf); compare
+        // line-ending-agnostic.
+        let restored = std::fs::read_to_string(tmp.path().join("README.md"))
+            .unwrap()
+            .replace("\r\n", "\n");
+        assert_eq!(restored, "dirty edit\n", "dirty work must be restored to the working tree");
         let stash_list = git_cli(tmp.path(), &["stash", "list"]).await.unwrap();
         assert!(
             stash_list.trim().is_empty(),

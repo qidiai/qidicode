@@ -14,6 +14,12 @@ use super::{LspBackend, LspError, LspOperation, LspToolInput, file_uri};
 
 const MOCK_LSP_SERVER: &str = r#"
 import json, sys
+# Windows python stdout is text-mode and would translate CRLF
+# into CR-CRLF, corrupting LSP headers.
+try:
+    sys.stdout.reconfigure(newline='')
+except AttributeError:
+    pass
 
 def read_message():
     headers = {}
@@ -148,7 +154,14 @@ fn write_mock_server() -> (tempfile::TempDir, std::path::PathBuf) {
 
 fn write_delayed_diagnostics_server() -> (tempfile::TempDir, std::path::PathBuf) {
     const DELAYED_SERVER: &str = r#"
-import json, sys, time
+import json, sys
+# Windows python stdout is text-mode and would translate CRLF
+# into CR-CRLF, corrupting LSP headers.
+try:
+    sys.stdout.reconfigure(newline='')
+except AttributeError:
+    pass
+import time
 
 def read_message():
     headers = {}
@@ -220,7 +233,14 @@ fn write_init_failure_server() -> (tempfile::TempDir, std::path::PathBuf) {
 
 fn write_slow_init_server(delay_ms: u64) -> (tempfile::TempDir, std::path::PathBuf) {
     let script = format!(
-        r#"import json, sys, time
+        r#"
+import json, sys, time
+# Windows python stdout is text-mode and would translate the
+# protocol's \r\n into \r\r\n, corrupting LSP headers.
+try:
+    sys.stdout.reconfigure(newline='')
+except AttributeError:
+    pass
 
 def read_message():
     headers = {{}}
@@ -292,7 +312,14 @@ fn write_init_failure_server_n_times(
     );
     let init_error_payload = init_error_payload.replace('"', r#"\""#);
     let script = format!(
-        r#"import json, os, sys
+        r#"
+import json, os, sys
+# Windows python stdout is text-mode and would translate the
+# protocol's \r\n into \r\r\n, corrupting LSP headers.
+try:
+    sys.stdout.reconfigure(newline='')
+except AttributeError:
+    pass
 
 FAILURES_BEFORE_SUCCESS = {failures_before_success}
 COUNTER_FILE = os.environ["INIT_FAILURE_COUNTER_FILE"]
@@ -361,11 +388,36 @@ while True:
     (dir, script_path)
 }
 
+/// Install a test-only tracing subscriber so LSP client debug logs are
+/// visible under `--nocapture` (idempotent; a second try_init is fine).
+fn init_tracing() {
+    let _ = tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_max_level(tracing::Level::DEBUG)
+        .try_init();
+}
+
+/// The python interpreter for the in-test mock LSP server.
+///
+/// Windows ships a Microsoft Store `python3.exe` stub that exits
+/// immediately when the store app is absent (breaking every e2e with
+/// "service stopped"); the real interpreter is `python` there.
+fn mock_python() -> String {
+    #[cfg(windows)]
+    {
+        "python".to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        "python3".to_string()
+    }
+}
+
 fn mock_server_config(script_path: &Path) -> LspServerConfig {
     let mut ext_map = HashMap::new();
     ext_map.insert(".ts".to_string(), "typescript".to_string());
     LspServerConfig {
-        command: "python3".to_string(),
+        command: mock_python(),
         args: vec!["-u".to_string(), script_path.to_string_lossy().into_owned()],
         extensions: ext_map,
         startup_timeout: Some(10_000),
@@ -374,6 +426,7 @@ fn mock_server_config(script_path: &Path) -> LspServerConfig {
 }
 
 async fn start_mock_client() -> (tempfile::TempDir, tempfile::TempDir, LspClient) {
+    init_tracing();
     let (script_dir, script_path) = write_mock_server();
     let config = mock_server_config(&script_path);
     let workspace = tempfile::tempdir().unwrap();
@@ -571,7 +624,7 @@ async fn e2e_multi_server_routing() {
     servers.insert(
         "mock-ts".to_string(),
         LspServerConfig {
-            command: "python3".to_string(),
+            command: mock_python(),
             args: vec!["-u".to_string(), script_path.to_string_lossy().into_owned()],
             extensions: ts_ext,
             startup_timeout: Some(10_000),
@@ -581,7 +634,7 @@ async fn e2e_multi_server_routing() {
     servers.insert(
         "mock-py".to_string(),
         LspServerConfig {
-            command: "python3".to_string(),
+            command: mock_python(),
             args: vec!["-u".to_string(), script_path.to_string_lossy().into_owned()],
             extensions: py_ext,
             startup_timeout: Some(10_000),
@@ -997,7 +1050,7 @@ async fn e2e_finalize_no_longer_blocks_on_slow_lsp_startup() {
     let mut ext_map = HashMap::new();
     ext_map.insert(".ts".to_string(), "typescript".to_string());
     let server_config = LspServerConfig {
-        command: "python3".to_string(),
+        command: mock_python(),
         args: vec!["-u".to_string(), script_path.to_string_lossy().into_owned()],
         extensions: ext_map,
         startup_timeout: Some(5_000),
@@ -1052,7 +1105,7 @@ async fn e2e_first_dispatch_waits_for_background_startup() {
     let mut ext_map = HashMap::new();
     ext_map.insert(".ts".to_string(), "typescript".to_string());
     let server_config = LspServerConfig {
-        command: "python3".to_string(),
+        command: mock_python(),
         args: vec!["-u".to_string(), script_path.to_string_lossy().into_owned()],
         extensions: ext_map,
         startup_timeout: Some(5_000),
@@ -1116,7 +1169,7 @@ async fn e2e_restart_monitor_emits_failed_on_restart_init_error() {
                 counter_path.to_string_lossy().into_owned(),
             );
             let server_config = LspServerConfig {
-                command: "python3".to_string(),
+                command: mock_python(),
                 args: vec!["-u".to_string(), script_path.to_string_lossy().into_owned()],
                 env,
                 extensions: ext_map,
@@ -1209,7 +1262,7 @@ async fn e2e_drain_timeout_preserves_pending_diagnostics() {
     let mut ext_map = HashMap::new();
     ext_map.insert(".ts".to_string(), "typescript".to_string());
     let server_config = LspServerConfig {
-        command: "python3".to_string(),
+        command: mock_python(),
         args: vec!["-u".to_string(), script_path.to_string_lossy().into_owned()],
         extensions: ext_map,
         startup_timeout: Some(10_000),
@@ -1256,7 +1309,7 @@ async fn e2e_restart_replay_requeues_pending_diagnostics() {
     let mut ext_map = HashMap::new();
     ext_map.insert(".ts".to_string(), "typescript".to_string());
     let server_config = LspServerConfig {
-        command: "python3".to_string(),
+        command: mock_python(),
         args: vec!["-u".to_string(), script_path.to_string_lossy().into_owned()],
         extensions: ext_map,
         startup_timeout: Some(10_000),
@@ -1295,7 +1348,11 @@ async fn e2e_restart_replay_requeues_pending_diagnostics() {
     .expect("restart should succeed");
 
     for (uri_str, lang_id) in &tracked_docs {
-        let path = PathBuf::from(uri_str.strip_prefix("file://").unwrap());
+        // Url::to_file_path is the only correct way back to a local
+        // path: a manual strip_prefix("file://") leaves "/C:/..." on
+        // Windows (os error 123 on read).
+        let uri = url::Url::parse(uri_str).expect("tracked doc uri");
+        let path = uri.to_file_path().expect("tracked doc is a file");
         let content = std::fs::read_to_string(&path).unwrap();
         restarted.notify_file_change(&path, &content, lang_id);
         mgr.mark_path_pending_diagnostics("delayed", lifecycle_id, &path);

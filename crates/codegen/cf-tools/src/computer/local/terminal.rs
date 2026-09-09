@@ -3281,8 +3281,12 @@ mod tests {
         let output_file =
             std::env::temp_dir().join(format!("terminal-test-size-{}.out", std::process::id()));
 
+        #[cfg(windows)]
+        let command = "for (;;) { \"x\" }".to_string(); // PS flood
+        #[cfg(not(windows))]
+        let command = "yes".to_string(); // floods stdout forever
         let request = TerminalRunRequest {
-            command: "yes".to_string(), // floods stdout forever
+            command,
             working_directory: PathBuf::from("/tmp"),
             env: HashMap::new(),
             // Long timeout: the SIZE guard, not the timeout, must fire.
@@ -3314,7 +3318,19 @@ mod tests {
     #[tokio::test]
     async fn test_stderr_captured() {
         let backend = LocalTerminalBackend::new();
-        let result = backend.run(make_request("echo error >&2")).await.unwrap();
+        let result = backend
+                .run(make_request({
+                    #[cfg(windows)]
+                    {
+                        "[Console]::Error.WriteLine('error')"
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        "echo error >&2"
+                    }
+                }))
+                .await
+                .unwrap();
 
         assert!(result.combined_output.contains("error"));
         assert_eq!(result.exit_code, Some(0));
@@ -3377,6 +3393,9 @@ mod tests {
             std::env::temp_dir().join(format!("terminal-test-bg-{}.out", std::process::id()));
 
         let request = TerminalRunRequest {
+                        #[cfg(windows)]
+            command: "'background_test'; Start-Sleep -Milliseconds 100".to_string(),
+            #[cfg(not(windows))]
             command: "echo background_test && sleep 0.1".to_string(),
             working_directory: PathBuf::from("/tmp"),
             env: HashMap::new(),
@@ -3457,6 +3476,10 @@ mod tests {
 
         let request = TerminalRunRequest {
             // Command that produces output over time (not all at once)
+            #[cfg(windows)]
+            command: "foreach ($i in 1..3) { \"chunk_$i\"; Start-Sleep -Milliseconds 150 }"
+                .to_string(),
+            #[cfg(not(windows))]
             command: "for i in 1 2 3; do echo chunk_$i; sleep 0.15; done".to_string(),
             working_directory: tmp.path().to_path_buf(),
             env: HashMap::new(),
@@ -3532,6 +3555,10 @@ mod tests {
         let request = TerminalRunRequest {
             // ~1.8 KB of ASCII over ~1.8s; far exceeds the 200-char limit so
             // truncation fires early and keeps firing on the shrinking tail.
+            #[cfg(windows)]
+            command: "foreach ($i in 1..60) { \"LINE{0:D3}-XXXXXXXXXXXXXXXXXXXX\" -f $i; Start-Sleep -Milliseconds 30 }"
+                .to_string(),
+            #[cfg(not(windows))]
             command: "for i in $(seq 1 60); do printf 'LINE%03d-XXXXXXXXXXXXXXXXXXXX\\n' \"$i\"; sleep 0.03; done".to_string(),
             working_directory: tmp.path().to_path_buf(),
             env: HashMap::new(),
@@ -3598,6 +3625,9 @@ mod tests {
         let output_file = tmp.path().join("output.log");
 
         let request = TerminalRunRequest {
+            #[cfg(windows)]
+            command: format!("('x' * {output_amount})"),
+            #[cfg(not(windows))]
             command: format!("head -c {output_amount} /dev/zero | tr '\\0' 'x'"),
             working_directory: tmp.path().to_path_buf(),
             env: HashMap::new(),
@@ -3633,6 +3663,9 @@ mod tests {
         let output_file = tmp.path().join("output.log");
 
         let request = TerminalRunRequest {
+            #[cfg(windows)]
+            command: "('x' * 200000)".to_string(),
+            #[cfg(not(windows))]
             command: "head -c 200000 /dev/zero | tr '\\0' 'x'".to_string(),
             working_directory: tmp.path().to_path_buf(),
             env: HashMap::new(),
@@ -3886,6 +3919,11 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Unix-only: the drain-timeout path assumes a shell child that
+    /// inherits the stdout pipe and outlives the foreground command
+    /// (POSIX `sleep 300 &`); the Windows spawn path uses job objects
+    /// with no long-lived pipe holder, so the fixture is meaningless.
+    #[cfg(unix)]
     async fn test_background_child_with_inherited_pipe_does_not_block() {
         // `sleep 300 &` inherits the pipe — without drain timeout this blocks forever.
         let backend = LocalTerminalBackend::new();
@@ -4129,7 +4167,11 @@ mod tests {
             // live_count below so we can observe the `1` end of the transition.
             // The actor's first poll tick fires right after spawn, and `true`
             // could already be reaped by then, making the `== 1` check racy.
-            let mut bg_req = make_request("sleep 1");
+            #[cfg(windows)]
+            let sleep_one = "Start-Sleep -Seconds 1";
+            #[cfg(not(windows))]
+            let sleep_one = "sleep 1";
+            let mut bg_req = make_request(sleep_one);
             bg_req.tool_call_id = "bg-reap-1".to_string();
             let bg = backend
                 .run_background(bg_req)
@@ -4166,6 +4208,10 @@ mod tests {
     // ================================================================
 
     #[tokio::test]
+    /// Unix-only: the persistent-shell backend is implemented via fd
+    /// snapshotting on Unix only (see spawn_persistent_command);
+    /// Windows spawns through shell_command_argv with no state carry.
+    #[cfg(unix)]
     async fn test_persistent_shell_cd_persists() {
         let backend = LocalTerminalBackend::with_persistent_shell();
 
@@ -4184,6 +4230,10 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Unix-only: the persistent-shell backend is implemented via fd
+    /// snapshotting on Unix only (see spawn_persistent_command);
+    /// Windows spawns through shell_command_argv with no state carry.
+    #[cfg(unix)]
     async fn test_persistent_shell_env_var_persists() {
         let backend = LocalTerminalBackend::with_persistent_shell();
 
@@ -4225,6 +4275,10 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Unix-only: the persistent-shell backend is implemented via fd
+    /// snapshotting on Unix only (see spawn_persistent_command);
+    /// Windows spawns through shell_command_argv with no state carry.
+    #[cfg(unix)]
     async fn test_persistent_shell_function_persists() {
         let backend = LocalTerminalBackend::with_persistent_shell();
 
@@ -4244,6 +4298,10 @@ mod tests {
     }
 
     #[tokio::test]
+    /// Unix-only: the persistent-shell backend is implemented via fd
+    /// snapshotting on Unix only (see spawn_persistent_command);
+    /// Windows spawns through shell_command_argv with no state carry.
+    #[cfg(unix)]
     async fn test_persistent_shell_variable_capture() {
         let backend = LocalTerminalBackend::with_persistent_shell();
 
@@ -4269,16 +4327,18 @@ mod tests {
         // Verify the default (non-persistent) mode doesn't carry state.
         let backend = LocalTerminalBackend::new();
 
-        let result = backend
-            .run(make_request("export SHOULD_NOT_PERSIST=yes"))
-            .await
-            .unwrap();
+        #[cfg(windows)]
+        let set_var = "$env:SHOULD_NOT_PERSIST = 'yes'";
+        #[cfg(not(windows))]
+        let set_var = "export SHOULD_NOT_PERSIST=yes";
+        let result = backend.run(make_request(set_var)).await.unwrap();
         assert_eq!(result.exit_code, Some(0));
 
-        let result = backend
-            .run(make_request("echo ${SHOULD_NOT_PERSIST:-empty}"))
-            .await
-            .unwrap();
+        #[cfg(windows)]
+        let read_var = "if ($env:SHOULD_NOT_PERSIST) { $env:SHOULD_NOT_PERSIST } else { 'empty' }";
+        #[cfg(not(windows))]
+        let read_var = "echo ${SHOULD_NOT_PERSIST:-empty}";
+        let result = backend.run(make_request(read_var)).await.unwrap();
         assert_eq!(result.exit_code, Some(0));
         assert_eq!(
             result.combined_output.trim(),

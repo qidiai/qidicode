@@ -563,7 +563,7 @@ mod tests {
         // can carry an inline `hooks:` block (code-exec) and can shadow a built-in
         // subagent by name.
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".grok").join("agents")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".qidi").join("agents")).unwrap();
         assert!(repo_configs_present(tmp.path()));
     }
 
@@ -581,7 +581,7 @@ mod tests {
         // detection walks cwd→git root exactly like agent discovery, so it must
         // still fire (a cwd-only probe would miss it).
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".grok").join("agents")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".qidi").join("agents")).unwrap();
         let subdir = tmp.path().join("crates").join("inner");
         std::fs::create_dir_all(&subdir).unwrap();
         assert!(repo_configs_present(&subdir));
@@ -627,7 +627,7 @@ mod tests {
         // A plugin-only repo (no MCP/LSP/hooks configs) must still be gated, so a
         // project plugin's hooks/MCP don't run ungated when the folder is untrusted.
         let tmp = repo_tmp();
-        std::fs::create_dir_all(tmp.path().join(".grok").join("plugins").join("x")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".qidi").join("plugins").join("x")).unwrap();
         assert!(repo_configs_present(tmp.path()));
     }
 
@@ -638,7 +638,7 @@ mod tests {
         // discover_plugins, so a subdir-only plugin is not a fail-open hole.
         let tmp = repo_tmp();
         let subdir = tmp.path().join("packages").join("foo");
-        std::fs::create_dir_all(subdir.join(".grok").join("plugins").join("evil")).unwrap();
+        std::fs::create_dir_all(subdir.join(".qidi").join("plugins").join("evil")).unwrap();
         assert!(repo_configs_present(&subdir));
     }
 
@@ -685,8 +685,12 @@ mod tests {
         // `.qidi/agents` — even when launched from a SUBDIR (the cwd→git-root walk
         // that `first_only` shares). Guards against silent drift between the two.
         let tmp = repo_tmp();
+        let qidi = tmp.path().join(".qidi");
+        std::fs::create_dir_all(qidi.join("agents")).unwrap();
+        // [plugins].paths is read from `<root>/.grok/config.toml`
+        // (see load_project_config), unlike the agents dir SSOT.
         let grok = tmp.path().join(".grok");
-        std::fs::create_dir_all(grok.join("agents")).unwrap();
+        std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./x\"]\n").unwrap();
         let claude = tmp.path().join(".claude");
         std::fs::create_dir_all(&claude).unwrap();

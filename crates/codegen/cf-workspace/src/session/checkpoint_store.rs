@@ -501,9 +501,11 @@ mod tests {
         // The checkpoint blob is on disk...
         assert!(store.checkpoint_path(0).exists(), "checkpoint blob written");
         // ...and a `.gitignore` ignores the whole store so blobs are never committed.
+        // ensure_store_dir writes the .gitignore at the STORE root
+        // (dir.parent()): `<cwd>/.qidi/<STORE_SUBDIR>/.gitignore`.
         let gitignore = tmp
             .path()
-            .join(".grok")
+            .join(".qidi")
             .join(STORE_SUBDIR)
             .join(".gitignore");
         let body = std::fs::read_to_string(&gitignore).expect("gitignore written");
