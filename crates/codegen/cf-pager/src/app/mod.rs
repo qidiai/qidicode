@@ -1045,11 +1045,11 @@ fn init_terminal(
         MOUSE_CAPTURE_ENABLED.store(!want_minimal, Ordering::Release);
         set_panic_hook(mode);
         signal_handler::install(mode);
-        let drain_timeout = if crate::terminal::terminal_context().vte_version.is_some() {
-            std::time::Duration::from_millis(20)
-        } else {
-            std::time::Duration::ZERO
-        };
+        // Drain terminal replies queued during setup (probe responses,
+        // console-mode-flip events). All terminals get the same 20ms: the old
+        // 0ms path for non-VTE terminals let late-arriving garbage land in the
+        // input reader thread instead of being discarded here.
+        let drain_timeout = std::time::Duration::from_millis(20);
         drain_pending_events_with_timeout(drain_timeout);
         crate::theme::apply_cursor_color();
         let ctx = crate::terminal::terminal_context();

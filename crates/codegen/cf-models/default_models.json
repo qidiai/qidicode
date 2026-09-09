@@ -84,6 +84,160 @@
       "auth_scheme": "bearer",
       "supports_reasoning_effort": true,
       "supported_in_api": false
+    },
+    {
+      "id": "codely-basic-222",
+      "model": "codely-basic",
+      "name": "CodeLy Basic (LAN 222)",
+      "description": "CodeLy Basic via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "codely-core-222",
+      "model": "codely-core",
+      "name": "CodeLy Core (LAN 222)",
+      "description": "CodeLy Core via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "codely-air-222",
+      "model": "codely-air",
+      "name": "CodeLy Air (LAN 222)",
+      "description": "CodeLy Air via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "codely-vl-222",
+      "model": "codely-vl",
+      "name": "CodeLy VL (LAN 222)",
+      "description": "CodeLy VL via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "codely-flash-222",
+      "model": "codely-flash",
+      "name": "CodeLy Flash (LAN 222)",
+      "description": "CodeLy Flash via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "GLM-5.3-222",
+      "model": "GLM-5.3",
+      "name": "CodeLy Glm 5.3 (LAN 222)",
+      "description": "CodeLy Glm 5.3 via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "KIMI-K3-222",
+      "model": "KIMI-K3",
+      "name": "CodeLy Kimi K3 (LAN 222)",
+      "description": "CodeLy Kimi K3 via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "GLM-5.3-FLASH-222",
+      "model": "GLM-5.3-FLASH",
+      "name": "CodeLy Glm 5.3 Flash (LAN 222)",
+      "description": "CodeLy Glm 5.3 Flash via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "agnes-2.0-flash-222",
+      "model": "agnes-2.0-flash",
+      "name": "CodeLy Agnes 2.0 Flash (LAN 222)",
+      "description": "CodeLy Agnes 2.0 Flash via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "agnes-2.5-flash-222",
+      "model": "agnes-2.5-flash",
+      "name": "CodeLy Agnes 2.5 Flash (LAN 222)",
+      "description": "CodeLy Agnes 2.5 Flash via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "agnes-2.5-pro-222",
+      "model": "agnes-2.5-pro",
+      "name": "CodeLy Agnes 2.5 Pro (LAN 222)",
+      "description": "CodeLy Agnes 2.5 Pro via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "agnes-2.5-pro-alpha-222",
+      "model": "agnes-2.5-pro-alpha",
+      "name": "CodeLy Agnes 2.5 Pro Alpha (LAN 222)",
+      "description": "CodeLy Agnes 2.5 Pro Alpha via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "deepseek-v4-flash-222",
+      "model": "deepseek-v4-flash",
+      "name": "CodeLy Deepseek V4 Flash (LAN 222)",
+      "description": "CodeLy Deepseek V4 Flash via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
+    },
+    {
+      "id": "qwen3.8-27b-222",
+      "model": "qwen3.8-27b",
+      "name": "CodeLy Qwen3.8 27B (LAN 222)",
+      "description": "CodeLy Qwen3.8 27B via LAN proxy 192.168.1.222:8765",
+      "base_url": "http://192.168.1.222:8765/v1",
+      "context_window": 128000,
+      "api_backend": "chat_completions",
+      "auth_scheme": "bearer",
+      "supported_in_api": false
     }
   ]
 }

@@ -123,11 +123,15 @@ pub(crate) const FREE_USAGE_USER_MESSAGE: &str = "You\u{2019}ve reached your fre
 /// **`max_tier = true`** (positively identified as SuperGrok Heavy):
 /// pushes an inline scrollback card (`CreditLimitBlock`) with a single
 /// continue action. No Q&A modal — the user can't upgrade further.
+#[allow(unreachable_code)]
 pub(super) fn open_credit_limit_upsell(
     agent: &mut AgentView,
     mode: CreditLimitUpsellMode,
     max_tier: bool,
 ) {
+    // QIDI local patch: credit-limit upsell popup disabled - self-hosted
+    // model endpoints make the upstream Grok paywall irrelevant.
+    return;
     use crate::scrollback::blocks::CreditLimitCardAction;
 
     let (
@@ -285,11 +289,15 @@ pub(super) enum UpsellReason {
 /// [`open_restricted_command_upsell`]: a Q&A modal in the
 /// [`open_credit_limit_upsell`] style. Upgrade options carry their target
 /// URL in the option `id` (position-independent submit handling).
+#[allow(unreachable_code)]
 fn open_supergrok_upsell(
     agent: &mut AgentView,
     reason: UpsellReason,
     auth_method: Option<String>,
 ) -> bool {
+    // QIDI local patch: SuperGrok upsell popup disabled - return not-opened
+    // so callers keep the user's input instead of consuming it.
+    return false;
     use crate::views::question_view::{LocalQuestionKind, QuestionViewState};
     use cf_tools::implementations::qidi_build::ask_user_question::{
         Question, QuestionOption,
