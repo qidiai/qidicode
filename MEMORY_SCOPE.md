@@ -1,96 +1,67 @@
-﻿# 记忆系统使用指南
+# 记忆共享使用指南(基于实际实现,2026-08-23 源码审计后重写)
 
-## 快速启动
+## 现状:哪些是真的
 
-在 QIDI Code 中输入 `/m` 或 `/memory` 查看可用命令：
+| 功能 | 状态 |
+|------|------|
+| `[memory] enabled = true` | ✅ 有效,开启跨会话记忆 |
+| 同项目并行实例共享记忆 | ✅ 原生支持,无需任何配置 |
+| 跨项目全局记忆 `~/.qidi/memory/MEMORY.md` | ✅ 有效 |
+| `qidi memory clear/status` 命令 | ✅ 有效 |
+| `/memory` 浏览器(TUI 内) | ✅ 有效 |
+| `[memory] scope` 配置键 | ❌ **无效占位**(解析器无此字段,静默忽略) |
+| `qidi memory scope <mode>` | ❌ 只打印提示,不落盘不生效 |
+| `QIDI_MEMORY_SCOPE` 环境变量 | ❌ 代码中不存在 |
+| `instance-{pid}/`、`shared/` 目录 | ❌ 从未实现 |
 
-```
-/m memory clear      # 清空记忆
-/m memory scope isolated    # 完全隔离模式
-/m memory scope project     # 项目共享模式
-/m memory scope shared      # 全局共享模式
-/m memory status          # 查看当前配置
-```
+## 多窗口并行协作标准工作流
 
-## 三种记忆模式
+### 1. 记忆自动共享(零配置)
 
-| 命令 | 模式 | 使用场景 | 隔离级别 |
-|------|------|---------|---------|
-| `/m scope isolated` | 隔离模式 | 研究新项目，避免干扰 | 完全隔离 |
-| `/m scope project` | 项目模式 | 团队协作开发同一项目 | 项目级共享 |
-| `/m scope shared` | 共享模式 | 知识沉淀和团队共享 | 全局共享 |
-
-## 使用示例
-
-### 场景：多实例协作研究
-
-**实例 1 - 研究新 Rust async 最佳实践：**
-```
-> /m scope isolated
-> 记住这个 Rust async 模式...
-> /m memory clear --workspace  # 清理临时研究笔记
-```
-
-**实例 2 - 使用共享知识：**
-```
-> /m scope shared
-> /sync-pull techniques/async-patterns
-```
-
-**实例 3 - 继续其他研究（保持隔离）：**
-```
-> /m scope isolated
-> 研究新的 AI 架构...
-```
-
-## 配置文件
-
-编辑 `~/.qidi/config.toml` 设置默认模式：
-
-```toml
-[memory]
-enabled = true
-scope = "isolated"  # 默认模式
-```
-
-## 环境变量（临时切换）
-
-```powershell
-$env:QIDI_MEMORY_SCOPE = "project"
-qidicode  # 启动时使用项目模式
-```
-
-## 常用命令速查
+同一项目目录下启动的多个 QIDI Code 实例,天然共享同一个记忆池:
 
 ```
-/m                    # 打开记忆管理菜单
-/m status            # 查看当前记忆配置
-/m scope isolated    # 切换到隔离模式
-/m scope project     # 切换到项目模式
-/m scope shared      # 切换到共享模式
-/m clear             # 清空工作空间记忆
-/m clear --global    # 清空全局记忆
-/m clear --all       # 清空所有记忆
+~/.qidi/memory/qidicode-4bab8b9b/
+├── MEMORY.md        # 项目长期记忆(手工/dream 沉淀)
+├── sessions/        # 各会话的 /flush 与自动摘要
+└── index.sqlite     # 混合检索索引(全文+向量)
 ```
 
-## 目录结构
+任一窗口写入的记忆,其他窗口通过首轮自动注入(initial_injection)和 memory_search 立即可见。
+
+### 2. 关键节点用 /flush 主动沉淀
+
+在取得重要进展、发现关键事实、或准备交接给其他窗口时执行:
 
 ```
-~/.qidi/memory/
-├── MEMORY.md                    # 全局记忆（shared 模式）
-├── {project-hash}/             # 项目记忆（project 模式）
-│   └── MEMORY.md
-├── instance-{pid}/             # 实例记忆（isolated 模式）
-│   └── MEMORY.md
-└── shared/                     # 共享池
-    ├── MEMORY.md
-    └── techniques/             # 技术发现
-        └── {timestamp}.md
+/flush
 ```
+
+它会让模型总结当前会话的核心内容(决策/事实/调试经验),写入 sessions/ 并建索引。
+
+### 3. 新窗口接力
+
+新窗口第一轮对话自动注入相关记忆;也可显式要求:
+
+```
+> 搜索记忆中关于 scope 配置的讨论结论
+> 继续 2026-08-23 会话记忆共享机制调查的未完成事项
+```
+
+### 4. 多模型辩证讨论
+
+主会话派发不同模型的子代理各持立场,基于同一份共享记忆交叉反驳:
+
+- 第一轮:双方各自陈述(可用同模型独立会话)
+- 第二轮:换不同模型(如 KIMI-K3-222 / agnes-2.5-flash-222)逐条反驳对方
+- 结论追加写回共享记忆,供后续会话接力
+
+### 5. 会话结束自动摘要
+
+每个会话结束自动保存元数据摘要(消息数/主题/时间),无需操作;富内容仍靠 /flush。
 
 ## 注意事项
 
-- 切换模式后，当前会话的搜索范围会立即改变
-- 记忆索引需要在下次启动时重新加载
-- 建议使用 `isolated` 模式进行探索性研究
-- 使用 `shared` 模式进行长期知识沉淀
+- 切换记忆目录结构的功能(scope 三档)未实现,勿依赖
+- 文档先于实现是本仓库已知问题,判断功能真伪请用 rg 搜源码
+- 修改 ~/.qidi/config.toml 时注意 PowerShell Set-Content 会引入 BOM,应用 [System.IO.File]::WriteAllText + UTF8Encoding($false)
