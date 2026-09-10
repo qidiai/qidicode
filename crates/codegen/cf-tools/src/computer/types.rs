@@ -359,6 +359,113 @@ impl Computer {
     }
 }
 
+// ============================================================================
+// Browser backend (third `computer` family member, after fs + terminal).
+// ============================================================================
+
+/// One interactive element listed by [`BrowserBackend::snapshot`].
+///
+/// `ref_id` is a short-lived handle: the backend keeps the last snapshot's
+/// mapping so a follow-up click/type can address elements by ref instead of
+/// hand-written CSS selectors.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BrowserElementRef {
+    /// Numeric handle from the most recent snapshot (usable as a selector).
+    pub ref_id: u32,
+    /// Lowercased tag name, e.g. `a`, `button`, `input`.
+    pub tag: String,
+    /// Coarse role: `link` / `button` / `textbox` / `select` / `clickable`.
+    pub role: String,
+    /// Trimmed visible text (or value/label) for the element.
+    pub text: String,
+    /// CSS selector addressing this element.
+    pub css_path: String,
+}
+
+/// Request to load a URL in the browser page.
+#[derive(Debug, Clone)]
+pub struct BrowserNavigateRequest {
+    pub url: String,
+    /// Extra settle time (ms) after `load` before returning (cap 10s).
+    pub wait_ms: Option<u64>,
+}
+
+/// Result of a successful navigation.
+#[derive(Debug, Clone)]
+pub struct BrowserNavigateResult {
+    pub final_url: String,
+    pub title: String,
+}
+
+/// Full page observation: URL, title, markdown content, interactive refs.
+#[derive(Debug, Clone)]
+pub struct BrowserSnapshotResult {
+    pub url: String,
+    pub title: String,
+    pub markdown: String,
+    pub refs: Vec<BrowserElementRef>,
+}
+
+/// Address an element by snapshot ref (plain number) or CSS selector.
+#[derive(Debug, Clone)]
+pub struct BrowserClickRequest {
+    pub selector: String,
+}
+
+/// Type text into an element, optionally clearing first and submitting after.
+#[derive(Debug, Clone)]
+pub struct BrowserTypeRequest {
+    pub selector: String,
+    pub text: String,
+    /// Press Enter after typing (submit forms / trigger searches).
+    pub submit: bool,
+    /// Clear the field before typing.
+    pub clear: bool,
+}
+
+/// Read the whole page (`None`) or a single element's inner text (`Some`).
+#[derive(Debug, Clone)]
+pub struct BrowserReadRequest {
+    pub selector: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BrowserReadResult {
+    pub content: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct BrowserActionResult {
+    pub detail: String,
+}
+
+/// Browser automation backend abstraction, mirroring [`TerminalBackend`]:
+/// local drives a Chromium-family process over CDP; remote variants would
+/// proxy through the computer hub.
+#[async_trait::async_trait]
+pub trait BrowserBackend: Send + Sync {
+    async fn navigate(
+        &self,
+        request: BrowserNavigateRequest,
+    ) -> Result<BrowserNavigateResult, ComputerError>;
+
+    async fn snapshot(&self) -> Result<BrowserSnapshotResult, ComputerError>;
+
+    async fn click(
+        &self,
+        request: BrowserClickRequest,
+    ) -> Result<BrowserActionResult, ComputerError>;
+
+    async fn r#type(
+        &self,
+        request: BrowserTypeRequest,
+    ) -> Result<BrowserActionResult, ComputerError>;
+
+    async fn read(
+        &self,
+        request: BrowserReadRequest,
+    ) -> Result<BrowserReadResult, ComputerError>;
+}
 #[cfg(test)]
 mod tests {
     use super::*;

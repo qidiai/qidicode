@@ -698,6 +698,14 @@ impl AgentBuilder {
                 use cf_tools::implementations::think;
                 tool_config.tools.push((&think::ThinkImpl).into());
             }
+            {
+                use cf_tools::implementations::browser;
+                tool_config.tools.push((&browser::NavigateImpl).into());
+                tool_config.tools.push((&browser::SnapshotImpl).into());
+                tool_config.tools.push((&browser::ClickImpl).into());
+                tool_config.tools.push((&browser::TypeImpl).into());
+                tool_config.tools.push((&browser::ReadImpl).into());
+            }
             if self.memory_backend.is_some() {
                 use cf_tools::implementations::memory;
                 tool_config

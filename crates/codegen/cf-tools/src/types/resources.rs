@@ -14,7 +14,7 @@
 //! - **String-keyed access**: `get_json` / `set_json` for dynamic access by
 //!   category + key string — used by the gRPC `SetToolOptions` / `GetToolOptions`
 //!   RPCs.
-use crate::computer::types::{AsyncFileSystem, TerminalBackend};
+use crate::computer::types::{AsyncFileSystem, BrowserBackend, TerminalBackend};
 use crate::notification::types::ToolNotificationHandle;
 use serde::Serialize;
 use std::any::{Any, TypeId};
@@ -810,6 +810,8 @@ impl std::fmt::Debug for FileSystem {
 }
 /// Terminal backend abstraction.
 pub struct Terminal(pub Arc<dyn TerminalBackend>);
+/// Browser backend abstraction.
+pub struct Browser(pub Arc<dyn BrowserBackend>);
 /// Session ID that owns processes spawned by this session's tools.
 /// Used to scope kill operations so subagent teardown only kills
 /// the subagent's own tasks on a shared terminal backend.

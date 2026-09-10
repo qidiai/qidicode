@@ -85,6 +85,7 @@ chrono = { workspace = true }
 futures-util = { workspace = true }
 cf-sandbox= { path = "../cf-sandbox", default-features = false }
 cf-file-utils = { path = "../cf-file-utils" }
+chromiumoxide = { version = "0.9.1", default-features = false, features = ["bytes"] }
 
 [target.'cfg(unix)'.dependencies]
 command-fds = { version = "0.3", features = ["tokio"] }

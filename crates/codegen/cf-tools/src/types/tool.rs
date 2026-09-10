@@ -121,6 +121,8 @@ pub enum ToolKind {
     Monitor,
     GoalUpdate,
     Think,
+    BrowserRead,
+    BrowserAct,
     #[serde(other)]
     Other,
 }

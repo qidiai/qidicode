@@ -58,6 +58,11 @@ const RESERVED_BUILTIN_TOOL_NAMES: &[&str] = &[
     "memory_search",
     "memory_get",
     "search_tool",
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_read",
 ];
 /// Process-global registry of external "tool packs" — functions that
 /// contribute additional tool registrations into every
@@ -817,6 +822,11 @@ impl ToolRegistryBuilder {
         b.register::<crate::implementations::memory::get_tool::MemoryGetImpl>();
         b.register::<crate::implementations::search_tool::SearchTool>();
         b.register::<crate::implementations::think::ThinkImpl>();
+        b.register::<crate::implementations::browser::NavigateImpl>();
+        b.register::<crate::implementations::browser::SnapshotImpl>();
+        b.register::<crate::implementations::browser::ClickImpl>();
+        b.register::<crate::implementations::browser::TypeImpl>();
+        b.register::<crate::implementations::browser::ReadImpl>();
         b.register_with_params::<
                 crate::implementations::use_tool::UseTool,
                 crate::implementations::use_tool::UseToolParams,

@@ -104,6 +104,8 @@ pub(crate) const ALL_TOOL_KINDS: &[ToolKind] = &[
     ToolKind::Monitor,
     ToolKind::GoalUpdate,
     ToolKind::Think,
+    ToolKind::BrowserRead,
+    ToolKind::BrowserAct,
     ToolKind::Other,
 ];
 
@@ -135,8 +137,9 @@ pub(crate) fn kind_allowed(mode: CapabilityMode, kind: ToolKind) -> bool {
             matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute)
         }
 
-        // Search class.
-        Search | WebSearch | WebFetch => {
+        // Search class. Browser navigate/snapshot/read fetch external pages and
+        // cannot mutate the workspace, so they ride along with search.
+        Search | WebSearch | WebFetch | BrowserRead => {
             matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute)
         }
 
@@ -147,8 +150,9 @@ pub(crate) fn kind_allowed(mode: CapabilityMode, kind: ToolKind) -> bool {
         Edit | Write | Delete | Move | ImageGen | VideoGen | ImageToVideo | ReferenceToVideo
         | DeployApp => matches!(mode, M::ReadWrite),
 
-        // Bash / shell.
-        Execute => matches!(mode, M::Execute),
+        // Bash / shell. Browser click/type act on the live page (forms, orders,
+        // posts) -- external mutation of similar gravity to shell execution.
+        Execute | BrowserAct => matches!(mode, M::Execute),
 
         // Process control (background tasks, monitors).
         BackgroundTaskAction | WaitTasksAction | KillTaskAction | Task | Monitor => {
@@ -215,6 +219,8 @@ mod tests {
             test_support::tc("plan", Some(ToolKind::Plan)),
             test_support::tc("ask", Some(ToolKind::AskUser)),
             test_support::tc("think", Some(ToolKind::Think)),
+            test_support::tc("browse", Some(ToolKind::BrowserRead)),
+            test_support::tc("bact", Some(ToolKind::BrowserAct)),
             test_support::tc("other", Some(ToolKind::Other)),
         ]);
 
@@ -223,25 +229,33 @@ mod tests {
         };
 
         let ro = CapabilityMode::ReadOnly.filter(&cfg);
-        assert_eq!(names(&ro), vec!["read", "search", "inspect", "plan", "ask", "think"]);
+        assert_eq!(
+            names(&ro),
+            vec!["read", "search", "inspect", "plan", "ask", "think", "browse"]
+        );
 
         let rw = CapabilityMode::ReadWrite.filter(&cfg);
         assert_eq!(
             names(&rw),
-            vec!["read", "search", "inspect", "edit", "write", "plan", "ask", "think"]
+            vec![
+                "read", "search", "inspect", "edit", "write", "plan", "ask", "think", "browse"
+            ]
         );
 
         let ex = CapabilityMode::Execute.filter(&cfg);
         assert_eq!(
             names(&ex),
-            vec!["read", "search", "inspect", "bash", "bg", "plan", "ask", "think"]
+            vec![
+                "read", "search", "inspect", "bash", "bg", "plan", "ask", "think", "browse", "bact"
+            ]
         );
 
         let all = CapabilityMode::All.filter(&cfg);
         assert_eq!(
             names(&all),
             vec![
-                "read", "search", "inspect", "edit", "write", "bash", "bg", "plan", "ask", "think", "other"
+                "read", "search", "inspect", "edit", "write", "bash", "bg", "plan", "ask", "think",
+                "browse", "bact", "other"
             ]
         );
     }

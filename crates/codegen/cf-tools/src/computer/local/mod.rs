@@ -1,3 +1,4 @@
+pub mod browser;
 pub mod cgroup;
 #[cfg(unix)]
 pub mod embedded_search_tools;
@@ -7,6 +8,7 @@ pub mod mock_fs;
 pub mod shell_state;
 pub mod terminal;
 
+pub use browser::LocalBrowserBackend;
 pub use cgroup::{CgroupMemoryConfig, PROCESS_OOM_EXIT_CODE};
 pub use file_system::LocalFs;
 pub use mock_fs::MockFs;
