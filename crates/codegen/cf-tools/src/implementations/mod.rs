@@ -11,6 +11,7 @@ pub mod read_file;
 pub mod search_tool;
 pub mod skills;
 pub mod task_output;
+pub mod browser;
 pub mod think;
 pub mod use_tool;
 pub mod web_search;
@@ -26,6 +27,7 @@ pub use opencode::{
     OpenCodeSkillTool, OpenCodeTodoWriteTool, OpenCodeWriteTool,
 };
 pub use search_tool::SearchTool;
+pub use browser::{ClickImpl, NavigateImpl, ReadImpl, SnapshotImpl, TypeImpl};
 pub use think::ThinkImpl;
 pub use use_tool::{UseTool, UseToolInput};
 pub use web_search::WebSearchConfig;

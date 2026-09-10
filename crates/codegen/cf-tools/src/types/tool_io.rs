@@ -33,6 +33,10 @@ use crate::implementations::lsp::LspToolInput;
 use crate::implementations::memory::types::{MemoryGetInput, MemorySearchInput};
 use crate::implementations::opencode::write::WriteInput;
 use crate::implementations::search_tool::SearchToolInput;
+use crate::implementations::browser::types::{
+    BrowserClickInput, BrowserNavigateInput, BrowserReadInput, BrowserSnapshotInput,
+    BrowserTypeInput,
+};
 use crate::implementations::think::types::ThinkInput;
 use crate::implementations::skills::skill::SkillInput;
 use crate::implementations::use_tool::UseToolInput;
@@ -87,6 +91,11 @@ pub enum ToolInput {
     MemoryGet(MemoryGetInput),
     SearchTool(SearchToolInput),
     Think(ThinkInput),
+    BrowserNavigate(BrowserNavigateInput),
+    BrowserSnapshot(BrowserSnapshotInput),
+    BrowserClick(BrowserClickInput),
+    BrowserType(BrowserTypeInput),
+    BrowserRead(BrowserReadInput),
     UseTool(UseToolInput),
     EnterPlanMode(EnterPlanModeInput),
     ExitPlanMode(ExitPlanModeInput),

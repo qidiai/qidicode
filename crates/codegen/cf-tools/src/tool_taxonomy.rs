@@ -69,6 +69,8 @@ impl ToolKind {
             ToolKind::Monitor => "Monitor",
             ToolKind::GoalUpdate => "Update Goal",
             ToolKind::Think => "Think",
+            ToolKind::BrowserRead => "Browse the web",
+            ToolKind::BrowserAct => "Browse the web",
             ToolKind::Other => "Tool",
         }
     }
@@ -90,7 +92,8 @@ impl ToolKind {
             | ToolKind::EnterPlan
             | ToolKind::ExitPlan
             | ToolKind::AskUser
-            | ToolKind::Think => true,
+            | ToolKind::Think
+            | ToolKind::BrowserRead => true,
             ToolKind::Edit
             | ToolKind::Delete
             | ToolKind::Write
@@ -101,6 +104,7 @@ impl ToolKind {
             | ToolKind::WaitTasksAction
             | ToolKind::KillTaskAction
             | ToolKind::Skill
+            | ToolKind::BrowserAct
             | ToolKind::Task
             | ToolKind::ImageGen
             | ToolKind::VideoGen
@@ -259,6 +263,10 @@ mod tests {
         assert!(ToolKind::List.is_read_only());
         // Think: external reasoning scratchpad, zero side effects.
         assert!(ToolKind::Think.is_read_only());
+        // Browser: navigate/snapshot/read only fetch external pages;
+        // click/type act on the live page (the mutating pair).
+        assert!(ToolKind::BrowserRead.is_read_only());
+        assert!(!ToolKind::BrowserAct.is_read_only());
         assert!(!ToolKind::Edit.is_read_only());
         assert!(!ToolKind::Execute.is_read_only());
         assert!(!ToolKind::Delete.is_read_only());
