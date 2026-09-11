@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct BrowserNavigateInput {
-    /// Absolute URL to load (http:// or https://; about:/data:/file: also
-    /// accepted for testing).
+    /// Absolute URL to load (http:// or https:// only).
     pub url: String,
     /// Extra settle time in milliseconds after the page `load` event before
     /// returning (0..=10000). Default 300.

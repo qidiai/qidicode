@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Built-in browser tool family (`browser_navigate` / `browser_snapshot` / `browser_click` / `browser_type` / `browser_read`) over a lazily-launched headless Edge/Chrome/Chromium backend (chromiumoxide, CDP). `browser_snapshot` lists interactive elements as numbered refs; `browser_click`/`browser_type` accept refs or CSS selectors; non-ASCII text is inserted via `insertText` (native key events cannot type CJK)
+
+### Security
+- Browser permission semantics (fail-closed): `browser_click`/`browser_type` map to a new `AccessKind::BrowserAct` and prompt under the default ask policy (same gravity as shell execution); `browser_navigate` rides the `web_fetch` domain gate and only accepts http/https (no `file:`/`data:` origins through the tool surface)
+
 ### Changed
 - System prompt identity changed from "Grok released by xAI" to "QIDI Code"
 - TUI menu items and status bar localized to bilingual (Chinese + English)

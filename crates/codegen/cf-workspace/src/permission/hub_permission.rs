@@ -130,7 +130,10 @@ impl PermissionHookTransport for ToolServerPermissionTransport {
 }
 fn scope_for_access(access: &AccessKind) -> &'static str {
     match access {
-        AccessKind::Bash(_) | AccessKind::Edit(_) | AccessKind::MCPTool { .. } => "write",
+        AccessKind::Bash(_)
+        | AccessKind::Edit(_)
+        | AccessKind::MCPTool { .. }
+        | AccessKind::BrowserAct(_) => "write",
         AccessKind::Read(_)
         | AccessKind::Grep { .. }
         | AccessKind::WebFetch(_)
@@ -146,6 +149,7 @@ fn describe_access(access: &AccessKind) -> String {
         AccessKind::WebSearch(query) => format!("Search the web for {query}"),
         AccessKind::Read(_) => "Read a file".to_owned(),
         AccessKind::Grep { .. } => "Search file contents".to_owned(),
+        AccessKind::BrowserAct(detail) => format!("Browser {detail}"),
     }
 }
 /// Build the server → chat `permission_request` payload. The field set matches
@@ -262,6 +266,32 @@ pub fn access_kind_for_hub_tool(tool_name: &str, args: &Value) -> Option<AccessK
                 .unwrap_or("")
                 .to_owned();
             Some(AccessKind::WebFetch(url))
+        }
+        // Browser tools: navigate rides the web-fetch gate; click/type act
+        // on the live page and must reach the prompt (CWE-862 class).
+        "browser_navigate" => {
+            let url = args
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            Some(AccessKind::WebFetch(url))
+        }
+        "browser_click" => {
+            let selector = args
+                .get("selector")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            Some(AccessKind::BrowserAct(format!("click `{selector}`")))
+        }
+        "browser_type" => {
+            let selector = args
+                .get("selector")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            Some(AccessKind::BrowserAct(format!("type into `{selector}`")))
         }
         n if n.contains("__") || n.starts_with("mcp") => Some(AccessKind::MCPTool {
             name: tool_name.to_owned(),

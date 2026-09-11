@@ -797,6 +797,7 @@ pub(crate) fn tool_name_for_access(access: &AccessKind) -> String {
         AccessKind::MCPTool { name, .. } => format!("mcp:{name}"),
         AccessKind::WebFetch(_) => "web_fetch".to_owned(),
         AccessKind::WebSearch(_) => "web_search".to_owned(),
+        AccessKind::BrowserAct(_) => "browser_action".to_owned(),
     }
 }
 
