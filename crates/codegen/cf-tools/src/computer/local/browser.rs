@@ -36,7 +36,9 @@ const MAX_REFS: usize = 400;
 struct Inner {
     /// Keep the browser handle alive for the process lifetime.
     _browser: chromiumoxide::Browser,
-    /// Owned profile dir; deleted when the backend drops.
+    /// Owned profile dir. The default backend lives in a static OnceCell,
+    /// which Rust never drops: on exit the Edge process tree and this
+    /// profile dir are left to OS temp cleanup (see default_shared).
     _user_data: tempfile::TempDir,
     page: chromiumoxide::Page,
 }
@@ -83,7 +85,7 @@ impl LocalBrowserBackend {
             let lookup: Option<String> = page
                 .evaluate_expression(format!(
                     "(() => {{ const e = window.__qidiRefs && window.__qidiRefs[{selector}]; \
-                     return e ? e.css : null; }})()"
+                     return e ? e.css_path : null; }})()"
                 ))
                 .await
                 .ok()
@@ -224,14 +226,17 @@ impl BrowserBackend for LocalBrowserBackend {
         let _guard = self.op_lock.lock().await;
         let page = self.page().await?;
         let element = self.resolve_element(page, &request.selector).await?;
+        // Always focus: with clear=false the field may never have been
+        // touched, and native key events would land on document.activeElement
+        // (possibly the body) instead of the target field.
+        element
+            .focus()
+            .await
+            .map_err(|e| ComputerError::io(format!("focus failed: {e}")))?;
         if request.clear {
-            // Focus first, then clear document.activeElement via JS: the
-            // element API has no clear in 0.9, and the activeElement route
-            // covers inputs, textareas, and contenteditable alike.
-            element
-                .focus()
-                .await
-                .map_err(|e| ComputerError::io(format!("focus for clear failed: {e}")))?;
+            // Clear document.activeElement via JS: the element API has no
+            // clear in 0.9, and this covers inputs, textareas, and
+            // contenteditable alike.
             page.evaluate_expression(
                 "(() => { const el = document.activeElement; if (!el) return false; \
                  if (typeof el.value === 'string') { el.value = ''; \
@@ -243,10 +248,25 @@ impl BrowserBackend for LocalBrowserBackend {
             .await
             .map_err(|e| ComputerError::io(format!("clear failed: {e}")))?;
         }
-        element
-            .type_str(request.text.as_str())
+        if request.text.is_ascii() {
+            // ASCII path: native key events, so site key handlers see them.
+            element
+                .type_str(request.text.as_str())
+                .await
+                .map_err(|e| ComputerError::io(format!("typing failed: {e}")))?;
+        } else {
+            // Non-ASCII path: chromiumoxide 0.9 walks a US keyboard layout
+            // and hard-errors on CJK ("Key not found"). execCommand inserts
+            // any text on the focused field and fires the input event.
+            let escaped = serde_json::to_string(request.text.as_str())
+                .map_err(|e| ComputerError::io(format!("text encode failed: {e}")))?;
+            page.evaluate_expression(format!(
+                "(() => {{ const el = document.activeElement; if (!el) return false; \\
+                 return document.execCommand('insertText', false, {escaped}); }})()",
+            ))
             .await
-            .map_err(|e| ComputerError::io(format!("typing failed: {e}")))?;
+            .map_err(|e| ComputerError::io(format!("insertText failed: {e}")))?;
+        }
         let mut detail = format!("typed into `{}`", request.selector.trim());
         if request.submit {
             element
@@ -336,7 +356,7 @@ const COLLECT_REFS_JS: &str = r#"
         let text = (el.innerText || el.value || el.getAttribute('aria-label') ||
                     el.getAttribute('placeholder') || el.getAttribute('title') || '')
             .replace(/\s+/g, ' ').trim().slice(0, 200);
-        const rec = { ref: n, tag: tag, role: role, text: text, css: cssPath(el) };
+        const rec = { ref_id: n, tag: tag, role: role, text: text, css_path: cssPath(el) };
         refs[n] = rec;
         out.push(rec);
     }
@@ -344,9 +364,16 @@ const COLLECT_REFS_JS: &str = r#"
     return JSON.stringify(out);
 "#;
 
-/// Convert raw HTML to markdown using the crate's existing `htmd` dependency.
+/// Convert raw HTML to markdown using the crate's existing `htmd`
+/// dependency, skipping the same tag set as web_fetch so script/style
+/// source cannot eat the truncation budget or pollute the context.
 fn html_to_markdown(html: &str) -> String {
-    let md = htmd::convert(html).unwrap_or_default();
+    let converter = htmd::HtmlToMarkdown::builder()
+        .skip_tags(vec![
+            "script", "style", "noscript", "svg", "iframe", "object", "embed",
+        ])
+        .build();
+    let md = converter.convert(html).unwrap_or_default();
     truncate_chars(md.trim(), MAX_CONTENT_CHARS)
 }
 
@@ -370,6 +397,10 @@ async fn launch() -> Result<Inner, ComputerError> {
     let config = chromiumoxide::BrowserConfig::builder()
         .user_data_dir(user_data.path())
         .window_size(1280, 900)
+        // Drop the default 800x600 emulation override so the layout viewport
+        // follows the 1280x900 window: snapshot refs and click coordinates
+        // then describe the same page a headed browser would show.
+        .viewport(None)
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
         .arg("--disable-extensions")
@@ -396,6 +427,14 @@ async fn launch() -> Result<Inner, ComputerError> {
 /// Process-wide default backend used when no session `Browser` resource was
 /// injected. One browser per CLI process; per-session override goes through
 /// `resources.insert(Browser(Arc<dyn BrowserBackend>))`.
+///
+/// Known MVP limitations, stated here deliberately: the single page is
+/// shared by the main session AND every subagent (their snapshots and
+/// clicks act on the same page -- cross-session interference is possible),
+/// and neither the Edge process tree nor the temp profile dir is cleaned
+/// up on process exit (statics never drop; orphaned headless Edge is left
+/// to the OS). The `Browser` resource seam above is where a per-session
+/// lifecycle would plug in.
 static DEFAULT: OnceCell<Arc<LocalBrowserBackend>> = OnceCell::const_new();
 
 pub async fn default_shared() -> Arc<LocalBrowserBackend> {
@@ -422,6 +461,21 @@ mod tests {
         let out = truncate_chars(&long, MAX_CONTENT_CHARS);
         assert!(out.chars().count() <= MAX_CONTENT_CHARS + 16);
         assert!(out.ends_with("[truncated]"));
+    }
+
+    /// Pin the JS<->Rust contract: COLLECT_REFS_JS emits ref_id/css_path
+    /// (not ref/css). The E2E covers the real browser path; this catches
+    /// key renames on browserless hosts too.
+    #[test]
+    fn collect_refs_json_contract() {
+        let sample =
+            r#"[{"ref_id":7,"tag":"a","role":"link","text":"Home","css_path":"nav > a"}]"#;
+        let refs: Vec<BrowserElementRef> =
+            serde_json::from_str(sample).expect("collect-refs JSON contract");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].ref_id, 7);
+        assert_eq!(refs[0].role, "link");
+        assert_eq!(refs[0].css_path, "nav > a");
     }
 
     /// Real-browser E2E: `QIDI_BROWSER_E2E=1 cargo test -p cf-tools browser_e2e -- --nocapture`.

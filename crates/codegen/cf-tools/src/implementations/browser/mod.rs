@@ -162,6 +162,18 @@ mod tests {
             cf_tool_runtime::Tool::id(&ClickImpl).to_string(),
             BROWSER_CLICK_TOOL_NAME
         );
+        assert_eq!(
+            cf_tool_runtime::Tool::id(&SnapshotImpl).to_string(),
+            BROWSER_SNAPSHOT_TOOL_NAME
+        );
+        assert_eq!(
+            cf_tool_runtime::Tool::id(&TypeImpl).to_string(),
+            BROWSER_TYPE_TOOL_NAME
+        );
+        assert_eq!(
+            cf_tool_runtime::Tool::id(&ReadImpl).to_string(),
+            BROWSER_READ_TOOL_NAME
+        );
     }
 
     /// The advertised names must come from the same constants.

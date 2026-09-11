@@ -6,6 +6,14 @@ use crate::types::tool::{ToolKind, ToolNamespace};
 use super::types::BrowserNavigateInput;
 use super::BROWSER_NAVIGATE_TOOL_NAME;
 
+/// The only URL schemes the tool surface accepts. Fail-closed: everything
+/// else (file:, data:, javascript:, chrome:, ...) is rejected before the
+/// backend is ever consulted. `file:` would bypass the read_file trust
+/// model (deny-globs / managed-file denies) via a rendering round-trip,
+/// and `data:` renders attacker HTML with no origin to rule on. Direct
+/// `BrowserBackend` callers (tests) are not bound by this gate.
+const ALLOWED_URL_SCHEMES: &[&str] = &["http://", "https://"];
+
 #[derive(Debug, Default)]
 pub struct NavigateImpl;
 
@@ -60,14 +68,14 @@ impl cf_tool_runtime::Tool for NavigateImpl {
     ) -> Result<ToolOutput, cf_tool_runtime::ToolError> {
         let url = input.url.trim().to_owned();
         let lowered = url.to_ascii_lowercase();
-        let scheme_ok = ["http://", "https://", "about:", "data:", "file:"]
+        let scheme_ok = ALLOWED_URL_SCHEMES
             .iter()
             .any(|s| lowered.starts_with(s));
         if !scheme_ok {
             return Err(cf_tool_runtime::ToolError::custom(
                 "invalid_url",
                 format!(
-                    "url must be absolute with an http/https/about/data/file scheme, got `{url}`"
+                    "url must be absolute with an http/https scheme, got `{url}`"
                 ),
             ));
         }

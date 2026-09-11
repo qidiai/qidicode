@@ -1023,6 +1023,9 @@ impl SessionActor {
                 cf_workspace::permission::AccessKind::WebSearch(q) => {
                     (cf_telemetry::events::AccessKind::Web, q.clone())
                 }
+                cf_workspace::permission::AccessKind::BrowserAct(detail) => {
+                    (cf_telemetry::events::AccessKind::Browser, detail.clone())
+                }
             };
             let subagent_session_id = if self.startup_hints.is_subagent {
                 Some(self.session_id_string())

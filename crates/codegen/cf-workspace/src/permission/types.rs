@@ -159,6 +159,11 @@ pub enum AccessKind {
     },
     WebFetch(String),
     WebSearch(String),
+    /// A browser act on the live page (click / type+submit). Carries a short
+    /// human-readable detail of what would be acted on. Prompts under the
+    /// default ask policy: clicking the live web can submit forms and place
+    /// orders -- the same gravity as shell execution.
+    BrowserAct(String),
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
@@ -278,6 +283,16 @@ impl From<&cf_tools::types::ToolInput> for AccessKind {
                 input: u.tool_input.clone(),
             },
             ToolInput::WebFetch(wf) => AccessKind::WebFetch(wf.url.clone()),
+            // Browser navigate rides the web-fetch gate (same external-origin
+            // trust question, so the same domain rules and prompt treatment
+            // apply). Click/type act on the live page and must prompt.
+            ToolInput::BrowserNavigate(bn) => AccessKind::WebFetch(bn.url.clone()),
+            ToolInput::BrowserClick(bc) => {
+                AccessKind::BrowserAct(format!("click `{}`", bc.selector))
+            }
+            ToolInput::BrowserType(bt) => {
+                AccessKind::BrowserAct(format!("type into `{}`", bt.selector))
+            }
             ToolInput::Dynamic(_) => AccessKind::Read(None),
             #[allow(unreachable_patterns)]
             _ => AccessKind::Read(None),

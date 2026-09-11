@@ -839,7 +839,8 @@ fn session_grant_pre_decision(
         AccessKind::Read(_)
         | AccessKind::Grep { .. }
         | AccessKind::WebSearch(_)
-        | AccessKind::Edit(_) => None,
+        | AccessKind::Edit(_)
+        | AccessKind::BrowserAct(_) => None,
     }
 }
 
@@ -1124,6 +1125,9 @@ fn spawn_permission_manager_with_pin(
                         AccessKind::WebSearch(query) => {
                             ("web_search".to_owned(), Some(query.clone()))
                         }
+                        AccessKind::BrowserAct(detail) => {
+                            ("browser_act".to_owned(), Some(detail.clone()))
+                        }
                     };
 
                     // `decision_reason` is the trigger (always set); `prompt_outcome` is
@@ -1402,6 +1406,10 @@ fn spawn_permission_manager_with_pin(
                         AccessKind::Read(_) => Some((Decision::Allow, reasons::SAFE_COMMAND)),
                         AccessKind::WebSearch(_) => Some((Decision::Allow, reasons::SAFE_COMMAND)),
                         AccessKind::Grep { .. } => Some((Decision::Allow, reasons::SAFE_COMMAND)),
+                        // Browser acts (click/type) act on the live page:
+                        // never auto-allowed, always fall through to the
+                        // prompt path (same gravity rationale as Bash).
+                        AccessKind::BrowserAct(_) => None,
                         // CWE-862: MCP tools must prompt the user instead of
                         // being silently auto-approved. They can execute arbitrary
                         // operations via third-party servers and should not bypass

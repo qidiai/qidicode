@@ -241,6 +241,9 @@ fn pattern_matches(access: &AccessKind, cr: &CompiledRule<'_>) -> bool {
         AccessKind::WebSearch(query) => {
             glob_matches(query, MatchContext::Freeform, cr.matcher) || query.starts_with(pattern)
         }
+        AccessKind::BrowserAct(detail) => {
+            glob_matches(detail, MatchContext::Freeform, cr.matcher) || detail.starts_with(pattern)
+        }
     }
 }
 

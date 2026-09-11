@@ -654,6 +654,7 @@ pub(crate) fn access_kind_label(k: events::AccessKind) -> &'static str {
         events::AccessKind::Grep => "grep",
         events::AccessKind::Mcp => "mcp",
         events::AccessKind::Web => "web",
+        events::AccessKind::Browser => "browser",
     }
 }
 
