@@ -584,6 +584,9 @@ mod tests {
         let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (format!("{base}/v1"), seen_headers, handle)
     }
+    // Unix-only: HomeGuard sets HOME, which dirs::home_dir() ignores on
+    // Windows; the assertion reads the real profile bundle cache there.
+    #[cfg(unix)]
     #[test]
     #[serial]
     fn status_reports_no_cache_when_manifest_missing() {

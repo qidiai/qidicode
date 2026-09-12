@@ -1053,7 +1053,7 @@ fn dummy_tracker(
     use crate::session::signals::SessionSignalsHandle;
     use std::sync::atomic::AtomicBool;
     let gateway = test_gateway();
-    let cwd = cf_paths::AbsPathBuf::new(PathBuf::from("/tmp")).unwrap();
+    let cwd = cf_paths::AbsPathBuf::new(std::env::temp_dir()).unwrap();
     let fs: Arc<dyn cf_workspace::file_system::AsyncFileSystem> = Arc::new(
         cf_workspace::file_system::LocalFs::new(PathBuf::from("/tmp")),
     );

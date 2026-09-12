@@ -1,4 +1,4 @@
-﻿use super::support::*;
+use super::support::*;
 use super::*;
 use tokio::sync::mpsc;
 /// Test that `last_api_request_at` is recorded and used for idle detection.
@@ -70,7 +70,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             let (gateway_tx, _) = mpsc::unbounded_channel::<cf_acp_lib::AcpClientMessage>();
             let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
-            let cwd = cf_paths::AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+            let cwd = cf_paths::AbsPathBuf::new(std::env::temp_dir()).unwrap();
             let fs = Arc::new(cf_workspace::file_system::MockFs::new(
                 cwd.to_path_buf(),
             ));

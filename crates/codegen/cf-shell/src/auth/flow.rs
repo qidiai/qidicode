@@ -218,7 +218,7 @@ async fn run_external_auth_provider(
     // TODO(security): scrub QIDI_AUTH from this child's env
     // (`.env_remove("QIDI_AUTH")`) like the hook runner and MCP stdio spawn do;
     // the external auth script is user-configured arbitrary code.
-    let mut cmd = tokio::process::Command::new("sh");
+    let mut cmd = tokio::process::Command::new(crate::auth::external_auth::resolve_shell());
     cmd.args(["-c", command])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())

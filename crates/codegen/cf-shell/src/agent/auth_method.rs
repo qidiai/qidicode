@@ -1525,6 +1525,11 @@ mod tests {
         // to exercise. Held until end-of-scope so we restore on panic too.
 
         let _global = EnvGuard::unset(XAI_API_KEY_ENV_VAR);
+        // Bundled catalog entries carry model-level env_key (ANTHROPIC/
+        // OPENAI); a developer shell with these set would flip
+        // should_advertise_xai_api_key for this assertion.
+        let _byok = EnvGuard::unset("OPENAI_API_KEY");
+        let _byok2 = EnvGuard::unset("ANTHROPIC_API_KEY");
 
 
 

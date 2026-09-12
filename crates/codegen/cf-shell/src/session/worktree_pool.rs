@@ -1860,6 +1860,7 @@ pool_size = 3
         assert!(
             instance_dir
                 .to_string_lossy()
+                .replace('\\', "/")
                 .contains("worktree_pool/test-instance-uuid")
         );
     }

@@ -383,7 +383,7 @@ impl FileToolset {
                 };
                 Ok(vec![
                     ToolConfig {
-                        id: "cf_tools::hashline_read".to_owned(),
+                        id: "QidiBuildHashline:hashline_read".to_owned(),
                         params: params_map.clone(),
                         name_override: None,
                         params_name_overrides: None,
@@ -392,7 +392,7 @@ impl FileToolset {
                         kind: None,
                     },
                     ToolConfig {
-                        id: "cf_tools::hashline_edit".to_owned(),
+                        id: "QidiBuildHashline:hashline_edit".to_owned(),
                         params: params_map.clone(),
                         name_override: None,
                         params_name_overrides: None,
@@ -401,7 +401,7 @@ impl FileToolset {
                         kind: None,
                     },
                     ToolConfig {
-                        id: "cf_tools::hashline_grep".to_owned(),
+                        id: "QidiBuildHashline:hashline_grep".to_owned(),
                         params: params_map,
                         name_override: None,
                         params_name_overrides: None,
@@ -431,9 +431,10 @@ mod tests {
             .unwrap();
         assert_eq!(configs.len(), 3);
         let ids: Vec<&str> = configs.iter().map(|c| c.id.as_str()).collect();
-        assert!(ids.contains(&"cf_tools::read_file"));
-        assert!(ids.contains(&"cf_tools::search_replace"));
-        assert!(ids.contains(&"cf_tools::grep"));
+        // From<&T> renders the id as `<Namespace PascalCase>:<tool id>`.
+        assert!(ids.contains(&"QidiBuild:read_file"));
+        assert!(ids.contains(&"QidiBuild:search_replace"));
+        assert!(ids.contains(&"QidiBuild:grep"));
     }
 
     #[test]
@@ -443,9 +444,9 @@ mod tests {
             .unwrap();
         assert_eq!(configs.len(), 3);
         let ids: Vec<&str> = configs.iter().map(|c| c.id.as_str()).collect();
-        assert!(ids.contains(&"cf_tools::hashline_read"));
-        assert!(ids.contains(&"cf_tools::hashline_edit"));
-        assert!(ids.contains(&"cf_tools::hashline_grep"));
+        assert!(ids.contains(&"QidiBuildHashline:hashline_read"));
+        assert!(ids.contains(&"QidiBuildHashline:hashline_edit"));
+        assert!(ids.contains(&"QidiBuildHashline:hashline_grep"));
     }
 
     /// Plan/explore omit `search_replace` by contract ("no Write/Edit/
@@ -478,13 +479,13 @@ mod tests {
                 .collect();
             // The swap engages (read moves to hashline)...
             assert!(
-                ids.contains(&"cf_tools::hashline_read"),
+                ids.contains(&"QidiBuildHashline:hashline_read"),
                 "{name}: {ids:?}"
             );
-            assert!(!ids.contains(&"cf_tools::read_file"), "{name}: {ids:?}");
+            assert!(!ids.contains(&"QidiBuild:read_file"), "{name}: {ids:?}");
             // ...but never grants the edit slot.
             assert!(
-                !ids.contains(&"cf_tools::hashline_edit"),
+                !ids.contains(&"QidiBuildHashline:hashline_edit"),
                 "{name}: override granted an edit tool to a no-edit toolset: {ids:?}"
             );
         }

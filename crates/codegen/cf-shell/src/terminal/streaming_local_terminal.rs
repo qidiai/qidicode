@@ -1188,6 +1188,34 @@ async fn run_output_collector(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Cross-platform still-running command for kill tests: native
+    /// `sleep 30` on Unix, a shell-snippet `Start-Sleep` on Windows
+    /// (create_terminal with empty args routes through the platform shell).
+    fn kill_probe_command() -> String {
+        #[cfg(windows)]
+        {
+            "Start-Sleep -Seconds 30".to_string()
+        }
+        #[cfg(not(windows))]
+        {
+            "sleep 30".to_string()
+        }
+    }
+
+    /// Cross-platform two-children-plus-wait snippet for process-group
+    /// semantics tests (POSIX job-control syntax; PowerShell equivalent).
+    fn process_group_probe_command() -> String {
+        #[cfg(windows)]
+        {
+            "Start-Sleep -Seconds 300; Start-Sleep -Seconds 300".to_string()
+        }
+        #[cfg(not(windows))]
+        {
+            "sleep 300 & sleep 300 & wait".to_string()
+        }
+    }
+    use super::*;
     use crate::terminal::DEFAULT_OUTPUT_BYTE_LIMIT;
     use cf_paths::AbsPathBuf;
 
@@ -1268,7 +1296,7 @@ mod tests {
                 };
 
                 let handle = tokio::task::spawn_local(async move {
-                    runner.run(make_request(&tool_id_clone, "sleep 30")).await
+                    runner.run(make_request(&tool_id_clone, &kill_probe_command())).await
                 });
 
                 // Wait for the process to start
@@ -1292,7 +1320,15 @@ mod tests {
                 );
 
                 let result = handle.await.unwrap().unwrap();
+                // Windows: TerminateProcess yields exit_code 1 and no signal
+                // number; Unix delivers SIGKILL ("signal 9").
+                #[cfg(unix)]
                 assert_eq!(result.signal, Some("signal 9".to_string()));
+                #[cfg(windows)]
+                {
+                    assert_eq!(result.signal, None, "no signal on Windows kill");
+                    assert_eq!(result.exit_code, Some(1), "terminated process exit code");
+                }
 
                 let statuses = extract_statuses(&notifier.notifications.lock().await);
                 assert_eq!(statuses.last(), Some(&acp::ToolCallStatus::Failed));
@@ -1306,10 +1342,25 @@ mod tests {
             .run_until(async {
                 let session_id = format!("ext-create-{}", std::process::id());
 
+                // Direct argv spawn is POSIX-only (there is no echo.exe on
+                // Windows); an empty-args snippet routes through the
+                // platform shell (pwsh/cmd/Git Bash) instead.
+                #[cfg(unix)]
                 let id = create_terminal(
                     &session_id,
                     "echo",
                     &["hello".to_string()],
+                    HashMap::new(),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+                #[cfg(not(unix))]
+                let id = create_terminal(
+                    &session_id,
+                    "Write-Output hello",
+                    &[],
                     HashMap::new(),
                     None,
                     None,
@@ -1336,10 +1387,22 @@ mod tests {
             .run_until(async {
                 let session_id = format!("ext-release-{}", std::process::id());
 
+                #[cfg(unix)]
                 let id = create_terminal(
                     &session_id,
                     "sleep",
                     &["30".to_string()],
+                    HashMap::new(),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+                #[cfg(not(unix))]
+                let id = create_terminal(
+                    &session_id,
+                    "Start-Sleep -Seconds 30",
+                    &[],
                     HashMap::new(),
                     None,
                     None,
@@ -1364,6 +1427,7 @@ mod tests {
                 let session_id = format!("kill-all-{}", std::process::id());
 
                 // Create two terminals: one normal, one we'll background.
+                #[cfg(unix)]
                 let normal_id = create_terminal(
                     &session_id,
                     "sleep",
@@ -1374,11 +1438,34 @@ mod tests {
                 )
                 .await
                 .unwrap();
+                #[cfg(not(unix))]
+                let normal_id = create_terminal(
+                    &session_id,
+                    "Start-Sleep -Seconds 30",
+                    &[],
+                    HashMap::new(),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
 
+                #[cfg(unix)]
                 let bg_id = create_terminal(
                     &session_id,
                     "sleep",
                     &["30".to_string()],
+                    HashMap::new(),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+                #[cfg(not(unix))]
+                let bg_id = create_terminal(
+                    &session_id,
+                    "Start-Sleep -Seconds 30",
+                    &[],
                     HashMap::new(),
                     None,
                     None,
@@ -1481,7 +1568,7 @@ mod tests {
 
                 let handle = tokio::task::spawn_local(async move {
                     runner
-                        .run(make_request(&tool_id_clone, "sleep 300 & sleep 300 & wait"))
+                        .run(make_request(&tool_id_clone, &process_group_probe_command()))
                         .await
                 });
 
@@ -1504,10 +1591,14 @@ mod tests {
                 );
 
                 let result = handle.await.unwrap().unwrap();
+                // Windows: TerminateProcess -> exit_code 1, no signal number.
+                #[cfg(unix)]
                 assert!(
                     result.signal.is_some(),
                     "process should have been killed by signal"
                 );
+                #[cfg(windows)]
+                assert_eq!(result.exit_code, Some(1), "group-killed exit code");
             })
             .await;
     }
@@ -1520,10 +1611,22 @@ mod tests {
                 let session_b = format!("kill-all-b-{}", std::process::id());
 
                 // Create a terminal in session B.
+                #[cfg(unix)]
                 let id_b = create_terminal(
                     &session_b,
                     "sleep",
                     &["30".to_string()],
+                    HashMap::new(),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+                #[cfg(not(unix))]
+                let id_b = create_terminal(
+                    &session_b,
+                    "Start-Sleep -Seconds 30",
+                    &[],
                     HashMap::new(),
                     None,
                     None,

@@ -1,4 +1,4 @@
-﻿//! Tracks open TUI sessions in `~/.qidi/active_sessions.json` for crash
+//! Tracks open TUI sessions in `~/.qidi/active_sessions.json` for crash
 //! recovery. Clean exit removes the entry; crash leaves it behind. On next
 //! launch, [`collect_crashed`] finds orphaned entries (dead PIDs).
 
@@ -119,7 +119,15 @@ where
             let _ = lock_file.unlock();
             result.map(Some)
         }
-        Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(None),
+        // Windows: fs2's try_lock surfaces lock contention as os error 33
+        // (ERROR_LOCK_VIOLATION) rather than ErrorKind::WouldBlock; treat
+        // both as "contended" so the non-blocking contract holds.
+        Err(e)
+            if e.kind() == io::ErrorKind::WouldBlock
+                || (cfg!(windows) && e.raw_os_error() == Some(33)) =>
+        {
+            Ok(None)
+        }
         Err(e) => Err(e),
     }
 }

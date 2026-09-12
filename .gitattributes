@@ -8,3 +8,9 @@
 # committed bytes — so every checkout yields identical bytes everywhere.
 crates/codegen/cf-agent/templates/*.md text eol=crlf
 crates/codegen/cf-agent/src/prompt/prompt_encrypted.rs text eol=crlf
+
+# cf-shell goal templates flow through include_str! into rendered text whose
+# newline bytes are pinned by tests (line-anchored assertions). The repo
+# stores them as LF; pin checkout to LF everywhere so Windows include_str!
+# bytes match the Linux CI bytes.
+crates/codegen/cf-shell/src/session/templates/*.md text eol=lf

@@ -537,7 +537,10 @@ mod tests {
         let img = ImageContent::new(png, "image/png");
         let msg = persist_and_prepend_image_files(dir.path(), &[img], "hello").unwrap();
         assert!(msg.contains("<image_files>"));
-        assert!(msg.contains("/assets/image-"));
+        assert!(
+            msg.replace('\\', "/").contains("/assets/image-"),
+            "image path should reference the session assets dir: {msg}"
+        );
         assert!(msg.ends_with("hello") || msg.contains("\n\nhello"));
         let assets = std::fs::read_dir(dir.path().join("assets")).unwrap();
         assert_eq!(assets.count(), 1);

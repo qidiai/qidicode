@@ -146,7 +146,7 @@ pub(crate) async fn create_test_actor_ex(
     SessionActor,
     tokio::sync::mpsc::UnboundedReceiver<SessionEvent>,
 ) {
-    let cwd = cf_paths::AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+    let cwd = cf_paths::AbsPathBuf::new(std::env::temp_dir()).unwrap();
     let fs = Arc::new(cf_workspace::file_system::MockFs::new(
         cwd.to_path_buf(),
     ));

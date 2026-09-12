@@ -1153,7 +1153,7 @@ fn make_test_handle(
         upload_queue: Arc::new(OnceLock::new()),
         upload_failures_since_success: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         tool_context: crate::tools::ToolContext::new_local_context(
-            cf_paths::AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap(),
+            cf_paths::AbsPathBuf::new(std::env::temp_dir()).unwrap(),
             std::sync::Arc::new(cf_workspace::file_system::LocalFs::new(
                 std::path::PathBuf::from("/tmp"),
             )),
@@ -2427,6 +2427,11 @@ async fn cached_token_fallthrough_falls_to_grok_com_without_credentials() {
     let _lockdown = EnvGuard::unset("QIDI_DISABLE_API_KEY_AUTH");
     let _new = EnvGuard::unset(XAI_API_KEY_ENV_VAR);
     let _legacy = EnvGuard::unset(LEGACY_XAI_API_KEY_ENV_VAR);
+    // Model-level BYOK env keys flip should_advertise_xai_api_key for the
+    // bundled catalog (gpt-4o carries env_key=OPENAI_API_KEY); a
+    // developer shell with them set breaks the fallthrough assertion.
+    let _byok = EnvGuard::unset("OPENAI_API_KEY");
+    let _byok2 = EnvGuard::unset("ANTHROPIC_API_KEY");
     let agent = build_minimal_agent_for_tests();
     assert_eq!(
         agent
