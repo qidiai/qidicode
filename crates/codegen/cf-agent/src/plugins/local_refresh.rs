@@ -499,6 +499,9 @@ mod tests {
         assert!(!installed.repo_path.join("agents/new.md").exists());
     }
 
+    // Unix-only: the untrusted premise relies on HOME moving dirs::home_dir(),
+    // which Windows ignores (reads the OS profile).
+    #[cfg(unix)]
     #[test]
     #[serial(home_env)]
     fn refresh_skips_untrusted_source_outside_home() {
