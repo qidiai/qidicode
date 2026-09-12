@@ -1922,7 +1922,10 @@ fn collect_session_files_recursive(base: &Path, dir: &Path, files: &mut Vec<Copi
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            let Some(name) = rel_path.to_str() else {
+            // Archive-relative names are POSIX by convention (they end up
+            // as tar/zip entry paths and in cross-platform trace views),
+            // so normalize the native separators instead of leaking `\\`.
+            let Some(name) = rel_path.to_str().map(|s| s.replace('\\', "/")) else {
                 continue;
             };
             let data = match std::fs::read(&path) {
@@ -3277,7 +3280,7 @@ mod resumed_sandbox_profile_tests {
             "newer",
             "2026-06-01T00:00:00Z",
             None,
-            Some("off"),
+            Some("workspace"),
             false,
         );
 
@@ -3292,7 +3295,7 @@ mod resumed_sandbox_profile_tests {
         );
         assert_eq!(
             resumed_session_sandbox_profile_in_root(None, Some(cwd), &root),
-            Some("off".to_string())
+            Some("workspace".to_string())
         );
     }
 

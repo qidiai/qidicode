@@ -2150,7 +2150,7 @@ mod inline_auto_compact_flow_tests {
         gateway_tx: mpsc::UnboundedSender<cf_acp_lib::AcpClientMessage>,
         persistence_tx: mpsc::UnboundedSender<PersistenceMsg>,
     ) -> SessionActor {
-        let cwd = AbsPathBuf::new(std::path::PathBuf::from("/tmp")).unwrap();
+        let cwd = AbsPathBuf::new(std::env::temp_dir()).unwrap();
         let fs = Arc::new(MockFs::new(cwd.to_path_buf()));
         let terminal = Arc::new(DummyTerminal {});
         let (hunk_tx, _hunk_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2655,8 +2655,38 @@ mod inline_auto_compact_flow_tests {
                 };
                 tokio::spawn(async move {
                     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                    let mut buf = [0u8; 4096];
-                    let _ = stream.read(&mut buf).await;
+                    // Drain the FULL request before responding: replying while
+                    // the client is still writing gets the socket RST'd on
+                    // Windows, which the client classifies as a transient
+                    // transport error instead of the deterministic 400.
+                    let mut request = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    loop {
+                        let n = stream.read(&mut chunk).await.unwrap_or(0);
+                        if n == 0 {
+                            break;
+                        }
+                        request.extend_from_slice(&chunk[..n]);
+                        let head_end = request
+                            .windows(4)
+                            .position(|w| w == b"\r\n\r\n")
+                            .map(|i| i + 4);
+                        if let Some(h) = head_end {
+                            let headers = String::from_utf8_lossy(&request[..h]);
+                            let content_len = headers
+                                .lines()
+                                .find(|l| {
+                                    l.to_ascii_lowercase().starts_with("content-length:")
+                                })
+                                .and_then(|l| {
+                                    l.split(':' ).nth(1).and_then(|v| v.trim().parse::<usize>().ok())
+                                })
+                                .unwrap_or(0);
+                            if request.len() >= h + content_len {
+                                break;
+                            }
+                        }
+                    }
                     let body =
                         r#"{"error":{"type":"invalid_request_error","message":"bad schema"}}"#;
                     let resp = format!(

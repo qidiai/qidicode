@@ -81,6 +81,52 @@ pub(crate) fn parse_output(output: &std::process::Output) -> anyhow::Result<Grok
     })
 }
 
+/// Build a synthetic `ExitStatus` with the given raw exit code, per-platform.
+///
+/// Tests only: replaces spawning `true`/`false` (which do not exist on
+/// Windows) with a directly-constructed status.
+#[cfg(test)]
+fn exit_status_raw(code: i32) -> std::process::ExitStatus {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(code as u32)
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        std::process::ExitStatus::from_raw(code)
+    }
+}
+/// Resolve a POSIX `sh` for provider commands.
+///
+/// Windows has no `sh` on PATH by default; Git for Windows ships one. Prefer
+/// PATH `sh`, then the common Git-for-Windows install locations, and fall
+/// back to plain `sh` (Unix CI) when neither exists so the spawn error
+/// surfaces naturally.
+pub(crate) fn resolve_shell() -> &'static str {
+    #[cfg(windows)]
+    {
+        use std::sync::OnceLock;
+        static SH: OnceLock<&'static str> = OnceLock::new();
+        *SH.get_or_init(|| {
+            let candidates = [
+                "C:\\Program Files\\Git\\bin\\sh.exe",
+                "C:\\Program Files (x86)\\Git\\bin\\sh.exe",
+            ];
+            for c in candidates {
+                if std::path::Path::new(c).exists() {
+                    return c;
+                }
+            }
+            // Git's usr/bin is also on PATH in most shells; sh there resolves
+            // via the plain name.
+            "sh"
+        })
+    }
+    #[cfg(not(windows))]
+    "sh"
+}
 /// Sync version for mid-session refresh. 5s timeout for refresh, 60s for initial.
 pub(crate) fn run_external_auth_sync(command: &str, is_refresh: bool) -> Option<GrokAuth> {
     use std::process::{Command, Stdio};
@@ -93,7 +139,11 @@ pub(crate) fn run_external_auth_sync(command: &str, is_refresh: bool) -> Option<
     // (`.env_remove("QIDI_AUTH")`) like the hook runner and MCP stdio spawn do:
     // an external auth provider is user-configured arbitrary code and should
     // not inherit the parent's inline credentials.
-    let mut cmd = Command::new("sh");
+    // Windows has no `sh` on PATH: resolve Git-for-Windows' bundled sh
+    // when present (same approach as the envrc bash fallback), else `sh`
+    // fails to spawn and the caller reports no external auth available.
+    let sh = resolve_shell();
+    let mut cmd = Command::new(sh);
     cmd.args(["-c", command])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -170,7 +220,7 @@ mod tests {
     #[test]
     fn parse_output_nonzero_exit_is_err() {
         let output = std::process::Output {
-            status: std::process::Command::new("false").status().unwrap(),
+            status: exit_status_raw(1),
             stdout: b"token".to_vec(),
             stderr: vec![],
         };
@@ -180,7 +230,7 @@ mod tests {
     #[test]
     fn parse_output_empty_stdout_is_err() {
         let output = std::process::Output {
-            status: std::process::Command::new("true").status().unwrap(),
+            status: exit_status_raw(0),
             stdout: b"  \n".to_vec(),
             stderr: vec![],
         };
@@ -190,7 +240,7 @@ mod tests {
     #[test]
     fn parse_output_issuer_claim_enables_xai_auth() {
         let ok = |stdout: &str| std::process::Output {
-            status: std::process::Command::new("true").status().unwrap(),
+            status: exit_status_raw(0),
             stdout: stdout.as_bytes().to_vec(),
             stderr: vec![],
         };
@@ -230,7 +280,7 @@ mod tests {
     #[test]
     fn parse_output_malformed_json_falls_back_to_bare() {
         let output = std::process::Output {
-            status: std::process::Command::new("true").status().unwrap(),
+            status: exit_status_raw(0),
             stdout: b"{not valid json}".to_vec(),
             stderr: vec![],
         };

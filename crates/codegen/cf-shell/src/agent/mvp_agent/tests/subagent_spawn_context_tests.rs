@@ -1,4 +1,4 @@
-﻿//! Subagent spawn-context inheritance: a child session must inherit the parent's
+//! Subagent spawn-context inheritance: a child session must inherit the parent's
 //! permission handle and goal-loop gate so policy and run-state can't be bypassed
 //! by delegating to a subagent.
 
@@ -21,7 +21,7 @@ async fn subagent_spawn_context_inherits_parent_permission_handle() {
             let sid = acp::SessionId::new("parent-permission");
             let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
             let gateway = GatewaySender::new(tx);
-            let cwd = cf_paths::AbsPathBuf::new(std::path::PathBuf::from("/tmp"))
+            let cwd = cf_paths::AbsPathBuf::new(std::env::temp_dir())
                 .expect("absolute cwd");
             let (permission_handle, _events_rx) =
                 cf_workspace::permission::spawn_permission_manager(

@@ -184,8 +184,12 @@ fn parse_details_path(prompt: &str) -> Option<String> {
 /// Pull the absolute `.../strategy.md` path out of the strategist prompt
 /// (walk left from `/strategy.md` to the path start).
 fn parse_strategy_path(prompt: &str) -> Option<String> {
-    let end_idx = prompt.find("/strategy.md")?;
-    let end = end_idx + "/strategy.md".len();
+    // marker_end already points past the marker for both spellings
+    // (Windows Path::join renders backslashes). Slice [start..marker_end].
+    let end = prompt
+        .find("/strategy.md")
+        .or_else(|| prompt.rfind("\\strategy.md").map(|i| i + "\\strategy.md".len()))?;
+    let end_idx = end;
     let start = prompt[..end_idx]
         .rfind(|c: char| !c.is_ascii_graphic() || c == '`')
         .map(|i| i + 1)

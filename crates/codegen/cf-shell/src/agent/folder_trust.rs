@@ -653,6 +653,9 @@ mod tests {
         );
     }
 
+    // Unix-only: the premise is "HOME env makes the tempdir the home root",
+    // but dirs::home_dir() on Windows reads the OS profile and ignores HOME.
+    #[cfg(unix)]
     #[test]
     #[serial_test::serial]
     fn revoke_on_unrecordable_home_root_records_no_deny() {

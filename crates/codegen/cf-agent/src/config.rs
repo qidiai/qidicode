@@ -1395,13 +1395,16 @@ impl AgentDefinition {
         &mut self,
         file_tools: Vec<cf_tools::registry::types::ToolConfig>,
     ) {
+        // Ids are the canonical `Namespace:tool` form produced by
+        // `ToolConfig::from(&T)`; the pre-migration `cf_tools::*` strings
+        // never matched live toolsets, silently disabling the swap.
         const FILE_TOOL_SLOTS: &[[&str; 2]] = &[
-            ["cf_tools::read_file", "cf_tools::hashline_read"],
+            ["QidiBuild:read_file", "QidiBuildHashline:hashline_read"],
             [
-                "cf_tools::search_replace",
-                "cf_tools::hashline_edit",
+                "QidiBuild:search_replace",
+                "QidiBuildHashline:hashline_edit",
             ],
-            ["cf_tools::grep", "cf_tools::hashline_grep"],
+            ["QidiBuild:grep", "QidiBuildHashline:hashline_grep"],
         ];
         for tool in self.tool_config.tools.iter_mut() {
             let Some(slot) = FILE_TOOL_SLOTS

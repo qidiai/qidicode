@@ -3053,6 +3053,8 @@ mod tests {
         actor_handle.await.unwrap();
     }
 
+    /// Unix-only: sample_rss_bytes intentionally returns 0 on non-Unix.
+    #[cfg(unix)]
     #[test]
     fn test_sample_rss_bytes_returns_nonzero() {
         let rss = sample_rss_bytes();
@@ -3066,6 +3068,8 @@ mod tests {
         );
     }
 
+    /// Unix-only: sample_rss_bytes intentionally returns 0 on non-Unix.
+    #[cfg(unix)]
     #[test]
     fn test_sample_rss_bytes_is_stable() {
         // Two consecutive calls should return similar values (no wild swings)
@@ -3081,6 +3085,8 @@ mod tests {
         );
     }
 
+    /// Unix-only: peak RSS sampling is a getrusage no-op on non-Unix.
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_peak_rss_recorded_at_turn_end() {
         let (handle, actor) = SessionSignalsActor::new();

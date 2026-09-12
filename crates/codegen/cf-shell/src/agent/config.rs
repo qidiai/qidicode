@@ -37,7 +37,7 @@ pub enum AgentMode {
     Generic,
 }
 /// Default agent type when the server or user config doesn't specify one.
-pub const DEFAULT_AGENT_TYPE: &str = "cf-tools-plan";
+pub const DEFAULT_AGENT_TYPE: &str = "qidi-build-plan";
 /// Serde default for `ModelInfo.agent_type` and `ModelEntryConfig.agent_type`.
 pub fn default_agent_type() -> String {
     DEFAULT_AGENT_TYPE.to_owned()
@@ -6211,6 +6211,12 @@ reasoning_effort = "low"
     }
     #[test]
     fn has_own_credentials_guards_session_vs_external_key() {
+        use cf_test_support::EnvGuard;
+        // Bundled gpt-4o carries env_key=OPENAI_API_KEY; has_own_credentials
+        // probes env at call time, so a developer shell with it set flips
+        // the first assertion.
+        let _byok = EnvGuard::unset("OPENAI_API_KEY");
+        let _byok2 = EnvGuard::unset("ANTHROPIC_API_KEY");
         let endpoints = EndpointsConfig::default();
         for (model_id, entry) in default_model_entries(&endpoints) {
             assert!(
@@ -11183,11 +11189,11 @@ default = "grok-4.5"
     fn resolve_model_list_inherits_context_window_from_default_when_prefetched_has_fallback() {
         let cfg = Config::default();
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        let entry = prefetch_model_entry("cf-tools", default_cw, ApiBackend::default());
+        let entry = prefetch_model_entry("grok-build", default_cw, ApiBackend::default());
         let mut prefetched = IndexMap::new();
-        prefetched.insert("cf-tools".to_owned(), entry);
+        prefetched.insert("grok-build".to_owned(), entry);
         let resolved = resolve_model_list(&cfg, Some(prefetched));
-        let entry = resolved.get("cf-tools").expect("model must exist");
+        let entry = resolved.get("grok-build").expect("model must exist");
         assert_ne!(
             entry.info.context_window.get(),
             default_cw,
@@ -11198,11 +11204,11 @@ default = "grok-4.5"
     fn resolve_model_list_does_not_override_explicitly_set_context_window() {
         let cfg = Config::default();
         let explicit_cw = 65_536;
-        let entry = prefetch_model_entry("cf-tools", explicit_cw, ApiBackend::default());
+        let entry = prefetch_model_entry("grok-build", explicit_cw, ApiBackend::default());
         let mut prefetched = IndexMap::new();
-        prefetched.insert("cf-tools".to_owned(), entry);
+        prefetched.insert("grok-build".to_owned(), entry);
         let resolved = resolve_model_list(&cfg, Some(prefetched));
-        let entry = resolved.get("cf-tools").expect("model must exist");
+        let entry = resolved.get("grok-build").expect("model must exist");
         assert_eq!(
             entry.info.context_window.get(),
             explicit_cw,
@@ -11213,13 +11219,13 @@ default = "grok-4.5"
     fn resolve_model_list_inherits_agent_type_and_api_backend() {
         let cfg = Config::default();
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        let entry = prefetch_model_entry("cf-tools", default_cw, ApiBackend::default());
+        let entry = prefetch_model_entry("grok-build", default_cw, ApiBackend::default());
         let mut prefetched = IndexMap::new();
-        prefetched.insert("cf-tools".to_owned(), entry);
+        prefetched.insert("grok-build".to_owned(), entry);
         let resolved = resolve_model_list(&cfg, Some(prefetched));
-        let entry = resolved.get("cf-tools").expect("model must exist");
+        let entry = resolved.get("grok-build").expect("model must exist");
         let defaults = default_model_entries(&EndpointsConfig::default());
-        if let Some(default) = defaults.get("cf-tools") {
+        if let Some(default) = defaults.get("grok-build") {
             if default.info.agent_type != DEFAULT_AGENT_TYPE {
                 assert_eq!(
                     entry.info.agent_type, default.info.agent_type,
@@ -11259,21 +11265,21 @@ default = "grok-4.5"
         let cfg = Config::default();
         let mut defs = default_model_entries(&EndpointsConfig::default());
         let mut p = IndexMap::new();
-        if let Some(e) = defs.shift_remove("cf-tools") {
-            p.insert("cf-tools".to_string(), e);
+        if let Some(e) = defs.shift_remove("grok-build") {
+            p.insert("grok-build".to_string(), e);
         }
         let resolved = resolve_model_list(&cfg, Some(p));
-        assert!(resolved.contains_key("cf-tools"));
+        assert!(resolved.contains_key("grok-build"));
         let no_p = resolve_model_list(&cfg, None);
-        assert!(no_p.contains_key("cf-tools"));
+        assert!(no_p.contains_key("grok-build"));
     }
     #[test]
     fn resolve_model_list_prefetch_visibility_matches_auth_and_server_list() {
         let cfg = Config::default();
         let mut defs = default_model_entries(&EndpointsConfig::default());
         let mut p = IndexMap::new();
-        if let Some(e) = defs.shift_remove("cf-tools") {
-            p.insert("cf-tools".to_string(), e);
+        if let Some(e) = defs.shift_remove("grok-build") {
+            p.insert("grok-build".to_string(), e);
         }
         let resolved = resolve_model_list(&cfg, Some(p));
         let sess: Vec<_> = resolved
@@ -11295,7 +11301,7 @@ default = "grok-4.5"
         p.insert("secret-xyz".to_string(), e);
         let resolved = resolve_model_list(&cfg, Some(p));
         assert!(resolved.contains_key("secret-xyz"));
-        assert!(!resolved.contains_key("cf-tools"));
+        assert!(!resolved.contains_key("grok-build"));
     }
     #[test]
     fn resolve_model_list_prefetch_replaces_bundled_entirely() {
@@ -11305,7 +11311,7 @@ default = "grok-4.5"
         p.insert("grok-4.5".to_string(), e);
         let resolved = resolve_model_list(&cfg, Some(p));
         assert!(resolved.contains_key("grok-4.5"));
-        assert!(!resolved.contains_key("cf-tools"));
+        assert!(!resolved.contains_key("grok-build"));
     }
     #[test]
     fn resolve_model_list_empty_prefetch_yields_empty_base() {
@@ -11320,7 +11326,7 @@ default = "grok-4.5"
     fn byok_config_overlay_visible_to_api_key_users() {
         let raw: toml::Value = toml::from_str(
             r#"
-            [model.cf-tools]
+            [model.grok-build]
             model = "grok-4.5"
             base_url = "https://inference.company.com/v1"
             env_key = "COMPANY_TOKEN"
@@ -11329,7 +11335,7 @@ default = "grok-4.5"
         .unwrap();
         let cfg = Config::new_from_toml_cfg(&raw).expect("config should parse");
         let resolved = resolve_model_list(&cfg, None);
-        let entry = resolved.get("cf-tools").expect("cf-tools must exist");
+        let entry = resolved.get("grok-build").expect("grok-build must exist");
         assert!(
             entry.visible_for_auth(false),
             "BYOK config entry must be visible to API-key users — \
@@ -11342,14 +11348,14 @@ default = "grok-4.5"
     fn plain_config_overlay_preserves_bundled_visibility() {
         let raw: toml::Value = toml::from_str(
             r#"
-            [model.cf-tools]
+            [model.grok-build]
             context_window = 300000
             "#,
         )
         .unwrap();
         let cfg = Config::new_from_toml_cfg(&raw).expect("config should parse");
         let resolved = resolve_model_list(&cfg, None);
-        let entry = resolved.get("cf-tools").expect("cf-tools must exist");
+        let entry = resolved.get("grok-build").expect("grok-build must exist");
         assert!(
             !entry.visible_for_auth(false),
             "non-BYOK config overlay must preserve bundled supported_in_api=false"

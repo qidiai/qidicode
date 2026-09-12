@@ -99,8 +99,11 @@ async fn plan_mode_rejects_grok_edit_outside_plan_file_despite_allow_all_permiss
                 text.contains("Rejected: file edits are not allowed in plan mode"),
                 "rejection text: {text}"
             );
+            // Production renders the path via Path::join, so the separator is
+            // platform-native; match both spellings.
             assert!(
-                text.contains("/tmp/test-session/plan.md"),
+                text.replace('\\', "/")
+                    .contains("/tmp/test-session/plan.md"),
                 "must name the plan file so the model knows the one editable path: {text}"
             );
             assert!(

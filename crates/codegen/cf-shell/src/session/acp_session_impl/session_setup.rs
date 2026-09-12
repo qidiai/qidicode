@@ -347,7 +347,13 @@ impl SessionActor {
         };
         let current_model = &current_config.model;
         let base_url = &current_config.base_url;
-        if !crate::util::is_cli_chat_proxy_url(base_url) {
+        // Test builds allow the mock cli-chat-proxy on localhost; production
+        // builds compile to the shared predicate unchanged.
+        #[cfg(test)]
+        let trusted = crate::util::is_cli_chat_proxy_url_for_idle_refresh(base_url);
+        #[cfg(not(test))]
+        let trusted = crate::util::is_cli_chat_proxy_url(base_url);
+        if !trusted {
             return;
         }
         tracing::info!(

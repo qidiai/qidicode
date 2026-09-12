@@ -215,9 +215,11 @@ mod tests {
             !instr.contains("10m"),
             "instruction must not default: {instr}"
         );
-        // The stub surface (feature off) returns a fixed placeholder;
-        // invariants that only hold for the full implementation are
-        // gated behind the deploy feature upstream.
-        assert!(instr.contains("Schedule a command to run at regular intervals"));
+        // Full-implementation invariants (the stub placeholder was replaced
+        // by the restored xai-grok-tools-api wording): the model must see the
+        // scheduler_create action and the fire_immediately contract.
+        assert!(instr.contains("scheduler_create"), "{instr}");
+        assert!(instr.contains("fire_immediately"), "{instr}");
+        assert!(instr.contains("every 30 minutes do x"), "{instr}");
     }
 }

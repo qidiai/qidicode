@@ -379,6 +379,8 @@ mod tests {
         assert_eq!(result, vec!["my_exec"]);
     }
 
+    /// POSIX-only: the provider early-returns on Windows.
+    #[cfg(unix)]
     #[test]
     fn scan_deduplicates_across_dirs() {
         use std::fs;

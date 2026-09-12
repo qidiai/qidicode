@@ -72,9 +72,11 @@ fn spawn_planner_coordinator_capturing(
                 // The prompt embeds the path several times; we
                 // just need any one. Walk left from the first
                 // `/plan.md` occurrence to find the absolute path.
-                let plan_path = req.prompt.find("/plan.md").map(|end_idx| {
-                    let end = end_idx + "/plan.md".len();
-                    let start = req.prompt[..end_idx]
+                // marker_end already points past the marker for both spellings;
+                // slice [start..marker_end] with no extra length addition.
+                let plan_path = req.prompt.find("/plan.md").or_else(|| req.prompt.rfind("\\plan.md").map(|i| i + "\\plan.md".len())).map(|marker_end| {
+                    let end = marker_end;
+                    let start = req.prompt[..marker_end]
                         .rfind(|c: char| !c.is_ascii_graphic() || c == '`')
                         .map(|i| i + 1)
                         .unwrap_or(0);
@@ -850,9 +852,11 @@ async fn lifecycle_fail_pause_resume_retry_success() {
                 while let Some(ev) = rx.recv().await {
                     if let SubagentEvent::Spawn(req) = ev {
                         let n = count_task.fetch_add(1, SeqOrd::SeqCst);
-                        let plan_path = req.prompt.find("/plan.md").map(|end_idx| {
-                            let end = end_idx + "/plan.md".len();
-                            let start = req.prompt[..end_idx]
+                        // marker_end already points past the marker (same as
+                        // the coordinator path above).
+                        let plan_path = req.prompt.find("/plan.md").or_else(|| req.prompt.rfind("\\plan.md").map(|i| i + "\\plan.md".len())).map(|marker_end| {
+                            let end = marker_end;
+                            let start = req.prompt[..marker_end]
                                 .rfind(|c: char| !c.is_ascii_graphic() || c == '`')
                                 .map(|i| i + 1)
                                 .unwrap_or(0);

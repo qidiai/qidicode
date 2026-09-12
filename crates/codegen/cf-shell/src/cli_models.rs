@@ -102,7 +102,7 @@ mod tests {
     ///
     /// Uses `QIDI_AUTH_PATH` (not `QIDI_HOME`) so a OnceLock-cached real home
     /// with `auth.json` cannot leak into these tests.
-    fn isolate_auth_sources() -> (tempfile::TempDir, [EnvGuard; 7]) {
+    fn isolate_auth_sources() -> (tempfile::TempDir, [EnvGuard; 9]) {
         let dir = tempfile::tempdir().unwrap();
         let auth_path = dir.path().join("no-auth.json");
         let guards = [
@@ -113,6 +113,12 @@ mod tests {
             EnvGuard::unset("QIDI_DEPLOYMENT_KEY"),
             EnvGuard::unset("QIDI_WS_ORIGIN"),
             EnvGuard::unset("QIDI_DISABLE_API_KEY_AUTH"),
+            // Model-level BYOK env keys: the bundled catalog entries carry
+            // env_key (ANTHROPIC/OPENAI), and has_own_credentials probes
+            // them at call time -- a developer shell with these set makes
+            // "not authenticated" assertions flake.
+            EnvGuard::unset("OPENAI_API_KEY"),
+            EnvGuard::unset("ANTHROPIC_API_KEY"),
         ];
         (dir, guards)
     }

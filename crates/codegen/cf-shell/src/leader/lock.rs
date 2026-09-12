@@ -247,12 +247,20 @@ impl LeaderLock {
     }
 
     /// Write our PID to the lock file. Call after acquiring lock.
+    ///
+    /// Also writes an unlocked sibling `<lock>.pid` copy: on Windows the
+    /// mandatory byte-range lock blocks reads of the locked file through a
+    /// second handle, so `read_pid_from_path` would always fail while the
+    /// lock is held (same root cause as the workspace daemonize sidecar).
     pub fn write_pid(&mut self) -> Result<(), LockError> {
+        let pid = std::process::id().to_string();
         if let Some(ref mut file) = self.lock_file {
             file.set_len(0)?;
-            write!(file, "{}", std::process::id())?;
+            write!(file, "{}", pid)?;
             file.sync_all()?;
         }
+        // Best-effort: diagnostics only, never fails the acquire path.
+        let _ = std::fs::write(Self::pid_sidecar_path(&self.lock_path), &pid);
         Ok(())
     }
 
@@ -262,11 +270,25 @@ impl LeaderLock {
     }
 
     pub fn read_pid_from_path(path: &Path) -> Option<u32> {
+        // Prefer the unlocked sidecar: on Windows the held lock makes the
+        // main file unreadable through a second handle.
+        if let Ok(content) = std::fs::read_to_string(Self::pid_sidecar_path(path)) {
+            if let Ok(pid) = content.trim().parse() {
+                return Some(pid);
+            }
+        }
         let mut content = String::new();
         File::open(path)
             .and_then(|mut f| f.read_to_string(&mut content))
             .ok()?;
         content.trim().parse().ok()
+    }
+
+    /// Unlocked sibling file holding the readable pid copy.
+    fn pid_sidecar_path(lock_path: &Path) -> PathBuf {
+        let mut sidecar = lock_path.as_os_str().to_os_string();
+        sidecar.push(".pid");
+        PathBuf::from(sidecar)
     }
 
     /// Delete the socket file. Call while holding the lock.
