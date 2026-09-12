@@ -168,7 +168,11 @@ fn merge_tool_params(
     map: &serde_json::Map<String, serde_json::Value>,
 ) {
     for tc in &mut tool_config.tools {
-        if ids.contains(&tc.id.as_str()) {
+        // Namespace-agnostic: callers pass legacy `cf_tools::*` ids while live
+        // ToolConfigs render `Namespace:tool`; matching on the short name keeps
+        // both spellings firing (the ids were never migrated at rebrand time,
+        // which silently dropped web_fetch/bash/ask params injection).
+        if ids.iter().any(|i| *i == tc.id || short_tool_name(i) == short_tool_name(&tc.id)) {
             let params = tc.params.get_or_insert_with(serde_json::Map::new);
             for (k, v) in map {
                 params.insert(k.clone(), v.clone());

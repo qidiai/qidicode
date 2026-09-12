@@ -254,6 +254,13 @@ pub fn preset_names() -> Vec<String> {
 /// Resolve a named toolset preset to its [`ToolServerConfig`], or `None` if unknown.
 pub fn toolset_for_preset(preset: &str) -> Option<ToolServerConfig> {
     let normalized = preset.trim().to_ascii_lowercase().replace([' ', '_'], "-");
+    // Rebrand aliases: persisted configs and docs may still carry the
+    // pre-fork names; each maps onto its renamed native preset.
+    let normalized = match normalized.as_str() {
+        "qidi-build" | "grok-build" => "cf-tools".to_owned(),
+        "qidi-build-computer" | "grok-computer" => "cf-tools-computer".to_owned(),
+        other => other.to_owned(),
+    };
     native_toolset_presets()
         .into_iter()
         .find(|(name, _)| *name == normalized)
@@ -655,10 +662,18 @@ where
 )]
 #[strum(serialize_all = "kebab-case")]
 pub enum BuiltinAgentName {
+    /// strum alias keeps the pre-fork wire name parseable: persisted configs,
+    /// plugin manifests, and docs may still say "cf-tools", and the round-trip
+    /// contract (from_str -> as_ref) pins that same string back out.
+    #[strum(serialize = "cf-tools")]
     QidiBuild,
+    #[strum(serialize = "cf-tools-concise")]
     QidiBuildConcise,
+    #[strum(serialize = "qidi-build-plan")]
     QidiBuildPlan,
+    #[strum(serialize = "qidi-build-plan-no-subagents")]
     QidiBuildPlanNoSubagents,
+    #[strum(serialize = "cf-tools-ask-user")]
     QidiBuildAskUser,
     Codex,
     Opencode,
@@ -2270,7 +2285,7 @@ description: Test default tool config
             "promptBody" : "You are a coding assistant." }
         );
         let def = AgentDefinition::from_json(&json).unwrap();
-        let task_tool_id = "cf_tools::task";
+        let task_tool_id = "QidiBuild:task";
         assert!(
             def.tool_config.tools.iter().any(|tc| tc.id == task_tool_id),
             "from_json() without toolConfig should include TaskTool in default toolset, \

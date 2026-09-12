@@ -161,6 +161,12 @@ pub trait Reminder {
 }
 
 /// Map a tool name to its kind/category.
-pub fn kind_for(_tool_name: &str) -> Option<ToolKind> {
-    None
+///
+/// Delegates to the shared vendor-compat table (`claude_alias`): plugin
+/// allowlists written with upstream names (`PowerShell`, `TaskOutput`, ...)
+/// resolve to the same [`ToolKind`] the hook matcher uses. The stub here
+/// previously answered `None` for everything, making every allowlist entry
+/// fail open at `AgentBuilder` time.
+pub fn kind_for(tool_name: &str) -> Option<ToolKind> {
+    super::claude_alias::kind_for(tool_name)
 }

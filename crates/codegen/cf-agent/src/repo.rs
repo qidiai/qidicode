@@ -181,6 +181,9 @@ mod tests {
         }
     }
 
+    // Unix-only: the premise is "HOME env moves the home", but dirs::home_dir()
+    // on Windows reads the OS profile and ignores HOME.
+    #[cfg(unix)]
     #[test]
     #[serial(home_env)]
     fn resolve_treats_home_git_repo_as_no_repo() {

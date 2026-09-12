@@ -4,6 +4,7 @@
 //! from submodules for convenient access.
 
 // --- Submodule declarations ---
+pub mod claude_alias;
 pub mod config_validation;
 pub mod slash_commands;
 pub mod tool;
