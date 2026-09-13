@@ -32,7 +32,7 @@ pub(super) fn is_max_tier(subscription_tier: Option<&str>) -> bool {
     // deployments emit "SuperQIDI Heavy" (rebrand half-migration kept both
     // alive in the wild).
     matches!(
-        t.to_ascii_lowercase().replace(' ', "_").as_str(),
+        t.trim().to_ascii_lowercase().replace(' ', "_").as_str(),
         "supergrok_heavy" | "superqidi_heavy"
     )
 }
