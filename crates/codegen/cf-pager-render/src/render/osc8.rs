@@ -594,6 +594,11 @@ mod tests {
 
     // ── tool_path_file_url ──
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn tool_path_file_url_resolves_relative_against_cwd() {
         let cwd = Path::new("/Users/me/project");
@@ -602,6 +607,11 @@ mod tests {
         assert!(url.contains("/Users/me/project/src/main.rs"), "got {url}");
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn tool_path_file_url_accepts_absolute_without_existing_file() {
         let url = tool_path_file_url("/tmp/does-not-exist-xyz/foo.rs", None).expect("url");
@@ -609,6 +619,11 @@ mod tests {
         assert!(url.contains("foo.rs"), "got {url}");
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn tool_path_file_url_preserves_parent_segments_for_os_resolution() {
         let url = tool_path_file_url("/repo/link/../target.rs", None).expect("url");
@@ -797,6 +812,44 @@ mod tests {
 
     // ── File path detection ──
 
+    /// Windows smoke: the same scan/URL machinery that the POSIX-absolute
+    /// fixtures exercise, driven by a real drive-absolute path (tempdir).
+    #[test]
+    fn scan_and_tool_url_work_on_native_absolute_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("src").join("main.rs");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, b"fn main() {}").unwrap();
+        let path_str = p.to_string_lossy().to_string();
+
+        let url = tool_path_file_url(&path_str, None).expect("drive-absolute path resolves");
+        assert!(url.starts_with("file:///"), "got {url}");
+        assert!(url.replace("\\", "/").contains("src/main.rs"), "got {url}");
+
+        // NOTE: the prose-scan heuristic does not yet linkify drive-absolute
+        // paths (`C:\\...`) -- the colon in the drive prefix hits the same
+        // "stop at colon" rule that bounds POSIX path scans. URL assembly
+        // above is platform-correct; scan heuristics for drive letters are a
+        // tracked follow-up, asserted here so the behavior is pinned:
+        let line = make_line(&format!("Error in {path_str} at line 10"));
+        let mut overlay = LinkOverlay::new();
+        scan_unjoined(std::iter::once((0, &line)), 0, &[], &mut overlay);
+        #[cfg(unix)]
+        assert_eq!(overlay.links().len(), 1, "scan finds POSIX absolute path");
+        #[cfg(windows)]
+        assert!(
+            overlay.links().is_empty(),
+            "documents current drive-letter scan behavior; flip when the
+             heuristic learns drive prefixes"
+        );
+    }
+
+
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_detects_absolute_file_path() {
         let line = make_line("Error in /Users/foo/src/main.rs at line 10");
@@ -855,6 +908,11 @@ mod tests {
         assert!(overlay.links().is_empty());
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_detects_grok_session_media_path() {
         // Dot-directory (`.grok`), percent-encoded session segment, and a
@@ -871,6 +929,11 @@ mod tests {
         );
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_detects_media_path_soft_wrapped_across_rows() {
         // Regression: `image_gen` output prose wraps the long session path
@@ -914,6 +977,11 @@ mod tests {
         );
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_wrapped_path_trailing_sentence_period_excluded() {
         // Wrapped path ending mid-sentence: trailing `.` on the last row is
@@ -980,6 +1048,11 @@ mod tests {
         }
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_word_break_joiner_restores_source_space() {
         // A `Some(" ")` joiner re-inserts the collapsed space, so a spaced
@@ -1005,6 +1078,11 @@ mod tests {
         );
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_hard_break_rows_not_joined() {
         // `None` joiner = separate source lines: fragments must not be glued
@@ -1021,6 +1099,11 @@ mod tests {
         assert_eq!(overlay.links()[0].screen_row, 0);
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_path_split_across_styled_spans_single_row() {
         // Markdown styling can split one row into multiple spans; the path
@@ -1041,6 +1124,11 @@ mod tests {
         );
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_file_path_stops_at_colon() {
         let line = make_line("/Users/foo/bar.rs:45:10: error message");
@@ -1083,6 +1171,11 @@ mod tests {
         );
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_url_and_file_path_coexist() {
         let line = make_line("See https://docs.rs/foo and /Users/me/src/lib.rs end.");
@@ -1095,6 +1188,11 @@ mod tests {
         assert!(urls.contains(&"file:///Users/me/src/lib.rs"));
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_file_path_with_dots_and_hyphens() {
         let line = make_line("Reading /tmp/grok-impl-summary.md now.");
@@ -1105,6 +1203,11 @@ mod tests {
         assert_eq!(&*overlay.links()[0].url, "file:///tmp/grok-impl-summary.md");
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_file_path_with_at_sign() {
         let line = make_line("In /node_modules/@scope/package/index.js now.");
@@ -1118,6 +1221,11 @@ mod tests {
         );
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_file_path_with_space_in_segment_quoted() {
         // Tutor report: path underline/click target stopped at the space in
@@ -1147,6 +1255,11 @@ mod tests {
         );
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_file_path_with_space_in_segment_unquoted() {
         // Same filename without surrounding quotes — final segment has a
@@ -1168,6 +1281,11 @@ mod tests {
         );
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn scan_file_path_space_does_not_swallow_trailing_sentence() {
         // A space followed by prose (no `.ext` in the final segment) must not

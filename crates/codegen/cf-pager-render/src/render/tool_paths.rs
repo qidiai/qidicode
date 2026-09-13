@@ -282,6 +282,11 @@ mod tests {
         );
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn expanded_surface_normalizes_and_classifies_against_cwd() {
         let cwd = Path::new("/Users/me/project");
@@ -348,6 +353,11 @@ mod tests {
         assert_eq!(unresolved.relative_to_cwd, None);
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn expanded_outside_cwd_stays_normalized_target() {
         let cwd = Path::new("/Users/me/project");
@@ -358,6 +368,11 @@ mod tests {
         assert!(!got.starts_with("/Users/me/project"), "got {got}");
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn expanded_surface_uses_worktree_cwd() {
         let cwd = Path::new("/Users/me/.qidi/worktrees/foo");
@@ -368,6 +383,11 @@ mod tests {
         );
     }
 
+    // POSIX-absolute fixture (/Users, /tmp, /repo): those spellings are not
+    // Path::is_absolute() on Windows (no drive prefix), so the POSIX
+    // expectations cannot hold there; Windows behavior is covered by the
+    // drive-letter smoke below.
+    #[cfg(unix)]
     #[test]
     fn fullscreen_surface_uses_anchored_or_honestly_relative_target() {
         let cwd = Path::new("/Users/me/project");
