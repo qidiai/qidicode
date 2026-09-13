@@ -2449,6 +2449,10 @@ fn agent_paste_completion_after_switch_does_not_send_to_other_agent() {
     );
 }
 
+// /tmp-as-non-project-dir is POSIX semantics (Windows treats it as
+// a project dir); terminal-like Tab is compiled out on Windows. Gate
+// to POSIX, matching the cf-shell fixture-gating precedent.
+#[cfg(not(windows))]
 #[test]
 fn slash_passthrough_in_non_project_dir_creates_session() {
     let mut app = project_picker_app();
@@ -3270,6 +3274,10 @@ fn suggestions_landing_after_bash_exit_are_dropped() {
 /// OFF: Tab fires a deterministic fetch, and the landing response runs the
 /// terminal Tab semantics — a single file candidate splices in place
 /// immediately and the drill-down refetch rides out with the dispatch.
+// /tmp-as-non-project-dir is POSIX semantics (Windows treats it as
+// a project dir); terminal-like Tab is compiled out on Windows. Gate
+// to POSIX, matching the cf-shell fixture-gating precedent.
+#[cfg(not(windows))]
 #[test]
 fn tab_fetch_landing_insta_accepts_single_candidate_always_on() {
     use crate::views::suggestion_controller::{
@@ -3351,6 +3359,10 @@ fn tab_fetch_landing_insta_accepts_single_candidate_always_on() {
 /// dropdown (and installs no ghost) — the user picks with arrows + Tab.
 /// History rows model an OLD shell (new shells honor `tokenOnly` and send
 /// none on Tab fetches); whole-line sets must keep plain-open semantics.
+// /tmp-as-non-project-dir is POSIX semantics (Windows treats it as
+// a project dir); terminal-like Tab is compiled out on Windows. Gate
+// to POSIX, matching the cf-shell fixture-gating precedent.
+#[cfg(not(windows))]
 #[test]
 fn tab_fetch_landing_opens_dropdown_for_ambiguous_set_always_on() {
     use crate::views::suggestion_controller::{

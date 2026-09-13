@@ -730,6 +730,10 @@ mod tests {
         );
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn done_state_scans_file_paths_like_scrollback() {
         // Absolute path text (not a markdown hyperlink) should still become a

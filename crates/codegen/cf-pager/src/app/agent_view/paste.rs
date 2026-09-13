@@ -2530,6 +2530,10 @@ pub(super) mod paste_key_tests {
             )
         );
     }
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn agent_completion_inserts_unreadable_file_url_as_path_text() {
         let mut agent = make_agent();

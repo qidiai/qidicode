@@ -527,6 +527,10 @@ mod tests {
         assert_eq!(text, "Read main.rs (1-10)");
     }
 
+    // /tmp-as-non-project-dir is POSIX semantics (Windows treats it as
+    // a project dir); terminal-like Tab is compiled out on Windows. Gate
+    // to POSIX, matching the cf-shell fixture-gating precedent.
+    #[cfg(not(windows))]
     #[test]
     fn expanded_shows_relative_when_under_cwd_preamble_absolute() {
         let abs = "/Users/me/project/src/main.rs";
@@ -602,6 +606,10 @@ mod tests {
         assert!(header.selection_text.is_none());
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn expanded_header_selection_matches_relative_path() {
         use crate::scrollback::types::derive_selection_text;
@@ -614,6 +622,10 @@ mod tests {
         assert_eq!(derive_selection_text(header), "src/main.rs");
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn header_link_url_is_absolute_for_collapsed_and_expanded() {
         let abs = "/Users/me/project/src/main.rs";

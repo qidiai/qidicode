@@ -691,6 +691,10 @@ mod tests {
         assert_eq!(spans[3].style.fg, Some(theme.text_primary));
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn mid_text_multiple_tokens_each_teal() {
         let text = "run /commit then /review please";
@@ -709,6 +713,10 @@ mod tests {
         assert_eq!(teal, vec!["/commit", "/review"]);
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn mid_text_token_on_second_logical_line() {
         let text = "first line\nthen /model here";
@@ -731,6 +739,10 @@ mod tests {
         assert_eq!(line1[3].content.as_ref(), " here");
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn invalid_token_ranges_are_dropped() {
         let text = "héllo /model now"; // 'é' is 2 bytes: "/model" = 7..13
@@ -770,6 +782,7 @@ mod tests {
     // --- Token styling across soft-wrap and collapsed truncation ---
 
     /// Concatenated content of a line's skill-accent spans.
+    #[cfg(not(windows))]
     fn teal_text(line: &Line, theme: &Theme) -> String {
         line.spans
             .iter()
@@ -778,6 +791,10 @@ mod tests {
             .collect()
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn collapsed_truncation_keeps_teal_on_straddling_token() {
         // "/pr-workflow" (bytes 8..20) is wider than the content width, so it
@@ -798,6 +815,10 @@ mod tests {
         );
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn collapsed_truncation_keeps_teal_on_token_within_last_line() {
         // "/do-it" (bytes 8..14) fits fully on the truncated last line even at
@@ -820,6 +841,10 @@ mod tests {
         assert!(body.contains("more"), "args stay body-styled, got {body:?}");
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn narrow_wrap_keeps_teal_on_both_rows_of_split_token() {
         // Expanded (no max_lines): the 12-wide token cannot fit at width 8, so

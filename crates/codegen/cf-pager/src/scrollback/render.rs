@@ -2534,6 +2534,10 @@ mod tests {
         );
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn markdown_wrapped_session_media_path_fully_linkified() {
         // Regression: imagine-tool prose whose long session path soft-wraps
@@ -2618,6 +2622,10 @@ mod tests {
         );
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn collapsed_block_header_file_path_is_scanned() {
         // File paths in the command header line should be linkified even
@@ -2734,6 +2742,10 @@ mod tests {
         );
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn collapse_header_entry_does_not_leak_links_but_visible_group_entries_do() {
         // Smallest shape the truncation fold can produce for an expanded
@@ -3410,6 +3422,10 @@ mod tests {
 
     /// Collapsed Edit header: after bullet prepend the path is span 2, and the
     /// OSC8 overlay must cover path cols only (not the verb or bullet).
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn tool_header_link_url_overlay_covers_path_after_bullet() {
         use crate::appearance::ToolBullet;
@@ -3508,6 +3524,10 @@ mod tests {
         );
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn long_read_header_link_is_clipped_to_offset_content_area() {
         let path = "/outside/a/very/long/path/that/is/clipped/main.rs";
@@ -3528,6 +3548,10 @@ mod tests {
         assert_eq!(link.col_end, content.right());
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn explicit_tool_link_clips_before_u16_conversion() {
         let path = format!("/outside/{}.rs", "x".repeat(70_000));

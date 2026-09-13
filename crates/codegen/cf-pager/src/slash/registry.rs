@@ -212,11 +212,20 @@ impl CommandRegistry {
         if self.restricted.is_empty() {
             return false;
         }
-        self.restricted.contains(&cmd.name().to_lowercase())
-            || cmd
-                .aliases()
+        // Command names may carry a leading `/` (e.g. cf-tools constants
+        // like IMAGINE_COMMAND_NAME = "/imagine"), so normalize BOTH sides
+        // before comparing. A raw `contains(name)` silently never matches
+        // slashed constants and the tier gate leaks the command through.
+        let cmd_name = Self::normalize_deny_name(cmd.name());
+        let cmd_aliases: Vec<String> = cmd
+            .aliases()
+            .iter()
+            .map(|a| Self::normalize_deny_name(a))
+            .collect();
+        self.restricted.contains(&cmd_name)
+            || cmd_aliases
                 .iter()
-                .any(|a| self.restricted.contains(&a.to_lowercase()))
+                .any(|a| self.restricted.contains(a))
     }
 
     /// Replace the restricted-command deny list (e.g. tier restrictions).
@@ -255,8 +264,11 @@ impl CommandRegistry {
             .iter()
             .filter(|cmd| self.restricted_match(cmd))
             .any(|cmd| {
-                cmd.name().to_lowercase() == key
-                    || cmd.aliases().iter().any(|a| a.to_lowercase() == key)
+                Self::normalize_deny_name(cmd.name()) == key
+                    || cmd
+                        .aliases()
+                        .iter()
+                        .any(|a| Self::normalize_deny_name(a) == key)
             })
     }
 
@@ -542,8 +554,17 @@ impl CommandRegistry {
             // Execution is blocked by `get()`'s `restricted_match` filter —
             // invoking one shows the SuperGrok upsell instead.
 
-            // Insert canonical key.
+            // Insert canonical key. Also index the normalized name: some
+            // command constants carry a leading `/` (e.g. IMAGINE_COMMAND_NAME
+            // = "/imagine"), while `parse_invocation` tokens never do, so a
+            // raw-only key map makes the command unreachable via `get()`. The
+            // slash-stripped key resolves it; raw-name lookups keep working
+            // through the original entry.
             self.key_to_index.insert(canonical.to_string(), idx);
+            let canonical_norm = Self::normalize_deny_name(canonical);
+            if canonical_norm != canonical {
+                self.key_to_index.insert(canonical_norm.clone(), idx);
+            }
             if !menu_only {
                 self.triggers
                     .push(CommandTrigger::new(command, None, canonical, idx, source));
@@ -558,6 +579,10 @@ impl CommandRegistry {
                     );
                 }
                 self.key_to_index.insert(alias.to_string(), idx);
+                let alias_norm = Self::normalize_deny_name(alias);
+                if alias_norm != *alias {
+                    self.key_to_index.insert(alias_norm, idx);
+                }
                 if !menu_only {
                     self.triggers.push(CommandTrigger::new(
                         command,

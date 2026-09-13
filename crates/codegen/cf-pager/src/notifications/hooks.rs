@@ -100,6 +100,8 @@ mod tests {
         }
     }
 
+    // sh/printf/touch/env are POSIX tools; execute_hook itself is POSIX semantics.
+    #[cfg(unix)]
     #[test]
     fn sets_environment_variables() {
         let dir = tempfile::tempdir().unwrap();
@@ -133,6 +135,8 @@ mod tests {
         );
     }
 
+    // sh/printf/touch/env are POSIX tools; execute_hook itself is POSIX semantics.
+    #[cfg(unix)]
     #[test]
     fn omits_session_id_when_none() {
         let dir = tempfile::tempdir().unwrap();
@@ -193,6 +197,8 @@ mod tests {
         );
     }
 
+    // sh/printf/touch/env are POSIX tools; execute_hook itself is POSIX semantics.
+    #[cfg(unix)]
     #[test]
     fn successful_command_completes_without_error() {
         let dir = tempfile::tempdir().unwrap();
@@ -251,6 +257,8 @@ mod tests {
         );
     }
 
+    // sh/printf/touch/env are POSIX tools; execute_hook itself is POSIX semantics.
+    #[cfg(unix)]
     #[test]
     fn run_hook_passes_correct_env_via_thread() {
         let dir = tempfile::tempdir().unwrap();

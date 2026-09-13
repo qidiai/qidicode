@@ -16,31 +16,6 @@ fn open_upsell_max_card(app: &mut AppView, mode: CreditLimitUpsellMode) {
     open_credit_limit_upsell(agent, mode, true);
 }
 
-/// Return the `QuestionViewState` from agent 0. Panics if absent.
-fn agent_qv(app: &AppView) -> &crate::views::question_view::QuestionViewState {
-    app.agents
-        .get(&AgentId(0))
-        .unwrap()
-        .question_view
-        .as_ref()
-        .unwrap()
-}
-
-/// Extract the last-pushed `CreditLimitBlock` from agent 0 scrollback.
-fn last_credit_limit_block(
-    app: &AppView,
-    idx: usize,
-) -> &crate::scrollback::blocks::CreditLimitBlock {
-    let agent = app.agents.get(&AgentId(0)).unwrap();
-    if let crate::scrollback::block::RenderBlock::CreditLimit(ref blk) =
-        agent.scrollback.entry(idx).unwrap().block
-    {
-        blk
-    } else {
-        panic!("expected CreditLimit block at index {idx}");
-    }
-}
-
 /// Dispatch a `BillingFetched` task result with sensible defaults.
 fn dispatch_billing(
     app: &mut AppView,
@@ -135,145 +110,44 @@ fn is_max_tier_rejects_partial_matches() {
 }
 
 #[test]
-fn upsell_non_max_shows_qa_with_two_options() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(
-        &mut app,
+fn upsell_popups_disabled_credit_limit_no_modal_no_card() {
+    // QIDI local patch: `open_credit_limit_upsell` returns immediately
+    // (self-hosted model endpoints make the upstream paywall irrelevant).
+    // Guard the patch: neither the non-max Q&A modal nor the max-tier
+    // inline scrollback card may appear, on either billing mode.
+    for mode in [
+        CreditLimitUpsellMode::UnifiedCredits,
         CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    let q = &agent_qv(&app).questions[0];
-    assert_eq!(q.options.len(), 2);
-    assert_eq!(q.options[0].label, "Upgrade tier");
-    assert_eq!(q.options[0].id.as_deref(), Some(UPSELL_URL_UPGRADE));
-    assert_eq!(q.options[1].label, "Pay as you go");
-    assert_eq!(q.options[1].id.as_deref(), Some(UPSELL_URL_PAYG));
-}
-
-#[test]
-fn upsell_non_max_payg_on_shows_increase_label() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(
-        &mut app,
         CreditLimitUpsellMode::LegacyPayg { enabled: true },
-    );
-    let q = &agent_qv(&app).questions[0];
-    assert_eq!(q.options.len(), 2);
-    assert_eq!(q.options[1].label, "Increase limit");
-}
+    ] {
+        let mut app = test_app_with_agent();
+        let before = agent_scrollback_len(&app);
 
-#[test]
-fn upsell_non_max_qa_heading_is_credit_limit_when_payg_off() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    let heading = &agent_qv(&app).questions[0].question;
-    assert!(
-        heading.contains("credit limit"),
-        "expected 'credit limit' in heading, got: {heading}"
-    );
-}
+        open_upsell_qa(&mut app, mode);
+        let agent = app.agents.get(&AgentId(0)).unwrap();
+        assert!(
+            agent.question_view.is_none(),
+            "Q&A upsell modal must not open for {mode:?}"
+        );
+        assert_eq!(
+            agent_scrollback_len(&app),
+            before,
+            "Q&A path must not push a scrollback block for {mode:?}"
+        );
 
-#[test]
-fn upsell_non_max_qa_heading_is_spending_cap_when_payg_on() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: true },
-    );
-    let heading = &agent_qv(&app).questions[0].question;
-    assert!(
-        heading.contains("spending cap"),
-        "expected 'spending cap' in heading, got: {heading}"
-    );
+        open_upsell_max_card(&mut app, mode);
+        let agent = app.agents.get(&AgentId(0)).unwrap();
+        assert!(
+            agent.question_view.is_none(),
+            "max-tier card path must not open a modal for {mode:?}"
+        );
+        assert_eq!(
+            agent_scrollback_len(&app),
+            before,
+            "max-tier path must not push a scrollback block for {mode:?}"
+        );
+    }
 }
-
-#[test]
-fn upsell_non_max_upgrade_url_is_supergrok() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    let url = agent_qv(&app).questions[0].options[0]
-        .id
-        .as_deref()
-        .unwrap();
-    assert!(url.contains("supergrok"), "got: {url}");
-    assert!(url.contains("referrer=cf-tools"), "got: {url}");
-}
-
-#[test]
-fn upsell_non_max_payg_url_is_usage() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    let url = agent_qv(&app).questions[0].options[1]
-        .id
-        .as_deref()
-        .unwrap();
-    assert!(url.contains("_s=usage"), "got: {url}");
-}
-
-#[test]
-fn upsell_non_max_payg_on_description_mentions_spending_cap() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: true },
-    );
-    assert_eq!(
-        agent_qv(&app).questions[0].options[1].description,
-        "Raise your pay-as-you-go spending cap"
-    );
-}
-
-#[test]
-fn upsell_non_max_payg_off_description_mentions_on_demand() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    assert_eq!(
-        agent_qv(&app).questions[0].options[1].description,
-        "Enable pay-as-you-go credits for on-demand usage"
-    );
-}
-
-#[test]
-fn upsell_non_max_unified_shows_buy_credits() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(&mut app, CreditLimitUpsellMode::UnifiedCredits);
-    let q = &agent_qv(&app).questions[0];
-    assert!(q.question.contains("weekly limit"));
-    assert_eq!(
-        q.options[0].description,
-        "Upgrade to a higher tier for more usage"
-    );
-    assert_eq!(q.options[1].label, "Buy more credits");
-    assert_eq!(
-        q.options[1].description,
-        "Purchase credits to keep using QIDI Code"
-    );
-}
-
-#[test]
-fn upsell_max_unified_card_mentions_purchasing() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    open_upsell_max_card(&mut app, CreditLimitUpsellMode::UnifiedCredits);
-    let blk = last_credit_limit_block(&app, before);
-    assert_eq!(
-        blk.action,
-        crate::scrollback::blocks::CreditLimitCardAction::PurchaseCredits
-    );
-    assert!(blk.heading.contains("weekly limit"));
-}
-
 #[test]
 fn credit_limit_upsell_mode_prefers_unified_flag() {
     let mut bal = test_bal(100.0);
@@ -330,158 +204,6 @@ fn is_credit_limit_error_matches_legacy_403_and_pool_402() {
         "usage balance exhausted without status"
     ));
 }
-
-#[test]
-fn upsell_non_max_sets_no_freeform() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    assert!(
-        agent_qv(&app).no_freeform,
-        "upsell Q&A should disable freeform input"
-    );
-}
-
-#[test]
-fn upsell_non_max_qa_has_single_select() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    assert_eq!(
-        agent_qv(&app).questions[0].multi_select,
-        Some(false),
-        "upsell should be single-select"
-    );
-}
-
-#[test]
-fn upsell_non_max_does_not_push_scrollback_block() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    open_upsell_qa(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    assert_eq!(
-        agent_scrollback_len(&app),
-        before,
-        "non-max-tier upsell should NOT push a scrollback block"
-    );
-}
-
-#[test]
-fn upsell_non_max_idempotent_when_question_view_already_open() {
-    let mut app = test_app_with_agent();
-    open_upsell_qa(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    assert!(app.agents.get(&AgentId(0)).unwrap().question_view.is_some());
-
-    // Second call should be a no-op (guard at line 2070).
-    let before = agent_scrollback_len(&app);
-    open_upsell_qa(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    assert_eq!(
-        agent_scrollback_len(&app),
-        before,
-        "second call should not push a block"
-    );
-}
-
-#[test]
-fn upsell_max_tier_pushes_scrollback_card_payg_off() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    open_upsell_max_card(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    assert!(
-        app.agents.get(&AgentId(0)).unwrap().question_view.is_none(),
-        "max-tier should NOT open the question modal"
-    );
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    let blk = last_credit_limit_block(&app, before);
-    assert!(blk.heading.contains("credit limit"));
-    assert_eq!(
-        blk.action,
-        crate::scrollback::blocks::CreditLimitCardAction::EnablePayg
-    );
-    assert_eq!(blk.url, UPSELL_URL_PAYG);
-}
-
-#[test]
-fn upsell_max_tier_pushes_scrollback_card_payg_on() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    open_upsell_max_card(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: true },
-    );
-    assert!(app.agents.get(&AgentId(0)).unwrap().question_view.is_none());
-    assert_eq!(agent_scrollback_len(&app), before + 1);
-    let blk = last_credit_limit_block(&app, before);
-    assert!(blk.heading.contains("spending cap"));
-    assert_eq!(
-        blk.action,
-        crate::scrollback::blocks::CreditLimitCardAction::IncreasePaygLimit
-    );
-    assert_eq!(blk.url, UPSELL_URL_PAYG);
-}
-
-#[test]
-fn upsell_max_tier_does_not_open_question_view() {
-    let mut app = test_app_with_agent();
-    open_upsell_max_card(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    assert!(
-        app.agents.get(&AgentId(0)).unwrap().question_view.is_none(),
-        "max-tier should use inline card, not question modal"
-    );
-}
-
-#[test]
-fn upsell_max_tier_scrollback_card_url_is_payg() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    open_upsell_max_card(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    assert_eq!(last_credit_limit_block(&app, before).url, UPSELL_URL_PAYG);
-}
-
-#[test]
-fn upsell_max_tier_not_idempotent_pushes_multiple_cards() {
-    let mut app = test_app_with_agent();
-    let before = agent_scrollback_len(&app);
-    // Max-tier path doesn't guard against duplicates — each call
-    // pushes a new inline card.
-    open_upsell_max_card(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    open_upsell_max_card(
-        &mut app,
-        CreditLimitUpsellMode::LegacyPayg { enabled: false },
-    );
-    assert_eq!(
-        agent_scrollback_len(&app),
-        before + 2,
-        "max-tier path pushes a card on every call"
-    );
-}
-
-// ── ShowUsage dispatch tests ────────────────────────────────────────
 
 #[test]
 fn show_usage_returns_fetch_billing_effect() {
@@ -807,48 +529,12 @@ fn free_usage_error_detected_by_embedded_code() {
     ));
 }
 
+/// QIDI local patch: `open_free_usage_upsell` is a no-op (self-hosted
+/// endpoints never hit the upstream free-usage paywall). The 429
+/// exhaustion path still marks the session blocked; it just no longer
+/// opens a modal. Guard both halves of that contract.
 #[test]
-fn free_usage_upsell_shows_two_options_with_exact_labels() {
-    let mut app = test_app_with_agent();
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    open_free_usage_upsell(agent, None);
-
-    let qv = agent_qv(&app);
-    assert!(matches!(
-        qv.local_kind,
-        Some(
-            crate::views::question_view::LocalQuestionKind::FreeUsageUpsell {
-                source: cf_telemetry::events::SuperGrokUpsell::FreeUsagePaywall,
-            }
-        )
-    ));
-    let q = &qv.questions[0];
-    assert_eq!(q.question, "You hit your free usage limit.");
-    let expected = [
-        (
-            "Upgrade to SuperGrok",
-            "For everyday coding and productivity tasks",
-            Some(UPSELL_URL_UPGRADE),
-        ),
-        (
-            "Upgrade to SuperGrok Heavy",
-            "Get the most out of QIDI Code. Highest usage limits.",
-            Some(UPSELL_URL_UPGRADE),
-        ),
-    ];
-    assert_eq!(q.options.len(), expected.len());
-    for (opt, (label, desc, id)) in q.options.iter().zip(expected) {
-        assert_eq!(opt.label, label);
-        assert_eq!(opt.description, desc);
-        assert_eq!(opt.id.as_deref(), id);
-    }
-}
-
-/// Replay the REAL free-usage sequence — send → `RetryState::Retrying` →
-/// `Exhausted` → PromptResponse error — through the production handlers:
-/// the paywall modal must open on the turn-end error.
-#[test]
-fn free_usage_failure_opens_paywall_modal() {
+fn free_usage_upsell_disabled_marks_block_without_modal() {
     use crate::app::acp_handler::apply_session_event_for_test;
     use cf_shell::extensions::notification::{RetryState, SessionUpdate};
 
@@ -890,7 +576,10 @@ fn free_usage_failure_opens_paywall_modal() {
         assert!(agent.session.free_usage_blocked);
     }
 
-    // 4. Turn-end RPC error opens the upsell modal.
+    // 4. Turn-end RPC error: no paywall modal. (The session-level
+    // `free_usage_blocked` flag is transient turn state -- finish_turn
+    // clears it during the same dispatch -- so the surviving contract is
+    // the absent modal, not the flag.)
     let _ = dispatch(
         Action::TaskComplete(TaskResult::PromptResponse {
             agent_id: id,
@@ -900,42 +589,26 @@ fn free_usage_failure_opens_paywall_modal() {
         }),
         &mut app,
     );
+    let agent = &app.agents[&id];
     assert!(
-        app.agents[&id].question_view.is_some(),
-        "paywall modal must open"
+        agent.question_view.is_none(),
+        "paywall modal must NOT open under the QIDI patch"
+    );
+
+    // 5. Direct upsell call is likewise a no-op.
+    let agent = app.agents.get_mut(&id).unwrap();
+    open_free_usage_upsell(agent, None);
+    assert!(
+        agent.question_view.is_none(),
+        "open_free_usage_upsell must be a no-op under the QIDI patch"
     );
 }
-
-/// Answer translation: both upgrade options open their URL.
+/// QIDI local patch: restricted commands are still intercepted (never
+/// passthrough, never enqueued, composer cleared when no modal is up)
+/// but the SuperGrok upsell modal itself is disabled — no question view
+/// may appear. These tests guard that exact contract.
 #[test]
-fn free_usage_translate_local_submit_maps_options() {
-    use crate::app::agent_view::translate_local_submit_for_test;
-    use crate::app::app_view::InputOutcome;
-    use crate::views::question_view::{LocalQuestionKind, QuestionSelection};
-
-    let mut app = test_app_with_agent();
-    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
-    open_free_usage_upsell(agent, None);
-    let mut qv = agent.question_view.take().unwrap();
-    let kind = || LocalQuestionKind::FreeUsageUpsell {
-        source: cf_telemetry::events::SuperGrokUpsell::FreeUsagePaywall,
-    };
-
-    for idx in [0, 1] {
-        qv.selections[0] = QuestionSelection::Single(Some(idx));
-        match translate_local_submit_for_test(&qv, kind(), false) {
-            InputOutcome::Action(Action::OpenUrl(url)) => assert_eq!(url, UPSELL_URL_UPGRADE),
-            other => panic!("expected OpenUrl for option {idx}, got {other:?}"),
-        }
-    }
-}
-
-// ── Restricted-command upsell tests ─────────────────────────────────
-
-/// Submitting a tier-restricted command opens the two-option SuperGrok
-/// upsell and neither runs the command nor leaks the text to the model.
-#[test]
-fn restricted_command_submit_opens_two_option_upsell() {
+fn restricted_command_intercepted_without_upsell_modal() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.agents
@@ -955,29 +628,16 @@ fn restricted_command_submit_opens_two_option_upsell() {
         "restricted command must not be enqueued"
     );
     assert!(agent.prompt.text().is_empty(), "composer consumed");
-
-    let qv = agent_qv(&app);
-    assert!(matches!(
-        qv.local_kind,
-        Some(
-            crate::views::question_view::LocalQuestionKind::FreeUsageUpsell {
-                source: cf_telemetry::events::SuperGrokUpsell::RestrictedCommand,
-            }
-        )
-    ));
-    let q = &qv.questions[0];
-    assert_eq!(q.question, "Unlock all features with SuperGrok.");
-    assert_eq!(q.options.len(), 2);
-    assert_eq!(q.options[0].label, "Upgrade to SuperGrok");
-    assert_eq!(q.options[0].id.as_deref(), Some(UPSELL_URL_UPGRADE));
-    assert_eq!(q.options[1].label, "Upgrade to SuperGrok Heavy");
-    assert_eq!(q.options[1].id.as_deref(), Some(UPSELL_URL_UPGRADE));
+    assert!(
+        agent.question_view.is_none(),
+        "upsell modal must NOT open under the QIDI patch"
+    );
 }
 
-/// Aliases of a restricted command hit the same upsell (deny-list
+/// Aliases of a restricted command hit the same interception (deny-list
 /// matching covers aliases via the registry).
 #[test]
-fn restricted_command_alias_also_upsells() {
+fn restricted_command_alias_also_intercepted() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     app.agents
@@ -988,14 +648,21 @@ fn restricted_command_alias_also_upsells() {
     let effects = dispatch(Action::SendPrompt("/cost".into()), &mut app);
 
     assert!(effects.is_empty());
-    assert!(app.agents[&id].question_view.is_some(), "upsell must open");
+    assert!(
+        app.agents[&id].question_view.is_none(),
+        "no upsell modal under the QIDI patch"
+    );
+    assert!(
+        app.agents[&id].session.pending_prompts.is_empty(),
+        "alias interception must not enqueue"
+    );
 }
 
 /// A restricted submit while ANOTHER question modal is already open
-/// must not silently drop the typed text — the upsell can't open (the guard
-/// never displaces a modal), so the composer keeps the text for a resubmit
-/// after the modal closes. No passthrough, nothing enqueued, and the
-/// existing modal survives untouched.
+/// must not silently drop the typed text: the composer keeps the text
+/// for a later resubmit. No passthrough, nothing enqueued, and the
+/// existing modal survives untouched. (The modal here is a local
+/// QuestionView built directly — not an upsell — so it stays open.)
 #[test]
 fn restricted_command_with_open_modal_keeps_composer_text() {
     let mut app = test_app_with_agent();
@@ -1003,8 +670,22 @@ fn restricted_command_with_open_modal_keeps_composer_text() {
     {
         let agent = app.agents.get_mut(&id).unwrap();
         agent.set_restricted_commands(&["imagine".to_string()]);
-        // A question modal is already up (credit-limit upsell).
-        open_credit_limit_upsell(agent, CreditLimitUpsellMode::UnifiedCredits, false);
+        // A local question modal is already up (credit-limit upsell is a
+        // no-op under the patch, so build one directly).
+        agent.question_view = Some(
+            crate::views::question_view::QuestionViewState::new(
+                "test-tool-call".to_string(),
+                Vec::new(),
+                crate::views::prompt_widget::StashedPrompt::from_submission(
+                    String::new(),
+                    Vec::new(),
+                    Vec::new(),
+                ),
+            )
+            .with_local_kind(crate::views::question_view::LocalQuestionKind::CreditLimitUpsell {
+                choices: Vec::new(),
+            }),
+        );
         assert!(agent.question_view.is_some());
         // The user typed the restricted command into the composer.
         agent.prompt.set_text("/imagine a sunset");
@@ -1034,9 +715,6 @@ fn restricted_command_with_open_modal_keeps_composer_text() {
         "nothing may be enqueued"
     );
 }
-
-/// Regression: genuinely unknown (non-restricted) commands keep the
-/// PassThrough behavior shell/ACP commands rely on.
 #[test]
 fn unknown_non_restricted_command_still_passes_through() {
     let mut app = test_app_with_agent();

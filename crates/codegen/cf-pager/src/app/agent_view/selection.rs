@@ -1456,6 +1456,10 @@ mod tests {
         );
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn active_child_copy_uses_child_scrollback_cwd() {
         use crate::scrollback::block::RenderBlock;

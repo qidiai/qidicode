@@ -1446,7 +1446,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: false,
                 ..Default::default()
             },
-            "cf-tools-plan",
+            "qidi-build-plan",
         ),
         (
             SessionFlags {
@@ -1455,7 +1455,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: false,
                 ..Default::default()
             },
-            "cf-tools-plan-no-subagents",
+            "qidi-build-plan-no-subagents",
         ),
         (
             SessionFlags {
@@ -1464,7 +1464,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: true,
                 ..Default::default()
             },
-            "cf-tools-plan",
+            "qidi-build-plan",
         ),
         (
             SessionFlags {
@@ -1473,7 +1473,7 @@ fn agent_profile_names_are_valid_builtins() {
                 ask_user: true,
                 ..Default::default()
             },
-            "cf-tools-plan-no-subagents",
+            "qidi-build-plan-no-subagents",
         ),
         (
             SessionFlags {
@@ -1547,7 +1547,7 @@ fn runtime_default_flags_produce_plan_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "cf-tools-plan");
+    assert_eq!(meta["agentProfile"], "qidi-build-plan");
     assert!(meta.get("askUserQuestion").is_none());
     assert_eq!(meta["yoloMode"], false);
 }
@@ -1564,7 +1564,7 @@ fn plan_only_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "cf-tools-plan-no-subagents");
+    assert_eq!(meta["agentProfile"], "qidi-build-plan-no-subagents");
     assert_eq!(meta["askUserQuestion"], false);
     assert_eq!(meta["yoloMode"], false);
 }
@@ -1580,7 +1580,7 @@ fn plan_with_subagents_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "cf-tools-plan");
+    assert_eq!(meta["agentProfile"], "qidi-build-plan");
     assert_eq!(meta["askUserQuestion"], false);
     assert_eq!(meta["yoloMode"], false);
 }
@@ -1612,7 +1612,7 @@ fn plan_with_ask_user_uses_plan_profile() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "cf-tools-plan-no-subagents");
+    assert_eq!(meta["agentProfile"], "qidi-build-plan-no-subagents");
     assert!(meta.get("askUserQuestion").is_none());
     assert_eq!(meta["yoloMode"], false);
 }
@@ -1632,7 +1632,7 @@ fn subagents_alone_emits_only_ask_user_question_disable() {
     assert!(meta.get("agentProfile").is_none());
     assert_eq!(meta["askUserQuestion"], false);
 }
-/// All three flags on at the runtime default produce cf-tools-plan
+/// All three flags on at the runtime default produce qidi-build-plan
 /// and no `askUserQuestion` field.
 #[serial_test::serial(QIDI_AGENT)]
 #[test]
@@ -1645,7 +1645,7 @@ fn all_flags_meta() {
         ..Default::default()
     };
     let meta = flags.to_meta().unwrap();
-    assert_eq!(meta["agentProfile"], "cf-tools-plan");
+    assert_eq!(meta["agentProfile"], "qidi-build-plan");
     assert!(meta.get("askUserQuestion").is_none());
     assert_eq!(meta["yoloMode"], false);
 }
@@ -1843,8 +1843,8 @@ fn agent_profile_definitions_have_correct_names() {
     use std::str::FromStr;
     use cf_agent::config::BuiltinAgentName;
     for name in [
-        "cf-tools-plan",
-        "cf-tools-plan-no-subagents",
+        "qidi-build-plan",
+        "qidi-build-plan-no-subagents",
         "cf-tools-ask-user",
     ] {
         let builtin = BuiltinAgentName::from_str(name).unwrap();

@@ -2753,9 +2753,12 @@ mod command_palette_vim_input_tests {
             }
             let area = Rect::new(0, 0, 80, 24);
             let mut buf = Buffer::empty(area);
-            agent.draw_active_modal(area, &mut buf, crate::theme::Theme::current(), false);
-
-            let theme = crate::theme::Theme::current();
+            // Pin a real-color palette: the inverse-video cursor probe
+            // (bg == text_primary) is meaningless under the terminal-native
+            // palette, where text_primary == bg_base == Reset and EVERY
+            // frame-filled cell matches.
+            let theme = crate::theme::Theme::groknight();
+            agent.draw_active_modal(area, &mut buf, theme, false);
             let search_bar = match agent.active_modal.as_ref() {
                 Some(ActiveModal::CommandPalette { state, .. }) => {
                     state
