@@ -216,10 +216,10 @@ pub(crate) fn sanitize_user_error(raw: &str) -> String {
 /// | false | true      | false    | `cf-tools` (default)         | `false`            |
 /// | false | false     | true     | `cf-tools-ask-user`          | omitted (shell gate) |
 /// | false | true      | true     | `cf-tools-ask-user`          | omitted (shell gate) |
-/// | true  | false     | false    | `cf-tools-plan-no-subagents` | `false`            |
-/// | true  | true      | false    | `cf-tools-plan`              | `false`            |
-/// | true  | false     | true     | `cf-tools-plan-no-subagents` | omitted (shell gate) |
-/// | true  | true      | true     | `cf-tools-plan`              | omitted (shell gate) |
+/// | true  | false     | false    | `qidi-build-plan-no-subagents` | `false`            |
+/// | true  | true      | false    | `qidi-build-plan`              | `false`            |
+/// | true  | false     | true     | `qidi-build-plan-no-subagents` | omitted (shell gate) |
+/// | true  | true      | true     | `qidi-build-plan`              | omitted (shell gate) |
 ///
 /// When [`Self::chat_mode`] is set (gateway light-frontend / `--chat`), Build
 /// `agentProfile` injection is omitted (K12) and `_meta["x.ai/session"].kind`
@@ -263,8 +263,8 @@ impl SessionFlags {
             return None;
         }
         match (self.plan_mode, self.subagents, self.ask_user) {
-            (true, true, _) => Some("cf-tools-plan"),
-            (true, false, _) => Some("cf-tools-plan-no-subagents"),
+            (true, true, _) => Some("qidi-build-plan"),
+            (true, false, _) => Some("qidi-build-plan-no-subagents"),
             (false, _, true) => Some("cf-tools-ask-user"),
             (false, _, false) => None,
         }

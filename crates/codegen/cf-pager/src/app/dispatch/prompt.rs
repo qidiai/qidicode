@@ -388,7 +388,8 @@ pub(super) fn dispatch_send_prompt_inner(
             }
             let opened =
                 super::billing::open_restricted_command_upsell(agent, login_method_id_from_app);
-            debug_assert!(opened, "no modal was open, so the upsell must open");
+            // QIDI local patch: open_supergrok_upsell is a no-op (returns false) - the paywall modal is disabled for self-hosted endpoints. The command is still intercepted (never passthrough, never enqueued); the composer is cleared only when no other question modal is up. No upsell modal appears.
+            let _ = opened;
         }
         return vec![];
     }

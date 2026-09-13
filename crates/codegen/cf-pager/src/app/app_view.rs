@@ -10294,6 +10294,10 @@ pub(crate) mod tests {
         app.project_picker_disabled = false;
         assert!(!app.needs_project_picker());
     }
+    // /tmp-as-non-project-dir is POSIX semantics (Windows treats it as
+    // a project dir); terminal-like Tab is compiled out on Windows. Gate
+    // to POSIX, matching the cf-shell fixture-gating precedent.
+    #[cfg(not(windows))]
     #[test]
     fn needs_project_picker_true_for_non_project_dir() {
         let mut app = test_app();

@@ -3217,10 +3217,17 @@ mod tests {
         use ratatui::buffer::Buffer;
         use ratatui::layout::Rect;
 
-        // A `show_search_hint: false` picker (command palette / arg-picker family):
-        // the cursor must track focus (`search_active`), not render always-on.
-        let theme = Theme::current();
-        let config = cfg(false, false);
+        // A `show_search_hint: true` picker: the cursor must track focus
+        // (`search_active`); the unfocused bar shows the `/ to search` hint
+        // and no cursor. (Hint-less pickers are always-active by design —
+        // see `render_search_bar` — and keep a steady cursor.)
+        //
+        // Pin a real-color palette: `Theme::current()` may serve the
+        // terminal-native palette where text_primary == bg_base == Reset,
+        // and the inverse-video cursor probe (bg == text_primary) then
+        // matches EVERY frame-filled cell, breaking the assertion.
+        let theme = Theme::groknight();
+        let config = cfg(true, false);
         let area = Rect::new(0, 0, 60, 16);
 
         // Render the picker; report whether the search row drew a cursor (an
@@ -3245,6 +3252,9 @@ mod tests {
         };
 
         let (focused_cursor, _) = render_search_row(true);
+
+
+
         assert!(
             focused_cursor,
             "focused search bar (search_active) should render a cursor",

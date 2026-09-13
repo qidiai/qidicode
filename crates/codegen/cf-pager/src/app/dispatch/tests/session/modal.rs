@@ -223,6 +223,10 @@ fn close_does_not_disturb_unrelated_forked_from_pointers() {
     );
 }
 
+// /tmp-as-non-project-dir is POSIX semantics (Windows treats it as
+// a project dir); terminal-like Tab is compiled out on Windows. Gate
+// to POSIX, matching the cf-shell fixture-gating precedent.
+#[cfg(not(windows))]
 #[test]
 fn extensions_modal_in_non_project_dir_creates_session() {
     let mut app = project_picker_app();

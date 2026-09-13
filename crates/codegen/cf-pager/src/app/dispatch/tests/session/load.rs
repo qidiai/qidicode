@@ -1,5 +1,9 @@
 //! Tests for session loading, restore, pickers, and deep search.
 use super::*;
+// /tmp-as-non-project-dir is POSIX semantics (Windows treats it as
+// a project dir); terminal-like Tab is compiled out on Windows. Gate
+// to POSIX, matching the cf-shell fixture-gating precedent.
+#[cfg(not(windows))]
 #[test]
 fn follow_up_chip_bypasses_project_picker() {
     let mut app = test_app_with_agent();
@@ -1297,6 +1301,10 @@ fn project_picker_freeform_overrides_dont_ask() {
         other => panic!("expected ProjectSelected, got {other:?}"),
     }
 }
+// /tmp-as-non-project-dir is POSIX semantics (Windows treats it as
+// a project dir); terminal-like Tab is compiled out on Windows. Gate
+// to POSIX, matching the cf-shell fixture-gating precedent.
+#[cfg(not(windows))]
 #[test]
 fn needs_project_picker_false_when_disabled() {
     let mut app = project_picker_app();

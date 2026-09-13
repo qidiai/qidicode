@@ -1456,6 +1456,10 @@ mod tests {
     use crate::render::tool_paths::ToolPathSurface;
     use std::path::Path;
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn test_edit_block_header() {
         let block = EditToolCallBlock::new("src/main.rs", vec![]);
@@ -1588,6 +1592,10 @@ mod tests {
         assert!(!text.contains("let y"), "no diff body while collapsed");
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn expanded_shows_relative_when_under_cwd_preamble_absolute() {
         let abs = "/Users/me/project/src/foo.rs";
@@ -1633,6 +1641,10 @@ mod tests {
         assert!(header.selection_text.is_none());
     }
 
+    // POSIX-absolute-path fixture: Windows Path/Url semantics differ (no
+    // drive on /foo, CRLF separators), matching the cf-shell fixture-gating
+    // precedent. Run on POSIX only.
+    #[cfg(not(windows))]
     #[test]
     fn header_link_url_is_absolute_file_url_for_all_surfaces() {
         let abs = "/Users/me/project/src/foo.rs";

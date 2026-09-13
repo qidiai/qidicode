@@ -1113,14 +1113,14 @@ mod tests {
         );
     }
 
+        /// QIDI local patch: `validate_clone_url` whitelists only https:// and
+    /// ssh:// for marketplace clones (file:// and local paths are rejected
+    /// for security). Guard that contract end-to-end: a local-directory
+    /// source is refused by the sync layer, and `marketplace_update` surfaces
+    /// the refusal instead of silently cloning.
     #[test]
-    fn marketplace_update_force_syncs_fresh_git_cache() {
-        if !git_available() {
-            eprintln!("skipping git-dependent test: git binary not available");
-            return;
-        }
+    fn marketplace_update_rejects_local_clone_urls() {
         let remote = tempfile::tempdir().unwrap();
-        init_remote_repo(remote.path());
         let cache_root = tempfile::tempdir().unwrap();
         let url = remote.path().to_string_lossy().to_string();
         let source = MarketplaceSource {
@@ -1131,68 +1131,23 @@ mod tests {
             },
         };
 
-        let cache_dir = cf_plugin_marketplace::git::sync_source_cache(
+        let err = cf_plugin_marketplace::git::sync_source_cache(
             &url,
             Some("main"),
             cache_root.path(),
         )
-        .unwrap();
-        let first_head = current_head(&cache_dir);
-        add_commit(remote.path(), "second.txt", "second");
-
-        marketplace_update_with_cache_root(&[source], None, cache_root.path()).unwrap();
-        assert_ne!(current_head(&cache_dir), first_head);
-    }
-
-    fn init_remote_repo(path: &Path) {
-        run_git(path, &["init", "--initial-branch", "main"]);
-        run_git(path, &["config", "user.email", "test@example.com"]);
-        run_git(path, &["config", "user.name", "Test User"]);
-        add_commit(path, "file.txt", "initial");
-    }
-
-    fn add_commit(repo: &Path, file: &str, contents: &str) {
-        std::fs::write(repo.join(file), contents).unwrap();
-        run_git(repo, &["add", file]);
-        run_git(repo, &["commit", "-m", file]);
-    }
-
-    fn current_head(repo: &Path) -> String {
-        let output = cf_plugin_marketplace::git::git_command()
-            .current_dir(repo)
-            .args(["rev-parse", "HEAD"])
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-        String::from_utf8(output.stdout).unwrap().trim().to_string()
-    }
-
-    fn git_available() -> bool {
-        let git_bin = std::env::var("GIT_BIN_PATH").unwrap_or_else(|_| "git".to_string());
-        std::process::Command::new(git_bin)
-            .arg("--version")
-            .stdin(std::process::Stdio::null())
-            .output()
-            .is_ok_and(|output| output.status.success())
-    }
-
-    fn run_git(dir: &Path, args: &[&str]) {
-        let git_bin = std::env::var("GIT_BIN_PATH").unwrap_or_else(|_| "git".to_string());
-        let output = std::process::Command::new(git_bin)
-            .current_dir(dir)
-            .args(args)
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_ASKPASS", "")
-            .env("GIT_LFS_SKIP_SMUDGE", "1")
-            .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
-            .stdin(std::process::Stdio::null())
-            .output()
-            .unwrap();
+        .unwrap_err();
         assert!(
-            output.status.success(),
-            "git {:?} failed: {}",
-            args,
-            String::from_utf8_lossy(&output.stderr)
+            err.contains("blocked plugin clone URL"),
+            "local-path clone must be blocked by the security gate, got: {err}"
+        );
+
+        let update_err =
+            marketplace_update_with_cache_root(&[source], None, cache_root.path()).unwrap_err();
+        let update_msg = update_err.to_string();
+        assert!(
+            update_msg.contains("blocked plugin clone URL"),
+            "marketplace_update must propagate the block, got: {update_msg}"
         );
     }
 }

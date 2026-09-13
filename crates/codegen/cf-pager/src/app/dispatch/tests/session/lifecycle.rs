@@ -1561,6 +1561,10 @@ fn entry_title_falls_back_to_short_session_id_when_no_prompt() {
     let title = entry_title(&app.agents[&AgentId(0)]);
     assert_eq!(title, "session abcdef01");
 }
+// /tmp-as-non-project-dir is POSIX semantics (Windows treats it as
+// a project dir); terminal-like Tab is compiled out on Windows. Gate
+// to POSIX, matching the cf-shell fixture-gating precedent.
+#[cfg(not(windows))]
 #[test]
 fn new_session_defers_create_session_for_non_project_dir() {
     let mut app = project_picker_app();
