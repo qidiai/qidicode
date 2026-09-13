@@ -3253,8 +3253,6 @@ mod tests {
 
         let (focused_cursor, _) = render_search_row(true);
 
-
-
         assert!(
             focused_cursor,
             "focused search bar (search_active) should render a cursor",

@@ -474,14 +474,21 @@ impl CommandRegistry {
         }
 
         // Build the set of all reserved builtin keys (canonical names + aliases).
+        // Normalize like `rebuild_triggers` does so a shell advertising a
+        // slash-less name is recognized as colliding with a builtin whose
+        // constant carries a leading slash (e.g. IMAGINE_COMMAND_NAME).
         let builtin_keys: HashSet<String> = self
             .commands
             .iter()
             .enumerate()
             .filter(|(j, _)| self.sources[*j] == CommandSource::Builtin)
             .flat_map(|(_, c)| {
-                std::iter::once(c.name().to_lowercase())
-                    .chain(c.aliases().iter().map(|a| a.to_lowercase()))
+                std::iter::once(Self::normalize_deny_name(c.name()))
+                    .chain(
+                        c.aliases()
+                            .iter()
+                            .map(|a| Self::normalize_deny_name(a)),
+                    )
             })
             .collect();
 
@@ -501,7 +508,7 @@ impl CommandRegistry {
 
         // Add new ACP commands, skipping collisions with builtins and blocked names.
         for acp_cmd in commands {
-            let name_lower = acp_cmd.name.to_lowercase();
+            let name_lower = Self::normalize_deny_name(&acp_cmd.name);
             if builtin_keys.contains(&name_lower) {
                 continue;
             }
@@ -563,6 +570,17 @@ impl CommandRegistry {
             self.key_to_index.insert(canonical.to_string(), idx);
             let canonical_norm = Self::normalize_deny_name(canonical);
             if canonical_norm != canonical {
+                if source == CommandSource::Builtin
+                    && self
+                        .key_to_index
+                        .get(&canonical_norm)
+                        .is_some_and(|prev| *prev != idx)
+                {
+                    panic!(
+                        "slash command normalized name '{}' is already registered (builtin collision)",
+                        canonical_norm
+                    );
+                }
                 self.key_to_index.insert(canonical_norm.clone(), idx);
             }
             if !menu_only {
@@ -581,6 +599,17 @@ impl CommandRegistry {
                 self.key_to_index.insert(alias.to_string(), idx);
                 let alias_norm = Self::normalize_deny_name(alias);
                 if alias_norm != *alias {
+                    if source == CommandSource::Builtin
+                        && self
+                            .key_to_index
+                            .get(&alias_norm)
+                            .is_some_and(|prev| *prev != idx)
+                    {
+                        panic!(
+                            "slash command normalized alias '{}' is already registered (builtin collision)",
+                            alias_norm
+                        );
+                    }
                     self.key_to_index.insert(alias_norm, idx);
                 }
                 if !menu_only {

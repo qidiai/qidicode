@@ -527,9 +527,9 @@ mod tests {
         assert_eq!(text, "Read main.rs (1-10)");
     }
 
-    // /tmp-as-non-project-dir is POSIX semantics (Windows treats it as
-    // a project dir); terminal-like Tab is compiled out on Windows. Gate
-    // to POSIX, matching the cf-shell fixture-gating precedent.
+    // POSIX-absolute-path fixture (mirrors the edit.rs sibling): Windows
+    // Path/Url semantics differ (no drive on /foo, backslash display),
+    // matching the cf-shell fixture-gating precedent. Run on POSIX only.
     #[cfg(not(windows))]
     #[test]
     fn expanded_shows_relative_when_under_cwd_preamble_absolute() {

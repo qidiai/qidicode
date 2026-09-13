@@ -1060,6 +1060,15 @@ fn marketplace_update_with_cache_root(
         }
     } else if errors.is_empty() {
         println!("Refreshed {refreshed} source(s).");
+    } else if refreshed == 0 {
+        // Every source failed to sync: surface the failure instead of
+        // reporting success. Partial failures (refreshed > 0) keep the
+        // best-effort eprintln + Ok semantics above.
+        bail!(
+            "Marketplace update failed ({} source(s)):{}", 
+            errors.len(),
+            errors.iter().fold(String::new(), |acc, e| acc + "\n  " + e)
+        );
     } else {
         eprintln!(
             "Refreshed {refreshed} source(s) with {} error(s): {}",
@@ -1113,7 +1122,7 @@ mod tests {
         );
     }
 
-        /// QIDI local patch: `validate_clone_url` whitelists only https:// and
+    /// QIDI local patch: `validate_clone_url` whitelists only https:// and
     /// ssh:// for marketplace clones (file:// and local paths are rejected
     /// for security). Guard that contract end-to-end: a local-directory
     /// source is refused by the sync layer, and `marketplace_update` surfaces
