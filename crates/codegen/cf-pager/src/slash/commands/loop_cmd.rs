@@ -9,7 +9,11 @@ use crate::slash::command::{CommandExecCtx, CommandResult, ScheduledTaskPreview,
 /// module-level constant so the trait method can return a `'static`
 /// slice; the constant pulls the canonical name from `qidi-code`
 /// so a tool rename surfaces here at compile time.
-const LOOP_REQUIRED_TOOLS: &[&str] = &[SCHEDULER_CREATE_TOOL_NAME];
+/// Client-facing tool name as advertised in the ACP tools list (the key
+/// domain `CommandRegistry::tools_satisfied` matches against). The
+/// `SCHEDULER_CREATE_TOOL_NAME` constant is the registry id
+/// (`qidi_build:SchedulerCreate`), which never appears in that set.
+const LOOP_REQUIRED_TOOLS: &[&str] = &["scheduler_create"];
 
 pub struct LoopCommand;
 

@@ -2215,6 +2215,10 @@ mod tests {
 
     // ----- try_read_image_from_path ----------------------------------------
 
+    // POSIX-only: the fixture simulates a POSIX terminal paste (backslash
+    // escapes); backslash is a path separator on Windows so the escape
+    // semantics cannot exist there.
+    #[cfg(unix)]
     #[test]
     fn try_read_image_with_escaped_parens() {
         let dir = tempfile::tempdir().unwrap();
@@ -2237,6 +2241,8 @@ mod tests {
         );
     }
 
+    // POSIX-only: see the escaped-parens sibling note.
+    #[cfg(unix)]
     #[test]
     fn try_read_image_with_escaped_spaces() {
         let dir = tempfile::tempdir().unwrap();
@@ -2599,6 +2605,9 @@ mod tests {
         );
     }
 
+    // POSIX-only: backslash-escape semantics are unrepresentable on
+    // Windows path syntax.
+    #[cfg(unix)]
     #[test]
     fn quoted_path_with_internal_backslash_escape() {
         let dir = tempfile::tempdir().unwrap();
@@ -2616,6 +2625,9 @@ mod tests {
 
     // ----- file:// URL edge cases ----------------------------
 
+    // POSIX-only: builds a file:// URL from a POSIX-style path and relies
+    // on the POSIX unescape route.
+    #[cfg(unix)]
     #[test]
     fn file_url_with_localhost_host() {
         let dir = tempfile::tempdir().unwrap();
@@ -2933,6 +2945,8 @@ mod tests {
         assert_eq!(non_images[0], canon(&txt));
     }
 
+    // POSIX-only: percent-encoded round-trip rides the POSIX path reader.
+    #[cfg(unix)]
     #[test]
     fn dropped_path_percent_encoded_question_round_trips() {
         // `%3F` decodes to `?`. The URL parser must not treat the

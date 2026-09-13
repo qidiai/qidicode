@@ -468,7 +468,21 @@ fn to_legacy_glyphs(s: &str) -> String {
 pub fn is_legacy_windows_console() -> bool {
     static CACHE: OnceLock<bool> = OnceLock::new();
     *CACHE.get_or_init(|| {
-        forced_legacy_console_override().unwrap_or_else(|| {
+        // Test binaries default to the non-legacy assumption so toast and
+        // chrome wording assertions stay byte-stable across developer hosts
+        // (a GBK ConHost host machine would otherwise flip every pinned
+        // string). The dedicated fallback tests force legacy explicitly via
+        // QIDI_FORCE_LEGACY_CONSOLE=1 or exercise to_legacy_glyphs directly.
+        #[cfg(test)]
+        {
+            if let Some(forced) = forced_legacy_console_override() {
+                return forced;
+            }
+            return false;
+        }
+        #[cfg(not(test))]
+        {
+            forced_legacy_console_override().unwrap_or_else(|| {
             // `env_brand`, not `brand`: a bare ConHost is detected as
             // `Unknown`, but `brand` optimistically becomes `WindowsTerminal`
             // on native Windows. Font capability needs the raw detection so
@@ -484,7 +498,8 @@ pub fn is_legacy_windows_console() -> bool {
                 return true;
             }
             decide_legacy_windows_console(HostOs::current(), terminal_context().env_brand)
-        })
+            })
+        }
     })
 }
 
@@ -641,8 +656,11 @@ mod tests {
         }
     }
 
-    // On the (non-Windows) test host the helpers must return the fancy
-    // glyphs, and the `char` helpers must agree with their `&str` siblings.
+    // On a non-legacy host the helpers must return the fancy glyphs, and the
+    // `char` helpers must agree with their `&str` siblings. Unix-only: a
+    // real Windows host legitimately reports legacy (code-page check),
+    // and forcing it off would defeat the very fallback under test.
+    #[cfg(unix)]
     #[test]
     fn glyph_helpers_return_fancy_on_non_legacy() {
         assert!(!is_legacy_windows_console());
@@ -694,8 +712,9 @@ mod tests {
         );
     }
 
-    // On the (non-Windows) test host the funnel must be a zero-copy borrow
-    // so non-legacy toasts are byte-identical to the input.
+    // Unix-only: a real Windows host legitimately reports legacy
+    // (code-page check); see the sibling test note.
+    #[cfg(unix)]
     #[test]
     fn legacy_glyph_fallback_is_borrow_on_non_legacy() {
         assert!(!is_legacy_windows_console());

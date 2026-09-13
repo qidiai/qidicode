@@ -26,7 +26,15 @@ pub(super) fn is_max_tier(subscription_tier: Option<&str>) -> bool {
     };
     // Normalize: lowercase + spaces→underscores to match both JWT-derived
     // keys ("supergrok_heavy") and CCP display names ("SuperGrok Heavy").
-    t.to_ascii_lowercase().replace(' ', "_") == "supergrok_heavy"
+    // Normalize: lowercase + spaces to underscores so both JWT-derived keys
+    // and CCP display names match. Accept BOTH brand spellings: the CCP
+    // server may still emit the upstream "SuperGrok Heavy" while new
+    // deployments emit "SuperQIDI Heavy" (rebrand half-migration kept both
+    // alive in the wild).
+    matches!(
+        t.to_ascii_lowercase().replace(' ', "_").as_str(),
+        "supergrok_heavy" | "superqidi_heavy"
+    )
 }
 
 /// URL for upgrading the subscription tier.
