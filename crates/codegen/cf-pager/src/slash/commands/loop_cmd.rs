@@ -1,6 +1,6 @@
 use agent_client_protocol as acp;
 use cf_tools::implementations::qidi_build::{
-    SCHEDULER_CREATE_TOOL_NAME, loop_schedule_instruction, loop_usage_message,
+    loop_schedule_instruction, loop_usage_message,
 };
 
 use crate::slash::command::{CommandExecCtx, CommandResult, ScheduledTaskPreview, SlashCommand};

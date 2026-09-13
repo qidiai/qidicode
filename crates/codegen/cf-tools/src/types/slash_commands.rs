@@ -35,7 +35,24 @@ pub const IMAGE_GEN_TOOL_NAME: &str = "qidi_build:ImageGen";
 pub const IMAGINE_COMMAND_NAME: &str = "/imagine";
 
 /// Imagine instruction text.
-pub fn imagine_instruction() -> String { "Generate an image from a text description.".to_string() }
+/// Build the model instruction that `/imagine <prompt>` expands into.
+///
+/// Restored from upstream xai-grok-tools-api (that crate was not carried
+/// over at fork time; the stub broke the cf-pager injection-text pins that
+/// upstream CI exercises).
+pub fn imagine_instruction(args: &str) -> String {
+    format!(
+        "# /imagine -- generate an image\n\n\
+         Generate an image with the image_gen tool using the user's description below.\n\n\
+         ## Action\n\
+         1. Call image_gen with: prompt (the user's description, kept verbatim -- do not\n\
+            paraphrase), n: 1. The tool returns a saved image path.\n\
+         2. Show the returned image path to the user.\n\
+         3. Do NOT describe or imagine the image inline -- the tool produces it.\n\n\
+         ## Input\n\
+         {args}"
+    )
+}
 
 /// Imagine usage message.
 pub fn imagine_usage_message() -> String { "Usage: /imagine <description>".to_string() }
@@ -47,7 +64,25 @@ pub const IMAGE_TO_VIDEO_TOOL_NAME: &str = "qidi_build:ImageToVideo";
 pub const IMAGINE_VIDEO_COMMAND_NAME: &str = "/imagine-video";
 
 /// Imagine video instruction text.
-pub fn imagine_video_instruction() -> String { "Generate a video from an image.".to_string() }
+/// Build the model instruction that `/imagine-video <prompt>` expands into.
+///
+/// Restored alongside imagine_instruction (same upstream crate debt).
+pub fn imagine_video_instruction(args: &str) -> String {
+    format!(
+        "# /imagine-video -- generate a video\n\n\
+         Produce a video from the user's description below.\n\n\
+         ## Action\n\
+         1. Call image_to_video with: prompt (the user's description, kept verbatim),\n\
+            n: 1. The tool returns a saved video path.\n\
+         2. Show the returned video path to the user.\n\
+         3. Do NOT describe the video inline -- the tool produces it.\n\n\
+         If the description implies a scene you cannot produce directly, first generate\n\
+         a still with image_gen and animate it with reference_to_video, then continue\n\
+         from step 2 with the video tool.\n\n\
+         ## Input\n\
+         {args}"
+    )
+}
 
 /// Imagine video usage message.
 pub fn imagine_video_usage_message() -> String { "Usage: /imagine-video <image_url> <description>".to_string() }
