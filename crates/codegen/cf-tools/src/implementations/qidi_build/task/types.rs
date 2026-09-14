@@ -174,14 +174,24 @@ pub fn prune_orphaned_background_task_tools(config: &mut crate::registry::types:
 }
 
 fn is_background_capable_bash_tool(tc: &crate::registry::types::ToolConfig) -> bool {
-    match tc.id.as_str() {
-        "cf_tools::run_terminal_cmd" => tc
+    // Match on the short tool name: ids render as "Namespace:tool" and were
+    // never migrated at rebrand time (see `merge_tool_params` in cf-agent),
+    // so a single hard-coded prefix (`cf_tools::run_terminal_cmd`) misses the
+    // real entries (`QidiBuild:run_terminal_cmd`,
+    // `QidiBuildConcise:run_terminal_cmd`). That misclassification made
+    // `prune_orphaned_background_task_tools` strip get_task_output/kill_task
+    // from depth-max children while the bash tool remained with
+    // `enabled_background=true`, failing registry requirements at spawn
+    // ("enabled_background=true requires ... get_task_output and kill_task").
+    let short = tc.id.rsplit(':').next().unwrap_or(tc.id.as_str());
+    match short {
+        "run_terminal_cmd" => tc
             .params
             .as_ref()
             .and_then(|params| params.get("enabled_background"))
             .and_then(|value| value.as_bool())
             .unwrap_or(true),
-        "OpenCode:bash" => true,
+        "bash" => tc.id.starts_with("OpenCode:"),
         _ => false,
     }
 }
@@ -1007,6 +1017,83 @@ mod tests {
             config.tools.is_empty(),
             "execute tools should still be filtered out"
         );
+    }
+
+    #[test]
+    fn prune_keeps_companions_for_real_qidi_build_bash_id() {
+        // Regression: production ToolConfigs render `QidiBuild:run_terminal_cmd`,
+        // not the legacy `cf_tools::` prefix. A depth-max child (task tool
+        // stripped) must KEEP get_task_output/kill_task while its
+        // background-capable bash remains — pruning them made the registry
+        // requirement "enabled_background=true requires get_task_output and
+        // kill_task" fail every subagent spawn in <1s.
+        let mut config = ToolServerConfig {
+            tools: vec![
+                tc("QidiBuild:run_terminal_cmd", ToolKind::Execute),
+                tc("QidiBuild:get_task_output", ToolKind::BackgroundTaskAction),
+                tc("QidiBuild:kill_task", ToolKind::KillTaskAction),
+            ],
+            behavior_preset: None,
+        };
+
+        super::prune_orphaned_background_task_tools(&mut config);
+
+        let ids: Vec<&str> = config.tools.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "QidiBuild:run_terminal_cmd",
+                "QidiBuild:get_task_output",
+                "QidiBuild:kill_task",
+            ]
+        );
+    }
+
+    #[test]
+    fn prune_keeps_companions_for_qidi_build_concise_bash_id() {
+        let mut config = ToolServerConfig {
+            tools: vec![
+                tc("QidiBuildConcise:run_terminal_cmd", ToolKind::Execute),
+                tc(
+                    "QidiBuildConcise:get_task_output",
+                    ToolKind::BackgroundTaskAction,
+                ),
+                tc("QidiBuildConcise:kill_task", ToolKind::KillTaskAction),
+            ],
+            behavior_preset: None,
+        };
+
+        super::prune_orphaned_background_task_tools(&mut config);
+
+        assert_eq!(
+            config.tools.len(),
+            3,
+            "concise bash is background-capable by default; companions survive"
+        );
+    }
+
+    #[test]
+    fn prune_still_strips_companions_when_bash_is_foreground_only() {
+        let mut foreground = tc("QidiBuild:run_terminal_cmd", ToolKind::Execute);
+        foreground.params = Some(
+            serde_json::json!({ "enabled_background": false })
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        let mut config = ToolServerConfig {
+            tools: vec![
+                foreground,
+                tc("QidiBuild:get_task_output", ToolKind::BackgroundTaskAction),
+                tc("QidiBuild:kill_task", ToolKind::KillTaskAction),
+            ],
+            behavior_preset: None,
+        };
+
+        super::prune_orphaned_background_task_tools(&mut config);
+
+        let ids: Vec<&str> = config.tools.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, vec!["QidiBuild:run_terminal_cmd"]);
     }
 
     #[test]

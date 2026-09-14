@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Plan mode tool namespace prefix fix
 
 ### Fixed
+- Subagent spawn failed in <1s for every agent type ("enabled_background=true requires get_task_output and kill_task"): at `MAX_SUBAGENT_DEPTH` the task tool was stripped and `prune_orphaned_background_task_tools` misclassified the background-capable bash tool by its stale legacy id (`cf_tools::run_terminal_cmd` vs the real `QidiBuild:run_terminal_cmd`), so the lifecycle companions were wrongly pruned while bash remained; the matcher now keys on the short tool name (QidiBuild/QidiBuildConcise/legacy cf_tools:: + OpenCode:bash)
 - Compilation warnings: unreachable pattern, hidden lifetime, unused import, dead code
 - Ensure plan mode tools uses correct namespace prefix
 - TOML model ID with dots parsed as nested table (config.toml)
