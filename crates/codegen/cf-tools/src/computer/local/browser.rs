@@ -257,15 +257,12 @@ impl BrowserBackend for LocalBrowserBackend {
         } else {
             // Non-ASCII path: chromiumoxide 0.9 walks a US keyboard layout
             // and hard-errors on CJK ("Key not found"). execCommand inserts
-            // any text on the focused field and fires the input event.
-            let escaped = serde_json::to_string(request.text.as_str())
-                .map_err(|e| ComputerError::io(format!("text encode failed: {e}")))?;
-            page.evaluate_expression(format!(
-                "(() => {{ const el = document.activeElement; if (!el) return false; \\
-                 return document.execCommand('insertText', false, {escaped}); }})()",
-            ))
-            .await
-            .map_err(|e| ComputerError::io(format!("insertText failed: {e}")))?;
+            // any text on the focused field and fires the input event. The
+            // builder keeps the payload pure ASCII and single-line so it
+            // survives the CDP Runtime.evaluate round-trip unchanged.
+            page.evaluate_expression(build_insert_text_expression(request.text.as_str()))
+                .await
+                .map_err(|e| ComputerError::io(format!("insertText failed: {e}")))?;
         }
         let mut detail = format!("typed into `{}`", request.selector.trim());
         if request.submit {
@@ -279,10 +276,7 @@ impl BrowserBackend for LocalBrowserBackend {
         Ok(BrowserActionResult { detail })
     }
 
-    async fn read(
-        &self,
-        request: BrowserReadRequest,
-    ) -> Result<BrowserReadResult, ComputerError> {
+    async fn read(&self, request: BrowserReadRequest) -> Result<BrowserReadResult, ComputerError> {
         let _guard = self.op_lock.lock().await;
         let page = self.page().await?;
         let content = match request.selector {
@@ -386,6 +380,39 @@ fn truncate_chars(s: &str, max: usize) -> String {
     out
 }
 
+/// Build a single-line, pure-ASCII JS expression that inserts `text` into the
+/// focused element via `document.execCommand('insertText', ...)`.
+///
+/// The payload starts as a JSON string literal (`serde_json` already escapes
+/// `"`, `\`, and control characters), then every non-ASCII character is
+/// rewritten to a JS `\uXXXX` escape -- astral-plane scalars expand to a
+/// UTF-16 surrogate pair. The result satisfies `expr.is_ascii()`, so it crosses
+/// the CDP `Runtime.evaluate` boundary intact; an earlier multi-line template
+/// with a `\` line-continuation corrupted non-ASCII payloads into a V8
+/// `SyntaxError: Invalid or unexpected token`.
+fn build_insert_text_expression(text: &str) -> String {
+    // `&str -> JSON` is infallible; the closure is an unreachable guard.
+    let json = serde_json::to_string(text).unwrap_or_else(|_| String::from("\"\""));
+    let mut literal = String::with_capacity(json.len());
+    for ch in json.chars() {
+        let cp = ch as u32;
+        if cp <= 0x7F {
+            literal.push(ch);
+        } else if cp <= 0xFFFF {
+            literal.push_str(&format!("\\u{cp:04x}"));
+        } else {
+            // Astral plane -> UTF-16 surrogate pair.
+            let offset = cp - 0x1_0000;
+            let high = 0xD800 + (offset >> 10);
+            let low = 0xDC00 + (offset & 0x3FF);
+            literal.push_str(&format!("\\u{high:04x}\\u{low:04x}"));
+        }
+    }
+    format!(
+        "(() => {{ const el = document.activeElement; if (!el) return false; return document.execCommand('insertText', false, {literal}); }})()"
+    )
+}
+
 /// Launch a hidden browser and open a blank page.
 async fn launch() -> Result<Inner, ComputerError> {
     let user_data = tempfile::Builder::new()
@@ -410,9 +437,7 @@ async fn launch() -> Result<Inner, ComputerError> {
         .await
         .map_err(|e| ComputerError::io(format!("browser launch failed: {e}")))?;
     // The CDP connection needs its event handler pumped continuously.
-    tokio::spawn(async move {
-        while let Some(_event) = handler.next().await {}
-    });
+    tokio::spawn(async move { while let Some(_event) = handler.next().await {} });
     let page = browser
         .new_page("about:blank")
         .await
@@ -468,14 +493,58 @@ mod tests {
     /// key renames on browserless hosts too.
     #[test]
     fn collect_refs_json_contract() {
-        let sample =
-            r#"[{"ref_id":7,"tag":"a","role":"link","text":"Home","css_path":"nav > a"}]"#;
+        let sample = r#"[{"ref_id":7,"tag":"a","role":"link","text":"Home","css_path":"nav > a"}]"#;
         let refs: Vec<BrowserElementRef> =
             serde_json::from_str(sample).expect("collect-refs JSON contract");
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].ref_id, 7);
         assert_eq!(refs[0].role, "link");
         assert_eq!(refs[0].css_path, "nav > a");
+    }
+
+    #[test]
+    fn insert_text_expression_cjk_is_ascii_single_line() {
+        let expr = build_insert_text_expression("中文测试一二三");
+        assert!(expr.is_ascii(), "expression must be pure ASCII: {expr}");
+        assert!(
+            !expr.contains('\n'),
+            "expression must be single line: {expr}"
+        );
+        assert!(expr.starts_with("(() => {"), "expr: {expr}");
+        assert!(expr.ends_with("})()"), "expr: {expr}");
+        assert!(expr.contains("execCommand('insertText'"), "expr: {expr}");
+        assert!(expr.contains("\\u4e2d\\u6587"), "cjk escape: {expr}");
+    }
+
+    #[test]
+    fn insert_text_expression_astral_uses_surrogate_pair() {
+        let expr = build_insert_text_expression("😀");
+        assert!(expr.is_ascii(), "expression must be pure ASCII: {expr}");
+        assert!(expr.contains("\\ud83d\\ude00"), "surrogate pair: {expr}");
+    }
+
+    #[test]
+    fn insert_text_expression_escapes_quotes_backslash_and_cjk() {
+        let expr = build_insert_text_expression("He said \"hi\" \\ ok 中文");
+        assert!(expr.is_ascii(), "expression must be pure ASCII: {expr}");
+        assert!(expr.contains("\\\""), "escaped double quote: {expr}");
+        assert!(expr.contains("\\\\"), "escaped backslash: {expr}");
+        assert!(expr.contains("\\u4e2d"), "cjk escape: {expr}");
+    }
+
+    #[test]
+    fn insert_text_expression_handles_empty_control_and_single_quote() {
+        let empty = build_insert_text_expression("");
+        assert!(empty.is_ascii(), "expression: {empty}");
+        assert!(empty.contains("false, \"\")"), "empty literal: {empty}");
+
+        let newline = build_insert_text_expression("a\nb");
+        assert!(newline.is_ascii(), "expression: {newline}");
+        assert!(newline.contains("a\\nb"), "escaped newline: {newline}");
+
+        let apostrophe = build_insert_text_expression("it's");
+        assert!(apostrophe.is_ascii(), "expression: {apostrophe}");
+        assert!(apostrophe.contains("\"it's\""), "literal: {apostrophe}");
     }
 
     /// Real-browser E2E: `QIDI_BROWSER_E2E=1 cargo test -p cf-tools browser_e2e -- --nocapture`.
