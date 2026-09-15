@@ -16,16 +16,13 @@
   # 看到 BUILD_EXIT=0 即成功；产物 C:\qidi-build\release\qidi.exe
   ```
 
-## 2. 编译完成后的换装流程
+## 1. release 编译与换装 —— 已完成（2026-09-16 01:18）
 
-1. 确认没有正在运行的 qidi 会话残留进程（换装只能在新 qidi 会话里做，先备份）：
-   ```powershell
-   Copy-Item qidi.exe ("qidi.exe.bak-" + (Get-Date -Format "MMdd-HHmm")) -Force
-   Copy-Item C:\qidi-build\release\qidi.exe qidi.exe -Force
-   .\qidi.exe --version   # 应为 0.1.220-alpha.4 或更新
-   ```
-2. **验证 CJK 修复**：用 browser_type 在网页输入框输入"中文测试一二三"，
-   成功即修复生效（旧版必抛 SyntaxError）。
+- **BUILD_EXIT=0**（20m42s 收尾），产物 `C:\qidi-build\release\qidi.exe`（294.9MB）
+- **已换装**：`qidi.exe` = `qidi 0.1.220-alpha.4 (98deacf)`（CJK 修复版）
+  旧版备份：`qidi.exe.bak-cjk-0916-0118`
+- **待验证**：新会话启动后用 browser_type 在网页输入框输入"中文测试一二三"，
+  成功即 CJK 修复生效（旧版必抛 SyntaxError）
 
 ## 3. 可见浏览器 MCP（已配置，重启会话后生效）
 
