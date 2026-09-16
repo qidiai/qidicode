@@ -24,6 +24,7 @@
 
 # ============================== 1. imports + utf-8 stdout + 常量 ==============================
 import asyncio, base64, json, os, sys, time, uuid
+from pathlib import Path
 
 try:
     # Windows 控制台默认 GBK, 直接输出中文会炸; 统一改成 utf-8。
@@ -35,8 +36,17 @@ except Exception:
 from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
 
 __version__ = "1.0.0"
-HERE = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(HERE, "vibex2api.config.json")
+
+
+def _app_dir() -> Path:
+    """配置文件所在目录: 打包后取 EXE 同目录, 脚本模式取脚本同目录。"""
+    if getattr(sys, "frozen", False):                  # PyInstaller 打包后
+        return Path(sys.executable).resolve().parent   # EXE 同目录(临时解压目录每次变, 不能放 __file__)
+    return Path(__file__).resolve().parent             # 脚本模式: 脚本同目录
+
+
+HERE = _app_dir()
+CONFIG_PATH = HERE / "vibex2api.config.json"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
@@ -105,7 +115,7 @@ def load_config():
 def persist(cfg):
     """写回配置文件; 仅包含 DEFAULTS 的键。"""
     out = {k: cfg.get(k, DEFAULTS[k]) for k in DEFAULTS}
-    tmp = CONFIG_PATH + ".tmp"
+    tmp = str(CONFIG_PATH) + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
     os.replace(tmp, CONFIG_PATH)
@@ -125,6 +135,41 @@ def jwt_decode(token):
         return data if isinstance(data, dict) else None
     except Exception:
         return None
+
+
+def _is_valid_token_shape(t: str) -> bool:
+    """JWT 形状粗校验: 非空、三段、两处 '.'(且中段够长, 排除明显占位串)"""
+    return bool(t) and t.count(".") == 2 and len(t.split(".")[1]) > 10
+
+
+_TOKEN_GUIDE = """未检测到 Rh-Accesstoken。获取方法（约 30 秒）:
+  1. 浏览器打开 https://vibex.runninghub.cn 并登录（手机号注册）
+  2. F12 → Application(应用) → Local Storage(本地存储) → 该域名下
+  3. 找到键 Rh-Accesstoken，双击值全选复制（长字符串，含两个点）
+请把 Rh-Accesstoken 粘贴到这里后回车:"""
+
+
+def ensure_token_interactive(cfg) -> None:
+    """首次运行的 token 交互引导: 已配置则直接返回; 不可交互则只打印指引。"""
+    if cfg.get("token"):
+        return
+    interactive = sys.stdin.isatty() or os.environ.get("VIBEX_BOOTSTRAP_FORCE") == "1"
+    if not interactive:
+        print("token 未配置: 请设置环境变量 RH_ACCESSTOKEN, 或写入同目录 vibex2api.config.json 的 token 字段。")
+        return
+    for _ in range(3):
+        print(_TOKEN_GUIDE)
+        try:
+            t = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            t = ""
+        if _is_valid_token_shape(t):
+            cfg["token"] = t
+            persist(cfg)
+            print("token 已保存到 vibex2api.config.json")
+            return
+        print("格式不正确(应为含两个点的长字符串), 请重试。")
+    print("多次输入均不合法, 已跳过。请稍后手动配置 token。")
 
 
 # ============================== 3. class VibexError ==============================
@@ -973,6 +1018,7 @@ async def _check_async(config):
 
 def cmd_check(config):
     """--check: 解码 JWT, 打印 providers / apps。"""
+    ensure_token_interactive(config)               # load_config 之后、真正检查之前
     token = config.get("token") or ""
     if not token:
         print("未配置 VibeX token。")
@@ -1114,12 +1160,29 @@ def cmd_selftest():
     assert got[0] is None, "run_turn 应放出哨兵"
     assert err_at_wakeup, "哨兵必须是 finally 最后动作, 否则消费方唤醒时丢失 state['error']"
 
+    # 9) _is_valid_token_shape: JWT 形状粗校验
+    assert _is_valid_token_shape("a." + "b" * 12 + ".c") is True, "段长够的三段串应判合法"
+    assert _is_valid_token_shape("x.yyyyyyyyyyyy.z") is True
+    assert _is_valid_token_shape("abc") is False, "无点应判非法"
+    assert _is_valid_token_shape("a.b") is False, "两段应判非法"
+    assert _is_valid_token_shape("") is False, "空串应判非法"
+    # 规格正文以 "a.b.c" 举例并标注"(段长够)": 按给定实现, 中段须 >10 字符,
+    # 字面 "a.b.c"(中段 "b" 仅 1 字符) 判非法; True 分支由上面段长够的例子覆盖。
+    assert _is_valid_token_shape("a.b.c") is False, "中段过短应判非法"
+
+    # 10) _app_dir(): 脚本模式 == 脚本目录; frozen(EXE) == EXE 所在目录
+    if getattr(sys, "frozen", False):
+        assert _app_dir() == Path(sys.executable).resolve().parent, "_app_dir frozen 时应指向 EXE 目录"
+    else:
+        assert _app_dir() == Path(__file__).resolve().parent, "_app_dir 非 frozen 时应指向脚本目录"
+
     print("SELFTEST PASS")
     return 0
 
 
 def cmd_serve(config):
     """默认: 启动 HTTP 服务。"""
+    ensure_token_interactive(config)               # load_config 之后、真正启动之前
     app = make_app(config)
     host = config.get("listen_host") or "127.0.0.1"
     port = int(config.get("listen_port") or 8787)
