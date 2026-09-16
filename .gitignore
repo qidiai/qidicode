@@ -37,3 +37,5 @@ _n1/
 !vibex2api/
 vibex2api/vibex2api.config.json
 vibex2api/__pycache__/
+vibex2api/TOKEN_ALERT.md
+vibex2api/*.log
