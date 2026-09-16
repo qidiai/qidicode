@@ -19,10 +19,16 @@ OpenAI client ───> vibex2api (127.0.0.1:8787)
 
 ---
 
+## 两种安装形态
+
+- **源码版**：本文档流程（需要 Python 3.10+ 与 aiohttp）
+- **EXE 免安装版**：单文件 `vibex2api.exe`（约 14MB，PyInstaller 打包，无需 Python），
+  双击运行、首次交互式填 token。见 [使用说明-EXE版.md](使用说明-EXE版.md)
+
 ## 快速开始
 
 1. **前置**：Python 3.10+（本适配器在 3.12 验证）、`pip install aiohttp`；注册并登录 https://vibex.runninghub.cn 。
-2. **提取 token**：浏览器按 `F12` → **Application** → **Local Storage** → `https://vibex.runninghub.cn` → 找到键 **`Rh-Accesstoken`** → 复制它的值（是一个 JWT，约一周有效期，过期后重新提取）。
+2. **提取 token**：浏览器按 `F12` → **Application** → **Local Storage** → `https://vibex.runninghub.cn` → 找到键 **`Rh-Accesstoken`** → 复制它的值（是一个 JWT，实测约 30 天有效期，过期后重新提取）。
 3. **配置**：把 `config.example.json` 复制为 `vibex2api.config.json`，填入 `token`；或设置环境变量：
 
    ```bat
@@ -144,6 +150,6 @@ curl -s http://127.0.0.1:8787/v1/chat/completions \
 ## 故障排查
 
 - **PowerShell 里中文乱码**：先执行 `$env:PYTHONIOENCODING="utf-8"`，或 `chcp 65001` 切到 UTF-8 代码页。
-- **token 一周过期**：`Rh-Accesstoken` 约一周失效，出现 401 时重新从浏览器复制。
+- **token 约 30 天过期**：`Rh-Accesstoken` 实测 30 天失效（JWT exp 字段），出现 401 时重新从浏览器复制。
 - **离线自检**：`python vibex2api.py --selftest`（不需要 token、不联网），全部通过会打印 `SELFTEST PASS`。
 - **查看帮助**：`python vibex2api.py --help`。
