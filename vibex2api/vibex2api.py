@@ -277,12 +277,11 @@ class Vibex:
         except Exception as e:
             log("ensure-llm-settings 调用失败(忽略):", e)
     def _ws_url(self, app_id):
-        base = self.base_url
-        if base.startswith("https://"):
-            return "wss://" + base[len("https://"):] + f"/app-ws/{app_id}/ws"
-        if base.startswith("http://"):
-            return "ws://" + base[len("http://"):] + f"/app-ws/{app_id}/ws"
-        return "wss://" + base + f"/app-ws/{app_id}/ws"
+        # REST 走 base_url(可能含 /vc), 但 WS 不带任何 path: wss://<netloc>/app-ws/{id}/ws
+        from urllib.parse import urlsplit
+        parts = urlsplit(self.base_url)
+        scheme = "wss" if parts.scheme == "https" else "ws"
+        return f"{scheme}://{parts.netloc}/app-ws/{app_id}/ws"
     def _ws_headers(self):
         """WS 鉴权只带 Cookie。"""
         return {"Cookie": f"Rh-Accesstoken={self.config.get('token') or ''}",

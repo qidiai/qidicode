@@ -76,7 +76,7 @@ curl -s http://127.0.0.1:8787/v1/chat/completions \
 
 | 名称 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `base_url` | string | `"https://vibex.runninghub.cn"` | VibeX 网关地址（REST 与 WS 都由它派生） |
+| `base_url` | string | `"https://vibex.runninghub.cn/vc"` | VibeX 网关地址（REST 需要 `/vc` 前缀；WebSocket 由适配器自动去掉前缀直连 `/app-ws/...`） |
 | `listen_host` | string | `"127.0.0.1"` | 适配器监听地址，建议保持本机回环 |
 | `listen_port` | number | `8787` | 适配器监听端口 |
 | `api_key` | string | `""` | 适配器自身的鉴权；**留空 = 不校验**。设置后客户端须带 `Authorization: Bearer <api_key>` |

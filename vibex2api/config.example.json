@@ -1,5 +1,5 @@
 {
-  "base_url": "https://vibex.runninghub.cn",
+  "base_url": "https://vibex.runninghub.cn/vc",
   "listen_host": "127.0.0.1",
   "listen_port": 8787,
   "api_key": "",
