@@ -134,3 +134,17 @@ sh.Run """C:\Program Files\Python312\python.exe"" """ & here & "\wb_checkin.py""
    - 非法 model → 400
 4. 测完杀掉适配器进程，贴 service 停止证明
 5. `git status`（在中转目录跑）→ 新增仅 wb/ 目录
+
+
+---
+
+## 修订记录 R2（2026-09-17，K3 审计遗留全面修复）
+
+- [中] SSE 跨 chunk 多字节乱码 → SseChunkDecoder 增量解码（codecs.getincrementaldecoder）+ 行缓冲；HTTP 级 A/B 实证：修复前 43 U+FFFD → 修复后 0
+- [中低] 上游流式 error 事件伪装 stop → 流式路写 upstream_error 错误块后断流（无 stop/[DONE]）；聚合路 502 同构体
+- [低] 余额 unknown → 探测确认 get-user-resource 403 code:10085（需桌面端请求条件），保持软失败+注释；解析三层 fallback（data.Response.Data.TotalDosage → data.TotalDosage → 顶层）
+- [低] _forward 异常分支 session 泄漏 → try/finally + 所有权标志（handed_off）
+- [低] service.log 轮转 → >1MB 滚动为 .old（keepalive.ps1，纯 ASCII）
+- [域外] 中转 config.json pricing.MiniMax-M3 大小写重键移除（与小写键值一致，零功能影响；config.json.bak-0917-casekey 可回滚）
+
+指挥官终验：经中转 wb-hy3 流式 134 字中文，U+FFFD=0，model 回显 wb-hy3，finish=stop —— PASS。
