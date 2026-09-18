@@ -820,6 +820,10 @@ impl ToolRegistryBuilder {
         b.register::<opencode::OpenCodeSkillTool>();
         b.register::<crate::implementations::memory::search_tool::MemorySearchImpl>();
         b.register::<crate::implementations::memory::get_tool::MemoryGetImpl>();
+        // think: pushed unconditionally in builder.rs for inject_default_tools
+        // agents, but curated toolsets resolve it from this registry too
+        // (sessions reference it as QidiBuild:think). 2026-09-17 fix.
+        b.register::<crate::implementations::think::ThinkImpl>();
         b.register::<crate::implementations::search_tool::SearchTool>();
         b.register::<crate::implementations::think::ThinkImpl>();
         b.register::<crate::implementations::browser::NavigateImpl>();
