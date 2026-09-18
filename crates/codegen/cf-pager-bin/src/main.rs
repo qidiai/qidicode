@@ -1465,6 +1465,46 @@ fn install_heap_profile_hooks() {
         prof_available: jemalloc_prof_available,
     });
 }
+/// Read-only startup hint: count orphaned `.json` proposals under
+/// `~/.qidi/evolution/proposals/` that have not been modified in over 7 days.
+///
+/// Counting only — removing them is a separate concern. A missing directory
+/// (fresh installs have no `~/.qidi/evolution/`) is normal and prints nothing.
+fn report_stale_evolution_proposals(evolution_dir: &std::path::Path) {
+    const STALE_AFTER: std::time::Duration =
+        std::time::Duration::from_secs(7 * 24 * 60 * 60);
+
+    let proposals_dir = evolution_dir.join("proposals");
+    let Ok(entries) = std::fs::read_dir(&proposals_dir) else {
+        // Missing or unreadable directory: nothing to report, not an error.
+        return;
+    };
+    let Some(cutoff) = std::time::SystemTime::now().checked_sub(STALE_AFTER) else {
+        return;
+    };
+
+    let mut stale = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(std::ffi::OsStr::to_str) != Some("json") {
+            continue;
+        }
+        if let Ok(modified) = entry.metadata().and_then(|m| m.modified()) {
+            if modified < cutoff {
+                stale += 1;
+            }
+        }
+    }
+
+    if stale > 0 {
+        eprintln!(
+            "QIDI Code found {stale} stale evolution proposal(s) in {}.",
+            proposals_dir.display()
+        );
+        eprintln!("  These are orphaned drafts older than 7 days; safe to ignore for now.");
+        eprintln!();
+    }
+}
 fn main() {
     // Debug builds use significantly more stack space than release builds.
     // Spawn the actual main logic on a thread with a larger stack to avoid
@@ -1543,7 +1583,15 @@ fn real_main() -> i32 {
             count = crashed.len(),
             "Found crashed sessions from a previous run"
         );
+        // User-facing counterpart to the crash-handler notice above: same
+        // style, printed to stderr so it survives the TUI taking over stdout.
+        if let Some(notice) = cf_shell::active_sessions::recovery_notice(&crashed) {
+            eprintln!("{notice}");
+            eprintln!();
+        }
     }
+    // Read-only hint about stale evolution proposals (if that tree exists).
+    report_stale_evolution_proposals(&cf_shell::util::grok_home::grok_home().join("evolution"));
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
