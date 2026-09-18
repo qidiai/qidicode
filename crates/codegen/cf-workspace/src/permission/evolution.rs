@@ -7,11 +7,22 @@
 //! The rule is **synthetic**: it is never written into the user's config and is
 //! never persisted. It is injected at the single choke point every session
 //! funnels through — the permission manager, when it compiles the session's
-//! [`CompiledPolicy`] — so it applies no matter how the session's
+//! [`CompiledPolicy`] — so it applies however the session's
 //! `PermissionConfig` was obtained (disk resolution, CLI flags, subagents,
 //! tests). Injecting in the resolution layer would only cover the
 //! disk-resolution path and would be bypassed by any caller that passes an
 //! explicit config.
+//!
+//! ## Interaction with YOLO (always-approve)
+//!
+//! The gate is an `Ask` rule, so it follows the semantics of every explicit
+//! `Ask` rule rather than acting as a hard floor. **YOLO mode is the user's
+//! explicit, global self-grant**: under it an `Ask` gate — this synthetic one
+//! included — is auto-approved, consistent with the existing explicit-`Ask`
+//! behavior. A user's explicit `Deny` still wins unconditionally in every mode.
+//! YOLO direct writes into the skills tree are therefore the user's own accepted
+//! risk, not a gate bypass; in the **default** mode the gate blocks them as
+//! intended. (Red-team evaluation: K3 final review, M1.)
 //!
 //! Evaluation is order-independent with `deny > ask > allow`, so a user's
 //! explicit `deny` rule on the same path still wins over the injected `ask`
@@ -213,5 +224,45 @@ mod tests {
         // in sessions that had no file rules).
         let policy = gate_policy(Vec::new());
         assert!(!policy.has_file_restrictions);
+    }
+
+    /// K3 final review M1: pins the YOLO semantics of the gate at the rule layer.
+    ///
+    /// The gate is an `Ask` rule (never a hard `Deny`), which is exactly why YOLO
+    /// — the user's explicit global self-grant — auto-approves it uniformly with
+    /// every other explicit `Ask`. An explicit `Deny` on the same path still wins
+    /// in every mode. Actor-level YOLO auto-approval is exercised end to end by
+    /// the permission-manager tests (the H1 session-grant regression plus the
+    /// existing YOLO auto-approve tests); this test guards the rule-layer
+    /// invariants that keep that behavior intentional.
+    #[test]
+    fn gate_is_ask_so_yolo_applies_and_explicit_deny_still_wins() {
+        // The gate must be `Ask`: a `Deny` here would (wrongly) make YOLO
+        // irrelevant and would also block the sanctioned deploy path.
+        for rule in skill_deploy_gate_rules() {
+            assert_eq!(
+                rule.action,
+                RuleAction::Ask,
+                "the skill-deploy gate must be an Ask rule, never a Deny"
+            );
+        }
+
+        // An explicit user deny outranks the gate's ask in every mode.
+        let deny = PermissionRule {
+            action: RuleAction::Deny,
+            tool: ToolFilter::Edit,
+            pattern: Some(TILDE_SKILLS_GLOB.to_string()),
+            pattern_mode: PatternMode::Glob,
+        };
+        let policy = gate_policy(vec![deny]);
+        assert!(
+            matches!(
+                policy.evaluate(&AccessKind::Edit(
+                    "~/.qidi/skills/user-foo/SKILL.md".to_string()
+                )),
+                Some(Decision::Reject(_))
+            ),
+            "an explicit deny must still win over the gate's ask"
+        );
     }
 }

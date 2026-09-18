@@ -1438,6 +1438,13 @@ fn spawn_permission_manager_with_pin(
                             remember_tool_approvals,
                         )
                         .map(|d| (d, reasons::PERSISTED_GRANT)),
+                        // A policy `Ask` rule on an Edit path (e.g. the synthetic
+                        // skill-deploy gate) must reach the prompt, not the
+                        // session-level auto-allow below. The session grant is a
+                        // blanket "allow edits", not an explicit per-path approval,
+                        // so it must not silently satisfy a forced `Ask`. Deny is
+                        // already enforced earlier.
+                        AccessKind::Edit(_) if policy_forced_prompt => None,
                         AccessKind::Edit(_) => {
                             if allow_edits_for_session {
                                 Some((Decision::Allow, reasons::PERSISTED_GRANT))
@@ -1785,6 +1792,7 @@ fn spawn_permission_manager_with_pin(
 mod tests {
     use super::*;
     use crate::permission::bash_command_splitting::primary_command_from_script;
+    use crate::permission::prompter::ALLOW_EDITS_SESSION_OPTION_ID;
 
     // ── Managed-policy pin: yolo clamp + persisted bash clamp ──
 
@@ -3143,6 +3151,138 @@ mod tests {
                     "Read `ask` via shell-file access must still prompt despite a bash grant"
                 );
                 assert!(matches!(d, Decision::Reject(_)), "got {d:?}");
+            })
+            .await;
+    }
+
+    /// Recording client that answers every prompt with the edit-scoped
+    /// "allow all edits during this session" option, so a session-wide edit
+    /// grant is established through the real prompt path.
+    #[derive(Default)]
+    struct SessionEditClient {
+        prompts: std::rc::Rc<std::cell::RefCell<Vec<acp::RequestPermissionRequest>>>,
+    }
+
+    #[async_trait::async_trait(?Send)]
+    impl acp::Client for SessionEditClient {
+        async fn request_permission(
+            &self,
+            args: acp::RequestPermissionRequest,
+        ) -> acp::Result<acp::RequestPermissionResponse> {
+            let option_id = args
+                .options
+                .iter()
+                .find(|o| o.option_id.0.as_ref() == ALLOW_EDITS_SESSION_OPTION_ID)
+                .map(|o| o.option_id.clone())
+                .expect("edit prompt must offer the allow-edits-session option");
+            self.prompts.borrow_mut().push(args);
+            Ok(acp::RequestPermissionResponse::new(
+                acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(
+                    option_id,
+                )),
+            ))
+        }
+
+        async fn session_notification(&self, _: acp::SessionNotification) -> acp::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Spawn a manager whose prompter is wired to a live gateway backed by
+    /// `client`, so an Edit prompt performs a real `request_permission`
+    /// round-trip that yields the session-scoped edit grant.
+    fn manager_with_session_edit_client(
+        cwd: &AbsPathBuf,
+        config: Option<crate::permission::types::PermissionConfig>,
+        client: SessionEditClient,
+    ) -> (PermissionHandle, mpsc::UnboundedReceiver<PermissionEvent>) {
+        let (gateway, receiver) = cf_acp_lib::acp_gateway::<acp::AgentSide, _>(client);
+        tokio::task::spawn_local(receiver.run());
+        spawn_permission_manager_with_pin(
+            acp::SessionId::new(Arc::from("test-session")),
+            gateway,
+            cwd.clone(),
+            ClientType::Generic,
+            config,
+            vec![], // deny_read_globs
+            vec![],
+            false,
+            None,
+            true,
+            None,
+            None,
+        )
+    }
+
+    /// H1 regression: once the user has granted "allow all edits during this
+    /// session", that session-wide edit grant must NOT silently satisfy a policy
+    /// `Ask` rule. The synthetic skill-deploy gate (`Edit` on `~/.qidi/skills/**`)
+    /// must still reach the prompt, otherwise one generic edit approval defeats
+    /// the gate for the rest of the session.
+    ///
+    /// Relies on the evolution gate being enabled (the default); it is installed
+    /// by the manager regardless of the supplied config.
+    #[tokio::test]
+    async fn session_edit_grant_does_not_bypass_synthetic_skill_deploy_gate() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let tmp = tempfile::tempdir().unwrap();
+                let cwd = AbsPathBuf::new(tmp.path().to_path_buf()).unwrap();
+                let client = SessionEditClient::default();
+                let prompts = client.prompts.clone();
+                // No user config: only the synthetic evolution gate is in play.
+                let (mgr, _e) = manager_with_session_edit_client(
+                    &cwd,
+                    Some(crate::permission::types::PermissionConfig::new(vec![])),
+                    client,
+                );
+
+                // First edit is ungated: this prompt establishes the session grant
+                // (the client answers with allow-edits-session).
+                let d = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    mgr.request(
+                        AccessKind::Edit("src/main.rs".into()),
+                        tool_call(),
+                        None,
+                        None,
+                        None,
+                    ),
+                )
+                .await
+                .expect("permission request must resolve, not hang");
+                assert_eq!(d, Decision::Allow, "the ungated edit must be granted");
+                assert_eq!(
+                    prompts.borrow().len(),
+                    1,
+                    "the first (ungated) edit must prompt to establish the session grant"
+                );
+
+                // A subsequent edit into the skills tree must STILL prompt: the
+                // synthetic `ask` gate outranks the session edit grant.
+                let d = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    mgr.request(
+                        AccessKind::Edit("~/.qidi/skills/user-foo/SKILL.md".into()),
+                        tool_call(),
+                        None,
+                        None,
+                        None,
+                    ),
+                )
+                .await
+                .expect("permission request must resolve, not hang");
+                assert_eq!(
+                    d,
+                    Decision::Allow,
+                    "the client re-answers allow-edits-session"
+                );
+                assert_eq!(
+                    prompts.borrow().len(),
+                    2,
+                    "the synthetic skill-deploy gate must re-prompt despite the session edit grant"
+                );
             })
             .await;
     }
