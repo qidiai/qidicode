@@ -46,6 +46,50 @@ pub fn collect_crashed() -> io::Result<Vec<ActiveSession>> {
     collect_crashed_in(&crate::util::grok_home::grok_home())
 }
 
+/// Build the user-facing startup notice for the sessions returned by
+/// [`collect_crashed`]. Returns `None` when there is nothing to report.
+///
+/// Kept as a pure function so the message can be unit-tested without touching
+/// the filesystem or probing PIDs. The text is English to match the
+/// crash-handler startup notice printed by the pager binary, and every
+/// recovery command uses a flag the pager actually accepts:
+/// `--resume <SESSION_ID>` (`-r`) or `-c`/`--continue`.
+pub fn recovery_notice(crashed: &[ActiveSession]) -> Option<String> {
+    if crashed.is_empty() {
+        return None;
+    }
+    let mut lines = Vec::with_capacity(crashed.len() + 5);
+    lines.push(format!(
+        "QIDI Code found {} session(s) from a previous run that did not shut down cleanly.",
+        crashed.len()
+    ));
+    lines.push(
+        "  These are stale bookkeeping entries, not running processes; it is safe to ignore them."
+            .to_string(),
+    );
+    lines.push("  Resume one by copying its command:".to_string());
+    for s in crashed {
+        lines.push(format!(
+            "    qidi --resume {}    (last opened in {})",
+            &*s.session_id.0, s.cwd
+        ));
+    }
+    lines.push(
+        "  To continue the most recent session in this directory instead:  qidi -c".to_string(),
+    );
+    lines.push(
+        "  The stale entries are cleared automatically on this launch, so this notice stops \
+         appearing once it has been shown."
+            .to_string(),
+    );
+    lines.push(
+        "  Note: an entry can also be a recycled PID (an unrelated process now reuses the \
+         number); ignoring it is always safe."
+            .to_string(),
+    );
+    Some(lines.join("\n"))
+}
+
 // -- Injectable-root variants (`_in`) for testing ---------------------------
 
 pub fn register_in(root: &Path, session: ActiveSession) -> io::Result<()> {
@@ -286,5 +330,39 @@ mod tests {
         assert!(list_in(dir.path()).unwrap().is_empty());
         register_in(dir.path(), make_session("s1", std::process::id())).unwrap();
         assert_eq!(list_in(dir.path()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn recovery_notice_is_none_when_nothing_crashed() {
+        assert!(recovery_notice(&[]).is_none());
+    }
+
+    #[test]
+    fn recovery_notice_lists_each_session_and_a_real_resume_command() {
+        let crashed = vec![
+            make_session("sess-alpha", 2_000_000_000),
+            make_session("sess-beta", 2_000_000_001),
+        ];
+        let notice = recovery_notice(&crashed).expect("non-empty input yields a notice");
+
+        // Count + per-session recovery command (the pager's real `--resume` flag).
+        assert!(notice.contains("2 session"), "missing count: {notice}");
+        assert!(notice.contains("qidi --resume sess-alpha"), "{notice}");
+        assert!(notice.contains("qidi --resume sess-beta"), "{notice}");
+        // The most-recent shortcut and the stale-entry caveat are present.
+        assert!(notice.contains("qidi -c"), "{notice}");
+        assert!(notice.contains("recycled PID"), "{notice}");
+    }
+
+    /// The consumption path: a crashed entry collected from disk must round-trip
+    /// into a notice carrying its real session id.
+    #[test]
+    fn collect_crashed_feeds_recovery_notice() {
+        let dir = TempDir::new().unwrap();
+        register_in(dir.path(), make_session("dead", 2_000_000_000)).unwrap();
+
+        let crashed = collect_crashed_in(dir.path()).unwrap();
+        let notice = recovery_notice(&crashed).expect("one crashed session yields a notice");
+        assert!(notice.contains("qidi --resume dead"), "{notice}");
     }
 }
