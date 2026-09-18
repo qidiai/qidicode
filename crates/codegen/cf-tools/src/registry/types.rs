@@ -825,7 +825,6 @@ impl ToolRegistryBuilder {
         // (sessions reference it as QidiBuild:think). 2026-09-17 fix.
         b.register::<crate::implementations::think::ThinkImpl>();
         b.register::<crate::implementations::search_tool::SearchTool>();
-        b.register::<crate::implementations::think::ThinkImpl>();
         b.register::<crate::implementations::browser::NavigateImpl>();
         b.register::<crate::implementations::browser::SnapshotImpl>();
         b.register::<crate::implementations::browser::ClickImpl>();
