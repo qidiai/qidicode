@@ -1465,22 +1465,22 @@ fn install_heap_profile_hooks() {
         prof_available: jemalloc_prof_available,
     });
 }
-/// Read-only startup hint: count orphaned `.json` proposals under
-/// `~/.qidi/evolution/proposals/` that have not been modified in over 7 days.
+/// Count orphaned `.json` proposals in `proposals_dir` that have not been
+/// modified in over 7 days.
 ///
-/// Counting only — removing them is a separate concern. A missing directory
-/// (fresh installs have no `~/.qidi/evolution/`) is normal and prints nothing.
-fn report_stale_evolution_proposals(evolution_dir: &std::path::Path) {
+/// Side-effect free (no printing), so unit tests can assert the count
+/// directly. A missing or unreadable directory counts as zero — fresh installs
+/// have no `~/.qidi/evolution/`, which is normal and not an error.
+fn count_stale_proposals(proposals_dir: &std::path::Path) -> usize {
     const STALE_AFTER: std::time::Duration =
         std::time::Duration::from_secs(7 * 24 * 60 * 60);
 
-    let proposals_dir = evolution_dir.join("proposals");
-    let Ok(entries) = std::fs::read_dir(&proposals_dir) else {
-        // Missing or unreadable directory: nothing to report, not an error.
-        return;
+    let Ok(entries) = std::fs::read_dir(proposals_dir) else {
+        // Missing or unreadable directory: nothing to count, not an error.
+        return 0;
     };
     let Some(cutoff) = std::time::SystemTime::now().checked_sub(STALE_AFTER) else {
-        return;
+        return 0;
     };
 
     let mut stale = 0usize;
@@ -1495,7 +1495,17 @@ fn report_stale_evolution_proposals(evolution_dir: &std::path::Path) {
             }
         }
     }
+    stale
+}
 
+/// Read-only startup hint: count orphaned `.json` proposals under
+/// `~/.qidi/evolution/proposals/` that have not been modified in over 7 days.
+///
+/// Counting only — removing them is a separate concern. A missing directory
+/// (fresh installs have no `~/.qidi/evolution/`) is normal and prints nothing.
+fn report_stale_evolution_proposals(evolution_dir: &std::path::Path) {
+    let proposals_dir = evolution_dir.join("proposals");
+    let stale = count_stale_proposals(&proposals_dir);
     if stale > 0 {
         eprintln!(
             "QIDI Code found {stale} stale evolution proposal(s) in {}.",
@@ -2978,5 +2988,97 @@ mod tests {
             Err("boom".to_string()),
             "Err output must pass through unchanged",
         );
+    }
+    /// Unique per-test temp directory, removed on drop (mirrors `TempHeapDump`).
+    struct TempEvolutionDir(std::path::PathBuf);
+    impl TempEvolutionDir {
+        fn new(label: &str) -> std::io::Result<Self> {
+            let path = std::env::temp_dir().join(format!(
+                "qidi-evolution-{label}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            ));
+            std::fs::create_dir_all(&path)?;
+            Ok(Self(path))
+        }
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+    impl Drop for TempEvolutionDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn days(n: u64) -> std::time::Duration {
+        std::time::Duration::from_secs(n * 24 * 60 * 60)
+    }
+    /// Write `name` under `dir` and backdate its mtime by `age`.
+    ///
+    /// Uses `File::set_modified` (stable since Rust 1.75) so no extra crate
+    /// (e.g. `filetime`) is needed.
+    fn write_backdated(
+        dir: &std::path::Path,
+        name: &str,
+        age: std::time::Duration,
+    ) -> std::io::Result<()> {
+        let path = dir.join(name);
+        std::fs::write(&path, b"{}")?;
+        let modified = std::time::SystemTime::now()
+            .checked_sub(age)
+            .ok_or_else(|| std::io::Error::other("age underflows SystemTime"))?;
+        let file = std::fs::File::options().write(true).open(&path)?;
+        file.set_modified(modified)
+    }
+    /// A missing tree (fresh install, no `~/.qidi/evolution/`) counts zero and
+    /// the reporting entry point must not panic.
+    #[test]
+    fn stale_proposals_missing_dir_is_silent() -> std::io::Result<()> {
+        let dir = TempEvolutionDir::new("missing")?;
+        // Remove the freshly created dir so the proposals tree truly is absent.
+        std::fs::remove_dir_all(dir.path())?;
+        let proposals = dir.path().join("proposals");
+        assert_eq!(count_stale_proposals(&proposals), 0);
+        report_stale_evolution_proposals(dir.path());
+        Ok(())
+    }
+    /// Directory present but empty (or json-free) counts zero and stays silent.
+    #[test]
+    fn stale_proposals_empty_or_json_free_counts_zero() -> std::io::Result<()> {
+        let dir = TempEvolutionDir::new("empty")?;
+        let proposals = dir.path().join("proposals");
+        std::fs::create_dir_all(&proposals)?;
+        assert_eq!(count_stale_proposals(&proposals), 0);
+        // Non-json entries and subdirectories must not be counted either.
+        std::fs::write(proposals.join("notes.txt"), b"hello")?;
+        std::fs::create_dir_all(proposals.join("nested"))?;
+        assert_eq!(count_stale_proposals(&proposals), 0);
+        report_stale_evolution_proposals(dir.path());
+        Ok(())
+    }
+    /// One 8-day-old `.json` plus a fresh `.json` → exactly one stale.
+    #[test]
+    fn stale_proposals_counts_only_old_json() -> std::io::Result<()> {
+        let dir = TempEvolutionDir::new("count")?;
+        let proposals = dir.path().join("proposals");
+        std::fs::create_dir_all(&proposals)?;
+        write_backdated(&proposals, "old.json", days(8))?;
+        write_backdated(&proposals, "fresh.json", days(0))?;
+        assert_eq!(count_stale_proposals(&proposals), 1);
+        Ok(())
+    }
+    /// Old non-`.json` files are ignored — only the extension gate decides.
+    #[test]
+    fn stale_proposals_ignores_old_non_json() -> std::io::Result<()> {
+        let dir = TempEvolutionDir::new("nonjson")?;
+        let proposals = dir.path().join("proposals");
+        std::fs::create_dir_all(&proposals)?;
+        write_backdated(&proposals, "old.txt", days(30))?;
+        write_backdated(&proposals, "old.json.bak", days(30))?;
+        assert_eq!(count_stale_proposals(&proposals), 0);
+        Ok(())
     }
 }
