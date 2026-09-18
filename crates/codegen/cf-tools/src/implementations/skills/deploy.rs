@@ -277,14 +277,11 @@ pub fn deploy_skill(
         backup_dir = Some(backup);
     }
 
-    std::fs::create_dir_all(&target_dir).map_err(DeployError::io)?;
-    for member in &members {
-        let destination = target_dir.join(&member.relative);
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent).map_err(DeployError::io)?;
-        }
-        std::fs::copy(&member.source, &destination).map_err(DeployError::io)?;
-    }
+    // The publish step is where a half-deployed skill could be created. It is
+    // all-or-nothing; see [`publish_target`] for why a partial tree must never
+    // survive (it is the correctness precondition for the SKILL.md-only
+    // idempotency check in [`target_is_identical`]).
+    publish_target(&target_dir, &members)?;
 
     Ok(DeployReport {
         target_dir,
@@ -292,6 +289,36 @@ pub fn deploy_skill(
         backup_dir,
         idempotent: false,
     })
+}
+
+/// Copy `members` into `target_dir`, creating the tree as it goes.
+///
+/// This is the only step that makes the deployed tree observable, so it must be
+/// all-or-nothing with respect to the idempotency decision: [`target_is_identical`]
+/// (the redeploy check) inspects **only** `SKILL.md`, so a half-written tree
+/// whose `SKILL.md` already matches would be mistaken for a complete deploy and
+/// never repaired — the missing files would stay missing while the hot-reload
+/// loader sees a partial skill. On any failure the partial `target_dir` is
+/// removed so that state can never be observed by a later redeploy. This is
+/// safe: a pre-existing skill was already moved to the backup by the caller, so
+/// nothing of the user's is lost by deleting the freshly-created tree.
+fn publish_target(target_dir: &Path, members: &[Member]) -> Result<(), DeployError> {
+    let result = (|| -> Result<(), DeployError> {
+        std::fs::create_dir_all(target_dir).map_err(DeployError::io)?;
+        for member in members {
+            let destination = target_dir.join(&member.relative);
+            if let Some(parent) = destination.parent() {
+                std::fs::create_dir_all(parent).map_err(DeployError::io)?;
+            }
+            std::fs::copy(&member.source, &destination).map_err(DeployError::io)?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        // Best-effort cleanup; the original error is what the caller reports.
+        let _ = std::fs::remove_dir_all(target_dir);
+    }
+    result
 }
 
 /// Walk `root` and collect every regular file as a [`Member`], rejecting any
@@ -659,6 +686,48 @@ mod tests {
         assert_eq!(report.target_dir, home.path().join("skills").join("user-demo"));
         assert!(report.target_dir.join("SKILL.md").is_file());
         assert!(report.target_dir.join("scripts").join("run.py").is_file());
+    }
+
+    // ── failed-publish cleanup ─────────────────────────────────────
+
+    /// A failure part-way through publishing must leave no partial tree, so a
+    /// later redeploy cannot mistake a half-written skill for a complete one via
+    /// the SKILL.md-only idempotency check (`target_is_identical`).
+    ///
+    /// Construction: two members are handed to [`publish_target`] directly with
+    /// relative paths `a` and `a/b`. Copying `a` first creates `target/a` as a
+    /// FILE, so the `create_dir_all(target/a)` needed for `a/b` then fails
+    /// mid-publish. A real staging dir cannot hold both a file `a` and a
+    /// directory `a`, which is why the collision is built at the [`Member`]
+    /// level instead of on disk — and it fails identically on Windows and Unix.
+    #[test]
+    fn failed_publish_removes_partial_target() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let target = tmp.path().join("skills").join("user-demo");
+        let source_a = tmp.path().join("source-a");
+        let source_b = tmp.path().join("source-b");
+        fs::write(&source_a, "A").expect("write");
+        fs::write(&source_b, "B").expect("write");
+
+        let members = vec![
+            Member {
+                relative: PathBuf::from("a"),
+                source: source_a,
+                size: 1,
+            },
+            Member {
+                relative: PathBuf::from("a").join("b"),
+                source: source_b,
+                size: 1,
+            },
+        ];
+
+        let err = publish_target(&target, &members).unwrap_err();
+        assert!(matches!(err, DeployError::Io(_)), "got {err:?}");
+        assert!(
+            !target.exists(),
+            "a failed publish must remove the partial target tree"
+        );
     }
 
     // ── same-name detection ────────────────────────────────────────
