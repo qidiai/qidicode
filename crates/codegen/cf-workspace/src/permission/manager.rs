@@ -1022,7 +1022,16 @@ fn spawn_permission_manager_with_pin(
             .map(|c| c.prompt_policy)
             .unwrap_or_default();
         // Compile permission policy once; reused for every access check.
-        let compiled_policy = permission_config.map(CompiledPolicy::new);
+        //
+        // B1: the evolution skill-deploy gate is installed as *synthetic*
+        // in-memory rules (never persisted to user config). It is compiled even
+        // when no config was supplied, so the gate is active for every session;
+        // when evolution is disabled the synthetic list is empty and an empty
+        // policy behaves exactly like the previous `None`.
+        let compiled_policy = Some(CompiledPolicy::with_synthetic_rules(
+            permission_config.unwrap_or_default(),
+            crate::permission::evolution::session_skill_gate_rules(),
+        ));
         // Pre-built domain matcher for web_fetch allowlist (from resolved WebFetchConfig).
         let static_domain_matcher = DomainMatcher::new(&web_fetch_allowed_domains);
         while let Some(cmd) = rx.recv().await {

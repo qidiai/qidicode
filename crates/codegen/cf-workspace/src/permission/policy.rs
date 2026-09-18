@@ -22,6 +22,13 @@ struct CompiledRule<'a> {
 pub struct CompiledPolicy {
     config: PermissionConfig,
     matchers: Vec<Option<glob::Pattern>>,
+    /// Synthetic, in-memory rules appended by [`Self::with_synthetic_rules`]
+    /// (e.g. the evolution skill-deploy gate). Enforced by [`Self::evaluate`]
+    /// but deliberately NOT counted by `has_file_restrictions` /
+    /// `has_bash_command_restrictions`, so activating the gate never switches
+    /// on the shell file-access scanner for a session that had no file rules.
+    synthetic_rules: Vec<PermissionRule>,
+    synthetic_matchers: Vec<Option<glob::Pattern>>,
     /// True if any Read/Edit/Any deny/ask rule exists, so the shell file-access
     /// gate (`shell_access.rs`) should run. Read by `evaluate_shell_file_access`.
     pub(crate) has_file_restrictions: bool,
@@ -30,18 +37,40 @@ pub struct CompiledPolicy {
     has_bash_command_restrictions: bool,
 }
 
+/// Compile each rule's glob pattern the way [`CompiledPolicy`] expects its
+/// `matchers` to line up with `rules` (a bare `*` or an uncompilable pattern
+/// yields `None`, which matches nothing beyond the `*` fast path).
+fn compile_matchers(rules: &[PermissionRule]) -> Vec<Option<glob::Pattern>> {
+    rules
+        .iter()
+        .map(|rule| {
+            rule.pattern
+                .as_deref()
+                .filter(|p| *p != "*")
+                .and_then(|p| glob::Pattern::new(p).ok())
+        })
+        .collect()
+}
+
 impl CompiledPolicy {
     pub fn new(config: PermissionConfig) -> Self {
-        let matchers = config
-            .rules
-            .iter()
-            .map(|rule| {
-                rule.pattern
-                    .as_deref()
-                    .filter(|p| *p != "*")
-                    .and_then(|p| glob::Pattern::new(p).ok())
-            })
-            .collect();
+        Self::with_synthetic_rules(config, Vec::new())
+    }
+
+    /// Like [`Self::new`], but also enforces `synthetic_rules` — in-memory
+    /// rules that are never persisted to user config.
+    ///
+    /// Synthetic rules are consulted by [`Self::evaluate`] (so an explicit
+    /// `deny` still wins and an `ask` still outranks an `allow`), but are
+    /// intentionally excluded from the `has_*_restrictions` flags: whether the
+    /// shell file-access / bash-command gates run stays a pure function of the
+    /// caller's own rules, so injecting a gate cannot change that behavior.
+    pub fn with_synthetic_rules(
+        config: PermissionConfig,
+        synthetic_rules: Vec<PermissionRule>,
+    ) -> Self {
+        let matchers = compile_matchers(&config.rules);
+        let synthetic_matchers = compile_matchers(&synthetic_rules);
         let has_file_restrictions = config.rules.iter().any(|rule| {
             matches!(rule.action, RuleAction::Deny | RuleAction::Ask)
                 && matches!(
@@ -56,6 +85,8 @@ impl CompiledPolicy {
         Self {
             config,
             matchers,
+            synthetic_rules,
+            synthetic_matchers,
             has_file_restrictions,
             has_bash_command_restrictions,
         }
@@ -108,54 +139,72 @@ impl CompiledPolicy {
     }
 
     /// Evaluate using deny > ask > allow precedence (order-independent).
+    ///
+    /// Scans the caller-supplied rules and the synthetic gate rules (see
+    /// [`Self::with_synthetic_rules`]). Precedence is applied within each set
+    /// and across the two, so a deny in either set still wins and an ask in
+    /// either set outranks an allow.
     pub fn evaluate(&self, access: &AccessKind) -> Option<Decision> {
-        let mut matched_ask = false;
-        let mut matched_allow = false;
-
-        for (rule, matcher) in self.config.rules.iter().zip(&self.matchers) {
-            if !tool_filter_matches(access, &rule.tool) {
-                continue;
-            }
-            let cr = CompiledRule {
-                rule,
-                matcher: matcher.as_ref(),
-            };
-            if !pattern_matches(access, &cr) {
-                continue;
-            }
-            match rule.action {
-                RuleAction::Deny => {
-                    let tool_label = match &rule.tool {
-                        ToolFilter::Any => "any tool",
-                        ToolFilter::Bash => "bash",
-                        ToolFilter::Edit => "edit",
-                        ToolFilter::Read => "read",
-                        ToolFilter::Grep => "grep",
-                        ToolFilter::Mcp => "mcp",
-                        ToolFilter::WebFetch => "web_fetch",
-                        ToolFilter::WebSearch => "web_search",
-                    };
-                    let reason = match &rule.pattern {
-                        Some(pattern) => format!(
-                            "Denied by permission policy: deny rule on {tool_label} matching \"{pattern}\""
-                        ),
-                        None => format!("Denied by permission policy: deny rule on {tool_label}"),
-                    };
-                    return Some(Decision::Reject(reason));
-                }
-                RuleAction::Ask => matched_ask = true,
-                RuleAction::Allow => matched_allow = true,
-            }
-        }
-
-        if matched_ask {
-            return Some(Decision::Ask);
-        }
-        if matched_allow {
-            return Some(Decision::Allow);
-        }
-        None
+        let direct = evaluate_rules(access, self.config.rules.iter().zip(&self.matchers));
+        let synthetic =
+            evaluate_rules(access, self.synthetic_rules.iter().zip(&self.synthetic_matchers));
+        combine_decisions(direct, synthetic)
     }
+}
+
+/// Deny > ask > allow evaluation over one rule list. Returns `Reject` on the
+/// first deny; otherwise the highest-precedence match (`Ask` over `Allow`), or
+/// `None` when nothing matches.
+fn evaluate_rules<'a, I>(access: &AccessKind, rules: I) -> Option<Decision>
+where
+    I: Iterator<Item = (&'a PermissionRule, &'a Option<glob::Pattern>)>,
+{
+    let mut matched_ask = false;
+    let mut matched_allow = false;
+
+    for (rule, matcher) in rules {
+        if !tool_filter_matches(access, &rule.tool) {
+            continue;
+        }
+        let cr = CompiledRule {
+            rule,
+            matcher: matcher.as_ref(),
+        };
+        if !pattern_matches(access, &cr) {
+            continue;
+        }
+        match rule.action {
+            RuleAction::Deny => {
+                let tool_label = match &rule.tool {
+                    ToolFilter::Any => "any tool",
+                    ToolFilter::Bash => "bash",
+                    ToolFilter::Edit => "edit",
+                    ToolFilter::Read => "read",
+                    ToolFilter::Grep => "grep",
+                    ToolFilter::Mcp => "mcp",
+                    ToolFilter::WebFetch => "web_fetch",
+                    ToolFilter::WebSearch => "web_search",
+                };
+                let reason = match &rule.pattern {
+                    Some(pattern) => format!(
+                        "Denied by permission policy: deny rule on {tool_label} matching \"{pattern}\""
+                    ),
+                    None => format!("Denied by permission policy: deny rule on {tool_label}"),
+                };
+                return Some(Decision::Reject(reason));
+            }
+            RuleAction::Ask => matched_ask = true,
+            RuleAction::Allow => matched_allow = true,
+        }
+    }
+
+    if matched_ask {
+        return Some(Decision::Ask);
+    }
+    if matched_allow {
+        return Some(Decision::Allow);
+    }
+    None
 }
 
 impl From<PermissionConfig> for CompiledPolicy {

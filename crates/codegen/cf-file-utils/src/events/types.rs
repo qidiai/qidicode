@@ -455,6 +455,31 @@ pub enum Event {
         server_name: String,
         enabled: bool,
     },
+
+    // ── Evolution: skill deployment ───────────────────────────────
+    /// A `deploy_skill` tool call — the sanctioned channel that installs a
+    /// staged skill into `<grok_home>/skills/user-<name>/`. One event per
+    /// attempt (success or rejection).
+    ///
+    /// `approval_note` is the caller-supplied declaration of human approval.
+    /// Phase 1 records it as a declarative audit field only: it is NOT a
+    /// cryptographic token, and the enforced gate is the path-level `Ask`
+    /// permission rule (see the `cf-workspace` evolution gate). Signed tokens
+    /// are Phase 2.
+    SkillDeploy {
+        name: String,
+        staging_dir: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target_path: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        backup_path: Option<String>,
+        file_count: usize,
+        forced: bool,
+        success: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+        approval_note: String,
+    },
 }
 
 /// Where a mid-turn interjection originated. Drives the `source` field on
@@ -851,5 +876,52 @@ mod tests {
         assert_eq!(obj["type"], "goal_role_model_fail_open");
         assert_eq!(obj["role"], "strategist");
         assert_eq!(obj["reason"], "model_unauthorized");
+    }
+
+    #[test]
+    fn skill_deploy_serializes_tag_fields_and_omits_absent_options() {
+        let ok = Event::SkillDeploy {
+            name: "demo".into(),
+            staging_dir: "/tmp/stage".into(),
+            target_path: Some("/home/u/.qidi/skills/user-demo".into()),
+            backup_path: None,
+            file_count: 2,
+            forced: false,
+            success: true,
+            error: None,
+            approval_note: "user approved in chat".into(),
+        };
+        let v = serde_json::to_value(&ok).unwrap();
+        assert_eq!(v["type"], "skill_deploy");
+        assert_eq!(v["name"], "demo");
+        assert_eq!(v["staging_dir"], "/tmp/stage");
+        assert_eq!(v["target_path"], "/home/u/.qidi/skills/user-demo");
+        assert_eq!(v["file_count"], 2);
+        assert_eq!(v["forced"], false);
+        assert_eq!(v["success"], true);
+        assert_eq!(v["approval_note"], "user approved in chat");
+        assert!(v.get("backup_path").is_none(), "absent backup omitted");
+        assert!(v.get("error").is_none(), "absent error omitted");
+
+        let rejected = Event::SkillDeploy {
+            name: "demo".into(),
+            staging_dir: "/tmp/stage".into(),
+            target_path: None,
+            backup_path: Some("/home/u/.qidi/evolution/backups/20240101-000000-demo".into()),
+            file_count: 0,
+            forced: true,
+            success: false,
+            error: Some("target exists with different content".into()),
+            approval_note: "n/a".into(),
+        };
+        let v = serde_json::to_value(&rejected).unwrap();
+        assert_eq!(v["type"], "skill_deploy");
+        assert_eq!(v["success"], false);
+        assert_eq!(v["error"], "target exists with different content");
+        assert_eq!(
+            v["backup_path"],
+            "/home/u/.qidi/evolution/backups/20240101-000000-demo"
+        );
+        assert!(v.get("target_path").is_none(), "absent target omitted");
     }
 }

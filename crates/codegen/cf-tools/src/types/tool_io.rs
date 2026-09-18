@@ -38,6 +38,7 @@ use crate::implementations::browser::types::{
     BrowserTypeInput,
 };
 use crate::implementations::think::types::ThinkInput;
+use crate::implementations::skills::deploy::DeploySkillInput;
 use crate::implementations::skills::skill::SkillInput;
 use crate::implementations::use_tool::UseToolInput;
 use serde::{Deserialize, Serialize};
@@ -70,6 +71,7 @@ pub enum ToolInput {
     ListDir(ListDirInput),
     TodoWrite(TodoWriteInput),
     Skill(SkillInput),
+    DeploySkill(DeploySkillInput),
     MCPTool(MCPToolInput),
     TaskOutput(TaskOutputToolInput),
     WaitTasks(WaitTasksToolInput),

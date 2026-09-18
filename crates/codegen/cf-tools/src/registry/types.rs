@@ -54,6 +54,7 @@ const RESERVED_BUILTIN_TOOL_NAMES: &[&str] = &[
     "monitor",
     "lsp",
     "skill",
+    "deploy_skill",
     "use_tool",
     "memory_search",
     "memory_get",
@@ -824,6 +825,7 @@ impl ToolRegistryBuilder {
         // agents, but curated toolsets resolve it from this registry too
         // (sessions reference it as QidiBuild:think). 2026-09-17 fix.
         b.register::<crate::implementations::think::ThinkImpl>();
+        b.register::<crate::implementations::skills::deploy::DeploySkillTool>();
         b.register::<crate::implementations::search_tool::SearchTool>();
         b.register::<crate::implementations::browser::NavigateImpl>();
         b.register::<crate::implementations::browser::SnapshotImpl>();
