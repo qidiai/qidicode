@@ -39,6 +39,7 @@ use crate::implementations::browser::types::{
 };
 use crate::implementations::think::types::ThinkInput;
 use crate::implementations::skills::skill::SkillInput;
+use crate::implementations::think::types::ThinkInput;
 use crate::implementations::use_tool::UseToolInput;
 use serde::{Deserialize, Serialize};
 use cf_tool_types::KillTaskToolInput;
@@ -89,6 +90,7 @@ pub enum ToolInput {
     CodexReadFile(CodexReadFileInput),
     MemorySearch(MemorySearchInput),
     MemoryGet(MemoryGetInput),
+    Think(ThinkInput),
     SearchTool(SearchToolInput),
     Think(ThinkInput),
     BrowserNavigate(BrowserNavigateInput),
