@@ -591,7 +591,11 @@ impl AgentView {
                     if let Some(cmd) = self.prompt.slash_controller.registry().get(&command_clone) {
                         let ctx = self.prompt.slash_controller.app_ctx(&self.session.models);
                         if let Some(effort_items) = cmd.suggest_args(&ctx, &next_query)
-                            && Self::arg_items_look_like_effort_phase(&effort_items)
+                            && (Self::arg_items_look_like_effort_phase(&effort_items)
+                                || crate::slash::commands::model::is_group_phase(
+                                    &self.session.models,
+                                    &next_query,
+                                ))
                         {
                             if let Some(ActiveModal::ArgPicker {
                                 args_query,
@@ -1701,11 +1705,13 @@ impl AgentView {
             } = active_modal
             {
                 // Arg picker: ModalWindow chrome + picker content.
-                let title = match command.as_str() {
-                    "model" | "m" if !args_query.is_empty() => "Pick reasoning effort",
-                    "model" | "m" => "Pick model",
-                    "theme" | "t" => "Pick theme",
-                    _ => "Pick option",
+                let title: String = match command.as_str() {
+                    "model" | "m" => crate::slash::commands::model::picker_phase_title(
+                        &self.session.models,
+                        args_query,
+                    ),
+                    "theme" | "t" => "Pick theme".to_string(),
+                    _ => "Pick option".to_string(),
                 };
                 let picker_entries: Vec<PickerEntry> = items
                     .iter()
@@ -1733,7 +1739,7 @@ impl AgentView {
                 // Surface `i search` in the footer when vim nav mode is active.
                 mw::push_vim_nav_search_hint(&mut picker_shortcuts, state.search_active);
                 let modal_config = ModalWindowConfig {
-                    title,
+                    title: title.as_str(),
                     tabs: None,
                     shortcuts: &picker_shortcuts,
                     sizing: ModalSizing {

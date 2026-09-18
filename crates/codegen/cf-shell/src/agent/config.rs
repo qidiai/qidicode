@@ -3665,6 +3665,10 @@ pub struct ConfigModelOverride {
     /// order, each with its own catalog entry (base_url, credentials,
     /// api_backend). Empty (the default) disables failover.
     pub fallback_models: Vec<String>,
+    /// Optional source-group tag (`group = "..."` in `[model.<id>]`).
+    /// Models sharing a group fold into one picker row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 impl ConfigModelOverride {
     pub(crate) fn apply(
@@ -3688,6 +3692,9 @@ impl ConfigModelOverride {
         }
         if self.description.is_some() {
             entry.info.description.clone_from(&self.description);
+        }
+        if self.group.is_some() {
+            entry.info.group.clone_from(&self.group);
         }
         if self.max_completion_tokens.is_some() {
             entry.info.max_completion_tokens = self.max_completion_tokens;
@@ -3959,12 +3966,18 @@ pub struct ModelInfo {
     /// injecting nudges. See [`LazinessDetectorPerModelConfig`].
     #[serde(default)]
     pub laziness_detector: LazinessDetectorPerModelConfig,
+    /// Optional source-group tag for the `/model` picker. Set via
+    /// `group = "..."` on a `[model.<id>]` config entry; models sharing a
+    /// group collapse into one expandable row (`<group> N models`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 impl ModelInfo {
     /// Minimal fallback descriptor for an unknown model slug.
     /// Used when a configured model ID isn't found in presets or remote models.
     pub fn fallback(slug: &str) -> Self {
         ModelInfo {
+            group: None,
             user_selectable: true,
             id: None,
             model: slug.to_owned(),
@@ -4000,6 +4013,7 @@ impl ModelInfo {
     /// Extract shared model metadata from a flat config entry.
     pub fn from_config(entry: &ModelEntryConfig) -> Self {
         ModelInfo {
+            group: None,
             user_selectable: true,
             id: entry.id.clone(),
             model: entry.model.clone(),
@@ -4686,6 +4700,7 @@ pub fn resolve_aux_model_sampling_config(
     if let Some(bearer) = cf_bearer {
         let entry = ModelEntry {
             info: ModelInfo {
+                group: None,
                 user_selectable: true,
                 id: None,
                 model: catalog_entry
@@ -5021,6 +5036,7 @@ fn resolve_hidden_default_web_search_sampling_config(
 ) -> SamplerConfig {
     let entry = ModelEntry {
         info: ModelInfo {
+            group: None,
             id: None,
             model: model_id.to_owned(),
             base_url: endpoints.resolve_inference_base_url(),
@@ -5153,6 +5169,12 @@ pub fn to_acp_model_info(
                     map.insert(
                         REASONING_EFFORTS_META_KEY.to_string(),
                         reasoning_efforts_meta_value(&info.reasoning_efforts),
+                    );
+                }
+                if let Some(group) = info.group.as_deref() {
+                    map.insert(
+                        "group".to_string(),
+                        serde_json::Value::String(group.to_string()),
                     );
                 }
                 if map.is_empty() { None } else { Some(map) }
@@ -5689,6 +5711,7 @@ reasoning_effort = "low"
     ) -> ModelEntry {
         ModelEntry {
             info: ModelInfo {
+                group: None,
                 user_selectable: true,
                 id: None,
                 model: model.to_string(),
@@ -10891,6 +10914,7 @@ default = "grok-4.5"
     ) -> ModelEntry {
         ModelEntry {
             info: ModelInfo {
+                group: None,
                 user_selectable: true,
                 id: None,
                 model: slug.to_owned(),
