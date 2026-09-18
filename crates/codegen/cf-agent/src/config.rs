@@ -287,6 +287,10 @@ fn default_qidi_build_toolset() -> ToolServerConfig {
             (&search_tool::SearchTool).into(),
             (&use_tool::UseTool).into(),
             (&qidi_build::UpdateGoalTool).into(),
+            // Evolution Phase 1 (B2): the sanctioned channel for installing a
+            // user skill. `Edit`-class writes into `~/.qidi/skills/**` are
+            // gated to `Ask`, so this is the only supported deploy path.
+            (&cf_tools::implementations::skills::deploy::DeploySkillTool).into(),
         ],
         behavior_preset: None,
     }

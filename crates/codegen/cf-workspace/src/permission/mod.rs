@@ -1,5 +1,6 @@
 pub mod auto_mode;
 pub mod claude_settings;
+pub mod evolution;
 mod hub_permission;
 mod manager;
 mod policy;

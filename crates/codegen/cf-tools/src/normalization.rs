@@ -99,6 +99,7 @@ pub fn canonical_input(input: &ToolInput) -> Option<serde_json::Value> {
         ]),
         ToolInput::TodoWrite(_)
         | ToolInput::Skill(_)
+        | ToolInput::DeploySkill(_)
         | ToolInput::MCPTool(_)
         | ToolInput::TaskOutput(_)
         | ToolInput::WaitTasks(_)
