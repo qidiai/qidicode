@@ -20,6 +20,7 @@ pub mod effort;
 pub mod effort_levels;
 pub mod exit;
 pub mod expand;
+pub mod evolution;
 pub mod export;
 pub mod feedback;
 pub mod find;
@@ -100,6 +101,7 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(plugin::PluginsCommand),
         Arc::new(plugin::MarketplaceCommand),
         Arc::new(plugin::SkillsCommand),
+        Arc::new(evolution::EvolutionCommand),
         Arc::new(share::ShareCommand),
         Arc::new(session_info::SessionInfoCommand),
         Arc::new(rename::RenameCommand),
