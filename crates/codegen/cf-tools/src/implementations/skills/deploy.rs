@@ -389,8 +389,13 @@ fn unique_dir(base: PathBuf) -> PathBuf {
         .and_then(|name| name.to_str())
         .unwrap_or("backup")
         .to_string();
+    // evo-1.5 (K3 B1 plan A): collision suffix uses ~, which is OUTSIDE the
+    // skill-name alphabet ([a-z0-9-]), so <ts>-<name>~<n> can never be
+    // mistaken for a sibling skill's bare backup when the rollback command
+    // reads this directory back. The historical -N shape stays ambiguous
+    // for read-back; backups_for() resolves -N tails against known siblings.
     for n in 1..10_000u32 {
-        let candidate = base.with_file_name(format!("{stem}-{n}"));
+        let candidate = base.with_file_name(format!("{stem}~{n}"));
         if !candidate.exists() {
             return candidate;
         }
