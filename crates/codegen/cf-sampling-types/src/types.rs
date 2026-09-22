@@ -608,10 +608,30 @@ pub struct ToolCallDelta {
     #[serde(default)]
     pub index: u32,
     /// Only present in the first chunk for this tool call.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    ///
+    /// `deserialize_with` normalizes empty strings to `None`: StepFun
+    /// (`step_plan/v1`) re-sends `"id": ""`, `"type": ""` and
+    /// `"function": {"name": ""}` on every continuation chunk instead of
+    /// omitting them (OpenAI style). Without normalization those empty
+    /// strings would overwrite the real first-chunk values downstream.
+    /// `default` is REQUIRED alongside `deserialize_with`: serde_derive
+    /// turns a *missing* field into a hard "missing field" error when
+    /// `deserialize_with` is set without `default`, which would break every
+    /// OpenAI-style provider whose continuation chunks omit these fields.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::serde_helpers::empty_string_as_none"
+    )]
     pub id: Option<String>,
     /// Only present in the first chunk (usually "function").
-    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    /// See `id` for why `default` + `deserialize_with` are both required.
+    #[serde(
+        default,
+        rename = "type",
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::serde_helpers::empty_string_as_none"
+    )]
     pub kind: Option<String>,
     /// The function name and/or argument fragment.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -624,7 +644,14 @@ pub struct ToolCallDelta {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ToolCallFunctionDelta {
     /// Only present in the first chunk for this tool call.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// `deserialize_with` normalizes StepFun-style empty-string re-sends
+    /// (`""` → `None`); `default` keeps *missing*-field chunks (OpenAI
+    /// style) deserializing cleanly.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::serde_helpers::empty_string_as_none"
+    )]
     pub name: Option<String>,
     /// Argument fragment (may be empty or partial JSON).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1197,6 +1224,104 @@ impl From<crate::messages::MessagesRequest> for MessagesRequestWrapper {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // ── ToolCallDelta serde: empty-string / missing / null normalization ──
+
+    /// StepFun (step_plan/v1) re-sends `id: ""`, `type: ""` and
+    /// `function.name: ""` on continuation chunks. These must deserialize to
+    /// `None` so the stream accumulator keeps the first chunk's real values
+    /// (otherwise the replayed assistant history is rejected by the provider
+    /// with "tool_calls.id and tool_calls.type are required").
+    #[test]
+    fn tool_call_delta_empty_strings_normalize_to_none() {
+        let delta: ToolCallDelta = serde_json::from_str(
+            r#"{"index":0,"id":"","type":"","function":{"name":"","arguments":"\"city\": "}}"#,
+        )
+        .unwrap();
+        assert_eq!(delta.index, 0);
+        assert_eq!(delta.id, None, "empty id must normalize to None");
+        assert_eq!(delta.kind, None, "empty type must normalize to None");
+        let func = delta.function.expect("function present");
+        assert_eq!(func.name, None, "empty name must normalize to None");
+        assert_eq!(func.arguments.as_deref(), Some("\"city\": "));
+    }
+
+    /// OpenAI-style continuation chunks *omit* id/type/name entirely. The
+    /// `#[serde(default)]` pairing on the `deserialize_with` attributes is
+    /// what keeps these deserializing cleanly: serde_derive hard-errors with
+    /// "missing field" when `deserialize_with` is set without `default`.
+    /// This test is the regression sentinel for that pairing.
+    #[test]
+    fn tool_call_delta_missing_fields_deserialize_cleanly() {
+        let delta: ToolCallDelta =
+            serde_json::from_str(r#"{"index":1,"function":{"arguments":"1}"}}"#).unwrap();
+        assert_eq!(delta.index, 1);
+        assert_eq!(delta.id, None);
+        assert_eq!(delta.kind, None);
+        let func = delta.function.expect("function present");
+        assert_eq!(func.name, None);
+        assert_eq!(func.arguments.as_deref(), Some("1}"));
+    }
+
+    /// Four-quadrant normalization: null → None, missing → None (covered by
+    /// the sibling test), "" → None, non-empty → preserved verbatim.
+    #[test]
+    fn tool_call_delta_id_null_and_value_quadrants() {
+        // null → None
+        let delta: ToolCallDelta =
+            serde_json::from_str(r#"{"index":0,"id":null,"type":null,"function":{"name":null}}"#)
+                .unwrap();
+        assert_eq!(delta.id, None);
+        assert_eq!(delta.kind, None);
+        assert_eq!(delta.function.unwrap().name, None);
+
+        // non-empty values preserved verbatim
+        let delta: ToolCallDelta = serde_json::from_str(
+            r#"{"index":0,"id":"call_abc","type":"function","function":{"name":"do_thing"}}"#,
+        )
+        .unwrap();
+        assert_eq!(delta.id.as_deref(), Some("call_abc"));
+        assert_eq!(delta.kind.as_deref(), Some("function"));
+        assert_eq!(delta.function.unwrap().name.as_deref(), Some("do_thing"));
+    }
+
+    /// Serialization side must remain byte-identical to pre-F1' behavior:
+    /// `None` fields are omitted from the wire format (skip_serializing_if)
+    /// and no new keys appear. Guards against a future attribute edit
+    /// silently emitting `"id": null` / `""` into provider requests — some
+    /// providers 400 on those, which would resurface today's bug from the
+    /// outbound direction with all tests green.
+    #[test]
+    fn tool_call_delta_serialization_omits_none_fields() {
+        // OpenAI-style first chunk round-trips verbatim.
+        let delta: ToolCallDelta = serde_json::from_str(
+            r#"{"index":0,"id":"call_abc","type":"function","function":{"name":"do_thing","arguments":"{}"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&delta).unwrap(),
+            json!({
+                "index": 0,
+                "id": "call_abc",
+                "type": "function",
+                "function": {"name": "do_thing", "arguments": "{}"}
+            })
+        );
+
+        // StepFun-style empty strings normalize to None on deserialize;
+        // the serialize half must then drop the keys entirely.
+        let delta: ToolCallDelta = serde_json::from_str(
+            r#"{"index":2,"id":"","type":"","function":{"name":"","arguments":"\"x\": "}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&delta).unwrap(),
+            json!({
+                "index": 2,
+                "function": {"arguments": "\"x\": "}
+            })
+        );
+    }
 
     #[test]
     fn reasoning_effort_serde_lowercase_round_trip() {

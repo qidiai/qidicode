@@ -205,14 +205,56 @@ pub fn stream_chat_completions<'a>(
                     let mut name_for_event: Option<String> = None;
                     let mut args_for_event: Option<String> = None;
 
+                    // First-non-empty-wins accumulation.
+                    //
+                    // StepFun (step_plan/v1) re-sends `id: ""`, `type: ""` and
+                    // `function.name: ""` on every continuation chunk instead
+                    // of omitting them like OpenAI-style providers. A naive
+                    // last-write-wins overwrite would clobber the real id/name
+                    // captured from the first chunk with empty strings, and
+                    // the replayed assistant history would then be rejected
+                    // by the provider with
+                    // "tool_calls.id and tool_calls.type are required" (400).
+                    //
+                    // Empty incoming values are treated as absent: the
+                    // accumulator keeps its first value and the emitted event
+                    // normalizes them to `None` (matching the OpenAI-style
+                    // convention the merge layer downstream expects).
                     if let Some(id) = tc_delta.id {
-                        entry.0 = id.clone();
-                        id_for_event = Some(id);
+                        if id.is_empty() {
+                            // Treated as absent; event stays `None`.
+                        } else if entry.0.is_empty() || entry.0 == id {
+                            entry.0 = id.clone();
+                            id_for_event = Some(id);
+                        } else {
+                            // Non-empty conflicting id: keep the first value
+                            // in the accumulator, but forward the raw value
+                            // so downstream merge layers can react.
+                            tracing::warn!(
+                                tool_index = tc_delta.index,
+                                accumulated = %entry.0,
+                                incoming = %id,
+                                "Conflicting non-empty tool_call id in stream; keeping first value"
+                            );
+                            id_for_event = Some(id);
+                        }
                     }
                     if let Some(func) = tc_delta.function {
                         if let Some(name) = func.name {
-                            entry.1 = name.clone();
-                            name_for_event = Some(name);
+                            if name.is_empty() {
+                                // Treated as absent; event stays `None`.
+                            } else if entry.1.is_empty() || entry.1 == name {
+                                entry.1 = name.clone();
+                                name_for_event = Some(name);
+                            } else {
+                                tracing::warn!(
+                                    tool_index = tc_delta.index,
+                                    accumulated = %entry.1,
+                                    incoming = %name,
+                                    "Conflicting non-empty tool_call name in stream; keeping first value"
+                                );
+                                name_for_event = Some(name);
+                            }
                         }
                         if let Some(args) = func.arguments {
                             entry.2.push_str(&args);
@@ -575,6 +617,350 @@ mod tests {
                 assert_eq!(calls[0].arguments.as_ref(), "{\"x\":1}");
                 // Tool calls force ToolCalls stop reason.
                 assert_eq!(response.stop_reason, Some(StopReason::ToolCalls));
+            }
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    // ── Tool call accumulation: empty-string / conflict hardening ──
+
+    /// Build a tool-call delta chunk in one line. `id`/`kind`/`name` accept
+    /// `Some("")` to reproduce StepFun's empty-string continuation chunks.
+    fn tool_delta(
+        index: u32,
+        id: Option<&str>,
+        kind: Option<&str>,
+        name: Option<&str>,
+        arguments: Option<&str>,
+    ) -> ChunkToolCallDelta {
+        ChunkToolCallDelta {
+            index,
+            id: id.map(str::to_owned),
+            kind: kind.map(str::to_owned),
+            function: Some(ToolCallFunctionDelta {
+                name: name.map(str::to_owned),
+                arguments: arguments.map(str::to_owned),
+            }),
+        }
+    }
+
+    fn tool_chunk(deltas: Vec<ChunkToolCallDelta>) -> ChatCompletionChunk {
+        make_chunk(vec![ChatChunkDelta {
+            role: None,
+            content: None,
+            reasoning_content: None,
+            tool_calls: deltas,
+            tool_call_id: None,
+        }])
+    }
+
+    fn tool_call_deltas(events: &[SamplingEvent]) -> Vec<(Option<String>, Option<String>, Option<String>)> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                SamplingEvent::ToolCallDelta {
+                    id,
+                    name,
+                    arguments_delta,
+                    ..
+                } => Some((id.clone(), name.clone(), arguments_delta.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// StepFun wire capture: the first tool_call chunk carries the real
+    /// id/type/name, continuation chunks re-send them as EMPTY STRINGS
+    /// instead of omitting them like OpenAI. The accumulator must keep the
+    /// first chunk's values and the emitted events must normalize the empty
+    /// re-sends to `None`.
+    #[tokio::test]
+    async fn stepfun_empty_string_continuation_chunks_preserve_id_and_name() {
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(tool_chunk(vec![tool_delta(
+                0,
+                Some("chatcmpl-tool-a1c6"),
+                Some("function"),
+                Some("get_weather"),
+                Some("{"),
+            )])),
+            Ok(tool_chunk(vec![tool_delta(
+                0,
+                Some(""),
+                Some(""),
+                Some(""),
+                Some("\"city\": "),
+            )])),
+            Ok(tool_chunk(vec![tool_delta(
+                0,
+                Some(""),
+                Some(""),
+                Some(""),
+                Some("\"Beijing\"}"),
+            )])),
+            Ok(final_chunk(FinishReason::ToolCalls)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+
+        let deltas = tool_call_deltas(&events);
+        assert_eq!(deltas.len(), 3);
+        assert_eq!(deltas[0].0.as_deref(), Some("chatcmpl-tool-a1c6"));
+        assert_eq!(deltas[0].1.as_deref(), Some("get_weather"));
+        assert_eq!(deltas[1].0, None, "empty continuation id must not leak into events");
+        assert_eq!(deltas[1].1, None, "empty continuation name must not leak into events");
+        assert_eq!(deltas[1].2.as_deref(), Some("\"city\": "));
+        assert_eq!(deltas[2].0, None);
+        assert_eq!(deltas[2].1, None);
+
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                let calls = response.tool_calls();
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].id.as_ref(), "chatcmpl-tool-a1c6");
+                assert_eq!(calls[0].name, "get_weather");
+                assert_eq!(calls[0].arguments.as_ref(), "{\"city\": \"Beijing\"}");
+                assert_eq!(response.stop_reason, Some(StopReason::ToolCalls));
+            }
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    /// Parallel tool calls (index 0/1) streamed StepFun-style: two
+    /// independent accumulators, empty-string continuations must not clobber
+    /// either call's id/name, and arguments must not cross contaminate.
+    #[tokio::test]
+    async fn stepfun_parallel_tool_calls_keep_distinct_ids_and_names() {
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(tool_chunk(vec![
+                tool_delta(0, Some("call_a"), Some("function"), Some("get_weather"), Some("{")),
+                tool_delta(1, Some("call_b"), Some("function"), Some("get_time"), Some("{")),
+            ])),
+            Ok(tool_chunk(vec![
+                tool_delta(0, Some(""), Some(""), Some(""), Some("\"city\": \"Hangzhou\"}")),
+                tool_delta(1, Some(""), Some(""), Some(""), Some("\"tz\": \"CST\"}")),
+            ])),
+            Ok(final_chunk(FinishReason::ToolCalls)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                let calls = response.tool_calls();
+                assert_eq!(calls.len(), 2);
+                assert_eq!(calls[0].id.as_ref(), "call_a");
+                assert_eq!(calls[0].name, "get_weather");
+                assert_eq!(calls[0].arguments.as_ref(), "{\"city\": \"Hangzhou\"}");
+                assert_eq!(calls[1].id.as_ref(), "call_b");
+                assert_eq!(calls[1].name, "get_time");
+                assert_eq!(calls[1].arguments.as_ref(), "{\"tz\": \"CST\"}");
+            }
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    /// Multiple tool_call deltas inside a single chunk accumulate into
+    /// independent per-index entries.
+    #[tokio::test]
+    async fn multiple_tool_call_deltas_in_one_chunk_accumulate_independently() {
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(tool_chunk(vec![
+                tool_delta(0, Some("call_a"), Some("function"), Some("tool_a"), Some("{\"i\":")),
+                tool_delta(1, Some("call_b"), Some("function"), Some("tool_b"), Some("{\"j\":")),
+            ])),
+            Ok(tool_chunk(vec![
+                tool_delta(0, None, None, None, Some("0}")),
+                tool_delta(1, None, None, None, Some("1}")),
+            ])),
+            Ok(final_chunk(FinishReason::ToolCalls)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                let calls = response.tool_calls();
+                assert_eq!(calls.len(), 2);
+                assert_eq!(calls[0].id.as_ref(), "call_a");
+                assert_eq!(calls[0].name, "tool_a");
+                assert_eq!(calls[0].arguments.as_ref(), "{\"i\":0}");
+                assert_eq!(calls[1].id.as_ref(), "call_b");
+                assert_eq!(calls[1].name, "tool_b");
+                assert_eq!(calls[1].arguments.as_ref(), "{\"j\":1}");
+            }
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    /// A tool name that only arrives in a (non-empty) continuation chunk
+    /// must still land in the accumulator — first-non-empty-wins, not
+    /// first-chunk-only.
+    #[tokio::test]
+    async fn late_tool_name_in_continuation_chunk_is_kept() {
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(tool_chunk(vec![tool_delta(
+                0,
+                Some("call_x"),
+                Some("function"),
+                None,
+                Some("{"),
+            )])),
+            Ok(tool_chunk(vec![tool_delta(
+                0,
+                None,
+                None,
+                Some("do_thing"),
+                Some("}"),
+            )])),
+            Ok(final_chunk(FinishReason::ToolCalls)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+
+        let deltas = tool_call_deltas(&events);
+        assert_eq!(deltas.len(), 2);
+        assert_eq!(deltas[0].1, None, "first chunk had no name");
+        assert_eq!(deltas[1].1.as_deref(), Some("do_thing"));
+
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                let calls = response.tool_calls();
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].id.as_ref(), "call_x");
+                assert_eq!(calls[0].name, "do_thing");
+                assert_eq!(calls[0].arguments.as_ref(), "{}");
+            }
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    /// A second *non-empty* conflicting id must not panic and must not
+    /// replace the first value in the accumulator; the raw value is still
+    /// forwarded in the event so downstream merge layers can react.
+    #[tokio::test]
+    async fn conflicting_non_empty_tool_id_keeps_first_value() {
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(tool_chunk(vec![tool_delta(
+                0,
+                Some("call_first"),
+                Some("function"),
+                Some("do_thing"),
+                Some("{"),
+            )])),
+            Ok(tool_chunk(vec![tool_delta(
+                0,
+                Some("call_second"),
+                Some("function"),
+                None,
+                Some("}"),
+            )])),
+            Ok(final_chunk(FinishReason::ToolCalls)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+
+        let deltas = tool_call_deltas(&events);
+        assert_eq!(deltas.len(), 2);
+        assert_eq!(deltas[1].0.as_deref(), Some("call_second"), "raw conflicting id forwarded in event");
+
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                let calls = response.tool_calls();
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].id.as_ref(), "call_first");
+                assert_eq!(calls[0].name, "do_thing");
+                assert_eq!(calls[0].arguments.as_ref(), "{}");
+            }
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    /// `arguments: Some("")` is a legitimate EMPTY FRAGMENT, not an absence
+    /// — unlike id/name, arguments deliberately gets no empty-string
+    /// normalization (F1' scope decision). The empty fragment must be
+    /// forwarded in events, pushed into the accumulator, and must not
+    /// clobber real fragments arriving later. Guards against a future edit
+    /// "helpfully" applying empty_string_as_none to arguments, which would
+    /// silently drop argument fragments.
+    #[tokio::test]
+    async fn empty_arguments_fragment_is_preserved_not_dropped() {
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(tool_chunk(vec![tool_delta(
+                0,
+                Some("call_a"),
+                Some("function"),
+                Some("do_thing"),
+                Some(""),
+            )])),
+            Ok(tool_chunk(vec![tool_delta(
+                0,
+                Some(""),
+                Some(""),
+                Some(""),
+                Some("{\"x\":1}"),
+            )])),
+            Ok(final_chunk(FinishReason::ToolCalls)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+
+        let deltas = tool_call_deltas(&events);
+        assert_eq!(deltas.len(), 2);
+        assert_eq!(
+            deltas[0].2.as_deref(),
+            Some(""),
+            "empty arguments fragment must be forwarded, not normalized away"
+        );
+        assert_eq!(deltas[1].2.as_deref(), Some("{\"x\":1}"));
+
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                let calls = response.tool_calls();
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].id.as_ref(), "call_a");
+                assert_eq!(calls[0].name, "do_thing");
+                assert_eq!(
+                    calls[0].arguments.as_ref(),
+                    "{\"x\":1}",
+                    "leading empty fragment must not clobber real fragments"
+                );
             }
             other => panic!("expected Completed, got {other:?}"),
         }
