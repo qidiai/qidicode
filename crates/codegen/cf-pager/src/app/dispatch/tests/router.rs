@@ -666,6 +666,41 @@ fn switch_model_dispatch_produces_effect_and_sets_pending() {
     assert!(app.agents[&id].session.state.is_idle());
 }
 #[test]
+fn switch_model_and_persist_effort_emits_persist_then_switch() {
+    // `/effort <level> --save`: one action → PersistSetting (future-session
+    // default) + SwitchModel (live session), in that order.
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    let model_id = acp::ModelId::new(std::sync::Arc::from("grok-4.5"));
+    let effects = dispatch(
+        Action::SwitchModelAndPersistEffort {
+            model_id: model_id.clone(),
+            effort: cf_shell::sampling::types::ReasoningEffort::High,
+        },
+        &mut app,
+    );
+    assert_eq!(effects.len(), 2, "got {effects:?}");
+    match &effects[0] {
+        Effect::PersistSetting { key, value, .. } => {
+            assert_eq!(*key, "default_reasoning_effort");
+            assert_eq!(
+                value,
+                &crate::settings::SettingValue::Enum("high"),
+                "must persist the canonical effort string under [models].default_reasoning_effort",
+            );
+        }
+        other => panic!("expected PersistSetting first, got {other:?}"),
+    }
+    assert!(
+        matches!(& effects[1], Effect::SwitchModel { model_id : mid, effort :
+        Some(cf_shell::sampling::types::ReasoningEffort::High), .. } if mid == &
+        model_id),
+        "second effect must be SwitchModel(<model>, Some(High)), got {:?}",
+        effects[1],
+    );
+    assert!(app.agents[&id].session.model_switch_pending);
+}
+#[test]
 fn switch_model_allowed_when_agent_chat_kind() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);

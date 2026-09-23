@@ -23,14 +23,14 @@ use cf_config::xai_grok_config_types::MmrConfig;
 /// calling this. Uses the same splitting strategy as `query_expansion`
 /// (split on non-alphanumeric except underscore) for consistency, but without
 /// stop word removal — we want full token overlap for similarity measurement.
-fn tokenize(text: &str) -> HashSet<&str> {
+pub(crate) fn tokenize(text: &str) -> HashSet<&str> {
     text.split(|c: char| !c.is_alphanumeric() && c != '_')
         .filter(|w| !w.is_empty())
         .collect()
 }
 
 /// Jaccard similarity: |A ∩ B| / |A ∪ B|.
-fn jaccard_similarity(a: &HashSet<&str>, b: &HashSet<&str>) -> f64 {
+pub(crate) fn jaccard_similarity(a: &HashSet<&str>, b: &HashSet<&str>) -> f64 {
     if a.is_empty() && b.is_empty() {
         return 1.0;
     }

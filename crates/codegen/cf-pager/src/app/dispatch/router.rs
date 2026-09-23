@@ -815,6 +815,37 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
                 prev_model_id: None,
             }]
         }
+        Action::SwitchModelAndPersistEffort { model_id, effort } => {
+            // `/effort <level> --save`: persist the canonical effort for
+            // future sessions first (mirrors `set_default_model`'s
+            // PersistSetting-first ordering so a failed write rolls back
+            // before the switch), then switch the live session exactly like
+            // `Action::SwitchModel`.
+            let mut effects = vec![Effect::PersistSetting {
+                key: "default_reasoning_effort",
+                value: crate::settings::SettingValue::Enum(effort.as_str()),
+                rollback_value: crate::settings::SettingValue::Enum(effort.as_str()),
+            }];
+            let ActiveView::Agent(id) = app.active_view else {
+                return effects;
+            };
+            let Some(agent) = app.agents.get_mut(&id) else {
+                return effects;
+            };
+            let Some(session_id) = agent.session.session_id.clone() else {
+                agent.session.deferred_model_switch = Some((model_id, Some(effort)));
+                return effects;
+            };
+            agent.session.model_switch_pending = true;
+            effects.push(Effect::SwitchModel {
+                agent_id: id,
+                session_id,
+                model_id,
+                effort: Some(effort),
+                prev_model_id: None,
+            });
+            effects
+        }
         Action::AnnouncementsHide => {
             let shown_key = crate::views::announcements::first_session_announcement(
                 &app.active_announcements,

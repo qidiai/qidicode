@@ -277,8 +277,32 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
     app: &mut AppView,
     model_id: Option<acp::ModelId>,
 ) -> (AgentId, Vec<Effect>) {
-    let mut effects =
-        unregister_session_effect(get_active_agent(app).and_then(|a| a.session.session_id.clone()));
+    // `/new` switches away without ever firing `on_session_end`, so the
+    // outgoing session's memory would otherwise never be persisted (the
+    // "flush black hole"). Best-effort: capture the outgoing agent + session
+    // BEFORE we unregister/switch away and fire a `/flush` at it. `/flush` is
+    // a shell-side ACP builtin (the pager just passes the text through), and
+    // `Effect::SendPrompt` carries an explicit `agent_id` + `session_id`, so
+    // this targets the OLD session — never the one we're about to create.
+    // Fire-and-forget: the effect layer only spawns a task and logs failures;
+    // an unknown/absent session is a silent no-op (`handle_prompt_response`
+    // uses `if let Some(agent) = app.agents.get_mut(&agent_id)`).
+    let outgoing_session = get_active_agent(app)
+        .and_then(|a| a.session.session_id.clone().map(|sid| (a.session.id, sid)));
+    let flushing_previous = outgoing_session.is_some();
+    let mut effects = Vec::new();
+    if let Some((old_agent_id, old_session_id)) = outgoing_session {
+        effects.push(Effect::SendPrompt {
+            agent_id: old_agent_id,
+            session_id: old_session_id,
+            text: "/flush".to_string(),
+            prompt_id: uuid::Uuid::new_v4().to_string(),
+            skill_token_ranges: Vec::new(),
+        });
+    }
+    effects.extend(unregister_session_effect(
+        get_active_agent(app).and_then(|a| a.session.session_id.clone()),
+    ));
     let (effective_cwd, inherit_worktree) = get_active_agent(app)
         .map(|a| (a.session.cwd.clone(), a.session.is_worktree))
         .unwrap_or_else(|| (app.cwd.clone(), false));
@@ -352,6 +376,11 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
         agent.active_pane = ActivePane::Prompt;
     }
     switch_to_agent(app, agent_id, SwitchCause::New);
+    if flushing_previous {
+        // Routed to the freshly-activated (new) agent so the user actually
+        // sees it — the old agent is no longer the active view.
+        app.show_toast("Flushing memory for previous session\u{2026}");
+    }
     if app.screen_mode.is_minimal() {
         app.minimal_state.welcome_pending = true;
     }

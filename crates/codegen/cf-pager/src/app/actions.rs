@@ -385,6 +385,14 @@ pub enum Action {
         model_id: acp::ModelId,
         effort: Option<ReasoningEffort>,
     },
+    /// Switch the active model's reasoning effort AND persist it as
+    /// `[models].default_reasoning_effort` for future sessions. Produced by
+    /// `/effort <level> --save`; the dispatcher emits `Effect::SwitchModel`
+    /// plus `Effect::PersistSetting` (see `dispatch::router`).
+    SwitchModelAndPersistEffort {
+        model_id: acp::ModelId,
+        effort: ReasoningEffort,
+    },
     /// Cancel the currently running turn.
     CancelTurn,
     /// User confirmed a cancel-turn choice from the panel.

@@ -60,6 +60,17 @@ pub async fn set_theme(value: String) -> Result<()> {
     update_config(|cfg| cfg.ui.theme = Some(value)).await
 }
 
+/// Persist `[models].default_reasoning_effort` via `update_config`.
+///
+/// Caller must pass a canonical `ReasoningEffort` already validated
+/// against the active model's effort menu (the `/effort <level> --save`
+/// path resolves through `resolve_effort_for_model` first, so unsupported
+/// levels never reach here). Writes only the effort field — it never
+/// touches `[models].default`, unlike [`set_default_model`].
+pub async fn set_default_reasoning_effort(value: cf_sampling_types::ReasoningEffort) -> Result<()> {
+    update_config(|cfg| cfg.models.default_reasoning_effort = Some(value)).await
+}
+
 /// Persist `[ui].auto_dark_theme` via `update_config`. `UiConfig::auto_dark_theme`
 /// is `Option<String>` (canonical theme name; `auto` is rejected by the
 /// pager's `load_auto_theme_config` filter at read time to prevent
