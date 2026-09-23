@@ -123,7 +123,7 @@ impl SessionActor {
     ///
     /// Called at session end after the session summary is written.
     /// Uses the same sampling client infrastructure as flush but sends
-    /// the dream prompt instead. The model call has a 60s timeout.
+    /// the dream prompt instead. The model call has a 180s timeout.
     pub(super) async fn maybe_run_dream(&self) {
         if self.startup_hints.is_subagent {
             tracing::debug!(
@@ -235,7 +235,7 @@ impl SessionActor {
             };
 
         let model_response = match tokio::time::timeout(
-            std::time::Duration::from_secs(30 * 60),
+            std::time::Duration::from_secs(180),
             self.run_dream_model_call(&dream_msg.content),
         )
         .await

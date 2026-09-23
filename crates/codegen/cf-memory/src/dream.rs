@@ -95,7 +95,7 @@ You may also receive an existing memory document \u{2014} merge it with new sess
 rather than discarding prior knowledge. Your job:
 
 1. **Merge** related information into coherent topic summaries
-2. **Resolve** contradictions \u{2014} if a recent session disproves an older fact, keep only the current truth
+2. **Resolve** contradictions \u{2014} if a recent session disproves an older fact, KEEP the old fact but annotate it inline with a superseded marker such as `<!-- superseded: <YYYY-MM-DD> <brief reason> -->`; never silently drop it.
 3. **Convert** relative dates (\"yesterday\", \"last week\") to absolute dates
 4. **Discard** ephemeral details:
    - Greetings, meta-commentary, tool output noise

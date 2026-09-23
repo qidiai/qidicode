@@ -2331,7 +2331,8 @@ pub struct MemoryInitialInjectionConfig {
     pub enabled: bool,
     /// Optional score threshold override for first-turn injection.
     /// When `None`, the first-turn search uses the historical default of `0.0`
-    /// (no threshold filtering).
+    /// (no threshold filtering). The default value is `Some(0.35)`, aligning
+    /// first-turn injection with the `memory_search` tool path.
     pub min_score: Option<f32>,
 }
 
@@ -2339,7 +2340,7 @@ impl Default for MemoryInitialInjectionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            min_score: None,
+            min_score: Some(0.35),
         }
     }
 }

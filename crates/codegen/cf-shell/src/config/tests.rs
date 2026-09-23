@@ -324,7 +324,7 @@ fn memory_config_defaults_are_correct() {
         assert!((mem.search.source_weights["session"] - 1.0).abs() < f32::EPSILON);
         assert!((mem.search.source_weights["global"] - 1.0).abs() < f32::EPSILON);
         assert!(mem.initial_injection.enabled);
-        assert_eq!(mem.initial_injection.min_score, None);
+        assert_eq!(mem.initial_injection.min_score, Some(0.35));
         assert!(mem.session.save_on_end);
         assert!(mem.flush.enabled);
         assert_eq!(mem.flush.soft_threshold_tokens, 4000);
