@@ -755,6 +755,57 @@ fn slash_new_dispatches_new_session() {
             .any(|e| matches!(e, Effect::CreateSession { .. }))
     );
 }
+/// `/new` never fires `on_session_end`, so it must best-effort flush the
+/// OUTGOING session's memory before switching away. The flush must be a
+/// `/flush` text prompt directed at the OLD `agent_id` + `session_id` (never
+/// the placeholder we're about to create).
+#[test]
+fn new_session_flushes_previous_session_targeting_old_session() {
+    let mut app = test_app_with_agent();
+    let old_id = AgentId(0);
+    let old_sid = app.agents[&old_id]
+        .session
+        .session_id
+        .clone()
+        .expect("precondition: outgoing session is bound");
+    let effects = dispatch(Action::NewSession, &mut app);
+    let flush = effects
+        .iter()
+        .find(|e| matches!(e, Effect::SendPrompt { text, .. } if text == "/flush"))
+        .unwrap_or_else(|| panic!("expected a /flush effect, got: {effects:?}"));
+    match flush {
+        Effect::SendPrompt {
+            agent_id,
+            session_id,
+            ..
+        } => {
+            assert_eq!(*agent_id, old_id, "flush must target the OLD agent");
+            assert_eq!(
+                *session_id, old_sid,
+                "flush must target the OLD session id, not the new placeholder"
+            );
+        }
+        other => panic!("expected SendPrompt, got {other:?}"),
+    }
+    assert!(
+        matches!(app.active_view, ActiveView::Agent(id) if id != old_id),
+        "the new placeholder must be the active view after /new"
+    );
+}
+/// From the welcome screen there is no outgoing session, so `/new` must skip
+/// the flush safely (no panic, no `/flush` effect).
+#[test]
+fn new_session_on_welcome_skips_flush() {
+    let mut app = test_app();
+    assert!(matches!(app.active_view, ActiveView::Welcome));
+    let effects = dispatch(Action::NewSession, &mut app);
+    assert!(
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::SendPrompt { text, .. } if text == "/flush")),
+        "welcome-screen /new must not emit a /flush, got: {effects:?}"
+    );
+}
 #[test]
 fn new_session_falls_back_to_app_cwd_on_welcome_screen() {
     let mut app = test_app();

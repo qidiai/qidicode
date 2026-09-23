@@ -36,6 +36,8 @@ pub enum MemoryCommand {
     },
     /// Show current memory scope mode
     Status,
+    /// Diagnose memory index health (read-only)
+    Doctor,
 }
 
 /// Memory scope mode controlling isolation level
@@ -108,6 +110,13 @@ pub fn run(args: MemoryArgs) -> Result<()> {
             println!("  /memory scope isolated  # Full isolation");
             println!("  /memory scope project   # Share within project");
             println!("  /memory scope shared    # Global knowledge pool");
+            Ok(())
+        }
+        MemoryCommand::Doctor => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+            let storage = MemoryStorage::new(&cwd, None);
+            let report = cf_shell::session::memory::doctor::diagnose(&storage);
+            print!("{}", report.render());
             Ok(())
         }
     }

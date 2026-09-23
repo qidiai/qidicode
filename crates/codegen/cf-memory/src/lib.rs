@@ -24,6 +24,7 @@
 pub mod archive;
 pub mod backend;
 pub mod chunker;
+pub mod doctor;
 pub mod dream;
 pub mod dream_lock;
 pub mod embedding;

@@ -1109,6 +1109,12 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
             };
             set_fork_secondary_model_inner(app, restored);
         }
+        // default_reasoning_effort is SHELL-owned with no pager-side in-memory
+        // mirror (the shell applies it at session build). The live session's
+        // effort was already switched by the companion `SwitchModel` effect,
+        // so a failed persist has nothing to roll back here — the failure
+        // toast still surfaces via `SettingPersistFailed`.
+        ("default_reasoning_effort", SettingValue::Enum(_)) => {}
 
         _ => {
             tracing::error!(

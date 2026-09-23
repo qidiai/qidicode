@@ -26,7 +26,7 @@ impl SlashCommand for EffortCommand {
     fn usage(&self) -> &str {
         // Levels are model-specific; empty-args and UnknownToken errors list
         // the active model's offered option ids instead of a hardcoded set.
-        "/effort <level>"
+        "/effort <level> [--save]"
     }
 
     fn takes_args(&self) -> bool {
@@ -60,7 +60,15 @@ impl SlashCommand for EffortCommand {
             return CommandResult::Error("No active model".into());
         };
 
-        if trimmed.is_empty() {
+        // `/effort <level> --save`: strip the trailing flag; the level is
+        // everything before it. Without the flag, behavior is unchanged
+        // (the whole trimmed args is the level token).
+        let (level, save) = match trimmed.strip_suffix("--save") {
+            Some(prefix) => (prefix.trim_end(), true),
+            None => (trimmed, false),
+        };
+
+        if level.is_empty() {
             let offered: Vec<String> = ctx
                 .models
                 .reasoning_effort_options_for(&model_id)
@@ -81,11 +89,22 @@ impl SlashCommand for EffortCommand {
         }
 
         // Same gate-first policy as the CLI (`--effort`) and headless.
-        match ctx.models.resolve_effort_for_model(&model_id, trimmed) {
-            Ok(effort) => CommandResult::Action(Action::SwitchModel {
-                model_id,
-                effort: Some(effort),
-            }),
+        match ctx.models.resolve_effort_for_model(&model_id, level) {
+            Ok(effort) => {
+                if save {
+                    // Switch the session AND persist the canonical effort
+                    // for future sessions.
+                    CommandResult::Action(Action::SwitchModelAndPersistEffort {
+                        model_id,
+                        effort,
+                    })
+                } else {
+                    CommandResult::Action(Action::SwitchModel {
+                        model_id,
+                        effort: Some(effort),
+                    })
+                }
+            }
             Err(err) => CommandResult::Error(err.message()),
         }
     }
@@ -362,5 +381,83 @@ mod tests {
         assert_eq!(items[3].insert_text, "low");
         assert!(items[0].match_text.starts_with("a "));
         assert!(items[3].match_text.starts_with("d "));
+    }
+
+    #[test]
+    fn save_flag_dispatches_switch_and_persist() {
+        let mut state = ModelState::default();
+        let (id, info) = model_with_reasoning("reasoning-x", "Reasoning X");
+        state.available.insert(id.clone(), info);
+        state.current = Some(id.clone());
+        let mut ctx = dummy_exec_ctx(&state);
+        match EffortCommand.run(&mut ctx, "high --save") {
+            CommandResult::Action(Action::SwitchModelAndPersistEffort { model_id, effort }) => {
+                assert_eq!(model_id, id);
+                assert_eq!(effort, ReasoningEffort::High);
+            }
+            other => panic!("expected SwitchModelAndPersistEffort, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn save_flag_remaps_alias_max_to_xhigh() {
+        // "max" is the CLI/UX alias of xhigh; the persisted effort must be
+        // the canonical value, not the alias the user typed.
+        let mut state = ModelState::default();
+        let (id, info) = model_with_reasoning("reasoning-x", "Reasoning X");
+        state.available.insert(id.clone(), info);
+        state.current = Some(id.clone());
+        let mut ctx = dummy_exec_ctx(&state);
+        match EffortCommand.run(&mut ctx, "max --save") {
+            CommandResult::Action(Action::SwitchModelAndPersistEffort { model_id, effort }) => {
+                assert_eq!(model_id, id);
+                assert_eq!(effort, ReasoningEffort::Xhigh);
+            }
+            other => panic!("expected SwitchModelAndPersistEffort, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn save_flag_without_level_errors_with_usage() {
+        let mut state = ModelState::default();
+        let (id, info) = model_with_reasoning("reasoning-x", "Reasoning X");
+        state.available.insert(id.clone(), info);
+        state.current = Some(id);
+        let mut ctx = dummy_exec_ctx(&state);
+        match EffortCommand.run(&mut ctx, "--save") {
+            CommandResult::Error(msg) => assert!(msg.contains("Usage: /effort"), "msg={msg}"),
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn save_flag_with_unknown_level_errors_and_does_not_dispatch() {
+        let mut state = ModelState::default();
+        let (id, info) = model_with_reasoning("reasoning-x", "Reasoning X");
+        state.available.insert(id.clone(), info);
+        state.current = Some(id);
+        let mut ctx = dummy_exec_ctx(&state);
+        match EffortCommand.run(&mut ctx, "turbo --save") {
+            CommandResult::Error(msg) => {
+                assert!(msg.contains("unknown effort level 'turbo'"), "msg={msg}");
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn save_flag_with_unsupported_model_errors() {
+        // The unsupported-model gate must fire before any persist is
+        // dispatched (no Action, just the existing error message).
+        let mut state = ModelState::default();
+        let (id, info) = plain_model("grok-4.5", "Grok 4.5");
+        state.available.insert(id.clone(), info);
+        state.current = Some(id);
+        let mut ctx = dummy_exec_ctx(&state);
+        let result = EffortCommand.run(&mut ctx, "high --save");
+        assert!(matches!(
+            result,
+            CommandResult::Error(msg) if msg.contains("does not support reasoning effort")
+        ));
     }
 }

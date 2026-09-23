@@ -863,6 +863,20 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
+        "default_reasoning_effort" => {
+            let SettingValue::Enum(s) = value else {
+                return Err(kind_mismatch("default_reasoning_effort", "Enum", &value));
+            };
+            // The canonical string (e.g. "high") round-trips through the
+            // same `FromStr` the CLI/`/effort` gate uses; an unparseable
+            // value is a caller bug, surfaced (not silently dropped).
+            let effort = s
+                .parse::<cf_shell::sampling::types::ReasoningEffort>()
+                .map_err(|e| format!("persist_setting(default_reasoning_effort): {e}"))?;
+            cf_shell::util::config::set_default_reasoning_effort(effort)
+                .await
+                .map_err(|e| e.to_string())
+        }
         "scroll_speed" => {
             let SettingValue::Int(i) = value else {
                 return Err(kind_mismatch("scroll_speed", "Int", &value));
