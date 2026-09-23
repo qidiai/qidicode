@@ -2078,7 +2078,7 @@ Key options under `[memory]` in `~/.qidi/config.toml`:
 | `search.max_results` | `6` | Default number of memory results to return |
 | `search.min_score` | `0.35` | Minimum relevance score threshold for explicit memory search and recovery paths |
 | `initial_injection.enabled` | `true` | Enable automatic first-turn memory injection |
-| `initial_injection.min_score` | `0.0` | Override score threshold for first-turn injection (`0.0` preserves historical no-filter behavior) |
+| `initial_injection.min_score` | `0.35` | Score threshold for first-turn injection; aligned with `search.min_score` |
 | `embedding.model` | *(unset)* | Embedding model for vector search; unset disables embeddings |
 | `embedding.dimensions` | `1024` | Embedding vector dimensions |
 

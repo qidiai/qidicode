@@ -782,7 +782,7 @@ pub(crate) async fn spawn_session_actor(
                 temporal_decay_enabled: mc.is_none_or(|c| c.search.temporal_decay.enabled),
                 mmr_enabled: mc.is_some_and(|c| c.search.mmr.enabled),
                 mmr_lambda: mc.map_or(0.7, |c| c.search.mmr.lambda),
-                half_life_days: mc.map_or(30.0, |c| c.search.temporal_decay.half_life_days),
+                half_life_days: mc.map_or(7.0, |c| c.search.temporal_decay.half_life_days),
                 embedding_dimensions: mc.map_or(1024, |c| c.embedding.dimensions),
                 total_chunks,
                 total_files: storage.list_memory_files().map_or(0, |f| f.len()),

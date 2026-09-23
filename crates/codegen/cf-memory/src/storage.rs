@@ -247,6 +247,13 @@ impl MemoryStorage {
             }
         };
 
+        // Rolling backup before the destructive overwrite: MEMORY.md is the
+        // only lossy write in the memory store, so keep the last 3 versions
+        // beside it. Best-effort — never blocks the primary write.
+        if path.exists() {
+            rotate_long_term_backups(&path);
+        }
+
         write_secure_file(&path, content)?;
         tracing::debug!(path = %path.display(), scope = ?scope, "wrote long-term memory");
 
@@ -583,6 +590,69 @@ fn is_older_than(dir: &Path, days: u64) -> bool {
     };
     let age = modified.elapsed().unwrap_or(std::time::Duration::ZERO);
     age > std::time::Duration::from_secs(days * 24 * 60 * 60)
+}
+
+/// Build the path of the `n`-th backup generation beside `path`.
+///
+/// For `MEMORY.md` this yields `MEMORY.md.bak-1` … `MEMORY.md.bak-3`.
+/// The `.bak-N` suffix is deliberately **not** `.md`, so the memory file
+/// watcher (which gates on `extension() == "md"`) and
+/// [`MemoryStorage::list_memory_files`] (same gate) both ignore backups.
+fn backup_path(path: &Path, n: u32) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".bak-{n}"));
+    path.with_file_name(name)
+}
+
+/// Best-effort rolling backup of a long-term `MEMORY.md` before an overwrite.
+///
+/// Rotates up to three generations, oldest first, so a slot is always
+/// emptied before it is filled:
+/// `MEMORY.md.bak-2` → `.bak-3`, `MEMORY.md.bak-1` → `.bak-2`,
+/// `MEMORY.md` → `.bak-1`. Backups live beside the target.
+///
+/// Any failure is logged with `tracing::warn!` and ignored — this must never
+/// prevent the caller from performing the primary write.
+///
+/// # Why remove-before-rename (Windows)
+/// On Windows `std::fs::rename` fails with `AlreadyExists` when the
+/// destination exists, unlike POSIX `rename(2)` which silently replaces it.
+/// We therefore delete the destination slot before renaming into it. The two
+/// steps are not atomic, but the whole operation is best-effort and runs only
+/// before the authoritative write, so a torn rotation can at worst leave a
+/// stale/missing *backup* — it can never corrupt `MEMORY.md` itself.
+fn rotate_long_term_backups(path: &Path) {
+    // (source, destination) ordered oldest generation first.
+    let steps = [
+        (backup_path(path, 2), backup_path(path, 3)),
+        (backup_path(path, 1), backup_path(path, 2)),
+        (path.to_path_buf(), backup_path(path, 1)),
+    ];
+
+    for (from, to) in steps {
+        if !from.exists() {
+            continue;
+        }
+        // Windows: clear the destination before renaming into it.
+        if to.exists() {
+            if let Err(e) = std::fs::remove_file(&to) {
+                tracing::warn!(
+                    path = %to.display(),
+                    error = %e,
+                    "MEMORY_BACKUP: failed to clear backup slot; skipping rotation step"
+                );
+                continue;
+            }
+        }
+        if let Err(e) = std::fs::rename(&from, &to) {
+            tracing::warn!(
+                from = %from.display(),
+                to = %to.display(),
+                error = %e,
+                "MEMORY_BACKUP: failed to rotate backup; continuing"
+            );
+        }
+    }
 }
 
 /// Ensure content has proper Markdown heading structure for the memory chunker.
@@ -961,6 +1031,87 @@ mod tests {
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
         assert_eq!(content, "# Project\n\nProject info.");
+    }
+
+    #[test]
+    fn test_write_long_term_rotates_backups_global() {
+        let tmp = TempDir::new().unwrap();
+        let global_dir = tmp.path().join("memory");
+        let workspace_dir = global_dir.join("abc123");
+        let storage = MemoryStorage::with_paths(global_dir.clone(), workspace_dir);
+
+        // First write: nothing to back up yet.
+        storage.write_long_term(MemoryScope::Global, "v1").unwrap();
+        assert!(!global_dir.join("MEMORY.md.bak-1").exists());
+
+        // Each later write rotates the previous content into `.bak-1`.
+        for v in ["v2", "v3", "v4", "v5"] {
+            storage.write_long_term(MemoryScope::Global, v).unwrap();
+        }
+
+        let read = |n: u32| {
+            std::fs::read_to_string(global_dir.join(format!("MEMORY.md.bak-{n}"))).unwrap()
+        };
+        assert_eq!(
+            std::fs::read_to_string(global_dir.join("MEMORY.md")).unwrap(),
+            "v5"
+        );
+        assert_eq!(read(1), "v4");
+        assert_eq!(read(2), "v3");
+        assert_eq!(read(3), "v2");
+        // Only three generations are retained; the oldest is dropped.
+        assert!(!global_dir.join("MEMORY.md.bak-4").exists());
+    }
+
+    #[test]
+    fn test_write_long_term_rotates_backups_workspace() {
+        let tmp = TempDir::new().unwrap();
+        let global_dir = tmp.path().join("memory");
+        let workspace_dir = global_dir.join("abc123");
+        let storage = MemoryStorage::with_paths(global_dir, workspace_dir.clone());
+
+        storage
+            .write_long_term(MemoryScope::Workspace, "w1")
+            .unwrap();
+        storage
+            .write_long_term(MemoryScope::Workspace, "w2")
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(workspace_dir.join("MEMORY.md")).unwrap(),
+            "w2"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workspace_dir.join("MEMORY.md.bak-1")).unwrap(),
+            "w1"
+        );
+    }
+
+    #[test]
+    fn test_backup_files_not_listed_as_memory() {
+        let tmp = TempDir::new().unwrap();
+        let global_dir = tmp.path().join("memory");
+        let workspace_dir = global_dir.join("abc123");
+        let storage = MemoryStorage::with_paths(global_dir.clone(), workspace_dir.clone());
+
+        storage.write_long_term(MemoryScope::Global, "g1").unwrap();
+        storage.write_long_term(MemoryScope::Global, "g2").unwrap();
+        storage
+            .write_long_term(MemoryScope::Workspace, "w1")
+            .unwrap();
+        storage
+            .write_long_term(MemoryScope::Workspace, "w2")
+            .unwrap();
+
+        // Backups exist on disk ...
+        assert!(global_dir.join("MEMORY.md.bak-1").exists());
+        assert!(workspace_dir.join("MEMORY.md.bak-1").exists());
+
+        // ... but the `.bak-N` (non-`.md`) suffix keeps them out of
+        // `list_memory_files`, which gates on the `.md` extension.
+        let files = storage.list_memory_files().unwrap();
+        assert_eq!(files.len(), 2, "only the two MEMORY.md files: {files:?}");
+        assert!(files.iter().all(|p| p.ends_with("MEMORY.md")));
     }
 
     #[test]
