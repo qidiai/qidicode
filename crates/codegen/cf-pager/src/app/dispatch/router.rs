@@ -816,15 +816,36 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             }]
         }
         Action::SwitchModelAndPersistEffort { model_id, effort } => {
-            // `/effort <level> --save`: persist the canonical effort for
-            // future sessions first (mirrors `set_default_model`'s
-            // PersistSetting-first ordering so a failed write rolls back
-            // before the switch), then switch the live session exactly like
+            // `/effort <level> --save`: persist the canonical effort as the
+            // future-session default AND switch the live session, exactly like
             // `Action::SwitchModel`.
+            //
+            // The two effects below are dispatched CONCURRENTLY: the event
+            // loop spawns each effect in the returned vec as its own task with
+            // no gating between them (`app/effects/mod.rs` — `PersistSetting`
+            // and `SwitchModel` are independent `tasks.spawn(...)`). A failed
+            // persist therefore does NOT block or roll back the switch; it only
+            // surfaces as a `SettingPersistFailed` toast
+            // (`dispatch/task_result.rs`). `rollback_value` is consequently a
+            // no-op placeholder: the rollback arm for `default_reasoning_effort`
+            // is deliberately empty (`dispatch/settings/ui.rs` — the key is
+            // SHELL-owned with no pager-side in-memory mirror, so there is
+            // nothing to roll back here). We still snapshot the pre-switch
+            // effort so a future rollback arm has a meaningful value to restore
+            // instead of the new value echoing itself.
+            //
+            // Source: `app.models` is the app-level default model state that
+            // new sessions clone (and the welcome card renders), matching the
+            // `default_reasoning_effort` key; fall back to the new value if no
+            // prior effort is recorded.
+            let prev_effort = app.models.reasoning_effort;
+            let rollback_value = crate::settings::SettingValue::Enum(
+                prev_effort.map_or(effort.as_str(), |e| e.as_str()),
+            );
             let mut effects = vec![Effect::PersistSetting {
                 key: "default_reasoning_effort",
                 value: crate::settings::SettingValue::Enum(effort.as_str()),
-                rollback_value: crate::settings::SettingValue::Enum(effort.as_str()),
+                rollback_value,
             }];
             let ActiveView::Agent(id) = app.active_view else {
                 return effects;

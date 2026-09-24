@@ -763,6 +763,14 @@ fn slash_new_dispatches_new_session() {
 fn new_session_flushes_previous_session_targeting_old_session() {
     let mut app = test_app_with_agent();
     let old_id = AgentId(0);
+    // The outgoing session must advertise `/flush` for the best-effort flush
+    // to fire — the shell only advertises it while the memory gate is open
+    // (see `new_session_skips_flush_when_previous_session_lacks_flush_command`).
+    app.agents.get_mut(&old_id).unwrap().session.available_commands =
+        vec![acp::AvailableCommand::new(
+            "flush".to_string(),
+            "Flush conversation memory to disk now".to_string(),
+        )];
     let old_sid = app.agents[&old_id]
         .session
         .session_id
@@ -804,6 +812,44 @@ fn new_session_on_welcome_skips_flush() {
             .iter()
             .any(|e| matches!(e, Effect::SendPrompt { text, .. } if text == "/flush")),
         "welcome-screen /new must not emit a /flush, got: {effects:?}"
+    );
+}
+/// When the outgoing session does NOT advertise `/flush` (the memory gate is
+/// closed, so the shell omits it from `AvailableCommandsUpdate`), `/new` must
+/// NOT send the `/flush` text: the shell would resolve it as an ordinary user
+/// prompt and pollute the old session's history instead of flushing it. The
+/// "flushing…" toast must stay silent too (it is only shown when a flush is
+/// actually sent).
+#[test]
+fn new_session_skips_flush_when_previous_session_lacks_flush_command() {
+    let mut app = test_app_with_agent();
+    let old_id = AgentId(0);
+    // Precondition: outgoing session is bound but advertises some OTHER
+    // command, not `flush`.
+    app.agents.get_mut(&old_id).unwrap().session.available_commands =
+        vec![acp::AvailableCommand::new(
+            "compact".to_string(),
+            "Compress conversation history".to_string(),
+        )];
+    assert!(
+        app.agents[&old_id].session.session_id.is_some(),
+        "precondition: outgoing session is bound"
+    );
+    let effects = dispatch(Action::NewSession, &mut app);
+    assert!(
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::SendPrompt { text, .. } if text == "/flush")),
+        "must not emit /flush when the old session does not advertise it, got: {effects:?}"
+    );
+    let ActiveView::Agent(new_id) = app.active_view else {
+        panic!("expected the new session to be active after /new");
+    };
+    assert_ne!(new_id, old_id, "the new placeholder must differ from the old");
+    assert!(
+        app.agents[&new_id].toast.is_none(),
+        "no flush → no \"flushing\" toast, got {:?}",
+        app.agents[&new_id].toast
     );
 }
 #[test]

@@ -287,11 +287,33 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
     // Fire-and-forget: the effect layer only spawns a task and logs failures;
     // an unknown/absent session is a silent no-op (`handle_prompt_response`
     // uses `if let Some(agent) = app.agents.get_mut(&agent_id)`).
-    let outgoing_session = get_active_agent(app)
-        .and_then(|a| a.session.session_id.clone().map(|sid| (a.session.id, sid)));
-    let flushing_previous = outgoing_session.is_some();
+    //
+    // Gate the flush on the outgoing session actually advertising `/flush`.
+    // The shell registers `/flush` behind `BuiltinGate::Memory`
+    // (`cf-shell/src/session/slash_commands.rs`) and only advertises it via
+    // `AvailableCommandsUpdate` while that gate is open
+    // (`send_available_commands_update` filters through
+    // `slash_commands::available_commands` → `CommandAvailability::allows`).
+    // With the memory gate CLOSED the command is NOT advertised, so the shell
+    // resolver would treat a stray "/flush" as an ordinary user prompt — an
+    // extra LLM turn that pollutes the outgoing session's history instead of
+    // flushing it. Checking the advertised command keeps us from regressing
+    // that way.
+    let outgoing = get_active_agent(app).and_then(|a| {
+        a.session.session_id.clone().map(|sid| {
+            let has_flush = a
+                .session
+                .available_commands
+                .iter()
+                .any(|c| c.name == "flush");
+            (a.session.id, sid, has_flush)
+        })
+    });
+    let flushing_previous = outgoing
+        .as_ref()
+        .is_some_and(|(_, _, has_flush)| *has_flush);
     let mut effects = Vec::new();
-    if let Some((old_agent_id, old_session_id)) = outgoing_session {
+    if let Some((old_agent_id, old_session_id, true)) = outgoing {
         effects.push(Effect::SendPrompt {
             agent_id: old_agent_id,
             session_id: old_session_id,

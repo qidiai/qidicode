@@ -4,24 +4,25 @@
 //! reports four classes of problems:
 //!
 //! 1. **Orphan chunks** — indexed paths whose source file no longer exists.
-//! 2. **Stuck reindex claims** — a leftover `reindex_claim` lock value.
+//! 2. **Stuck reindex claims** — a leftover `reindex_claim` lock value whose
+//!    age exceeds [`STALE_CLAIM_SECS`].
 //! 3. **Stale / low-access chunks** — older than [`STALE_AGE_DAYS`] and never
 //!    accessed.
 //! 4. **Suspected redundant clusters** — chunk texts whose token-Jaccard
 //!    similarity is at or above [`REDUNDANCY_THRESHOLD`].
 //!
 //! The scan is strictly read-only: it never creates `index.sqlite` (an absent
-//! index yields an empty report) and never mutates the schema. Per-chunk facts
-//! are read through a read-only SQLite connection; the two doctor helpers
-//! prepared on [`crate::index::MemoryIndex`] (`get_reindex_claim`,
-//! `all_indexed_paths`) are reused for the claim and orphan checks.
+//! index yields an empty report) and never mutates the schema. Every fact is
+//! read through a read-only SQLite connection with plain `SELECT`s. The
+//! reindex claim and the indexed paths are read directly from `meta` /
+//! `chunks` (mirroring `MemoryIndex::get_reindex_claim` and
+//! `MemoryIndex::all_indexed_paths`) instead of opening a read-write
+//! `MemoryIndex` — that path runs schema DDL and could write
+//! `embedding_dimensions` or drop `chunks_vec`.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
-use cf_config::xai_grok_config_types::MemoryIndexConfig;
-
-use crate::index::MemoryIndex;
 use crate::mmr::{jaccard_similarity, tokenize};
 use crate::storage::MemoryStorage;
 
@@ -34,18 +35,40 @@ const REDUNDANCY_THRESHOLD: f64 = 0.8;
 /// Upper bound on chunks fed into the O(n²) redundancy scan.
 const MAX_REDUNDANCY_CHUNKS: usize = 2000;
 
-/// Embedding dimensions assumed when the index stores none.
-const DEFAULT_EMBED_DIMENSIONS: usize = 1024;
+/// A `pid:unix_ts` reindex claim older than this many seconds is "stuck".
+const STALE_CLAIM_SECS: i64 = 60;
 
 const SECS_PER_DAY: i64 = 86_400;
 
-/// Minimal per-chunk facts needed for the stale / redundancy checks.
+/// Per-chunk facts needed for the redundancy check (carries `text`).
 #[derive(Debug, Clone)]
-struct ChunkFact {
+struct RedundancyChunk {
     id: String,
     text: String,
-    access_count: i64,
+}
+
+/// Per-chunk metadata read *without* `text` — feeds the stale check and the
+/// distinct-path (orphan) set.
+#[derive(Debug, Clone)]
+struct ChunkMeta {
+    path: String,
     created_at: i64,
+    access_count: i64,
+}
+
+/// A read-only snapshot of one scope's index.
+#[derive(Debug, Default)]
+struct IndexSnapshot {
+    /// Distinct indexed file paths, sorted.
+    indexed_paths: Vec<String>,
+    /// Raw non-empty `reindex_claim` value, if any.
+    reindex_claim: Option<String>,
+    /// Age of the claim in seconds (`now - ts`), when the value parses.
+    reindex_claim_age_secs: Option<i64>,
+    /// Full chunk metadata (no `text`) — total count, stale and orphan inputs.
+    chunk_meta: Vec<ChunkMeta>,
+    /// Newest chunks (with `text`), capped at [`MAX_REDUNDANCY_CHUNKS`].
+    redundancy_chunks: Vec<RedundancyChunk>,
 }
 
 /// A group of chunks that look like near-duplicates.
@@ -64,25 +87,24 @@ pub struct ScopeReport {
     pub scope: String,
     /// Whether `index.sqlite` exists for this scope.
     pub index_present: bool,
+    /// When the index exists but could not be read, the reason. Distinguishes a
+    /// read failure from a genuinely empty index.
+    pub read_error: Option<String>,
     /// Number of distinct indexed file paths.
     pub indexed_paths: usize,
     /// Indexed paths whose source file is gone.
     pub orphan_paths: Vec<String>,
-    /// A non-empty leftover reindex claim, if any.
+    /// A non-empty leftover reindex claim value, if any.
     pub reindex_claim: Option<String>,
+    /// Age of the claim in seconds (`now - ts`) when it parses; `None` for a
+    /// malformed claim.
+    pub reindex_claim_age_secs: Option<i64>,
     /// Count of stale / never-accessed chunks.
     pub stale_chunks: usize,
     /// Suspected redundant clusters.
     pub redundant_clusters: Vec<RedundantCluster>,
     /// True when the redundancy scan was capped by [`MAX_REDUNDANCY_CHUNKS`].
     pub redundancy_truncated: bool,
-}
-
-impl ScopeReport {
-    /// A scope is "empty" when there is no index or no indexed chunks at all.
-    fn is_empty(&self) -> bool {
-        !self.index_present || self.indexed_paths == 0
-    }
 }
 
 /// Full `memory doctor` report across both scopes.
@@ -109,7 +131,23 @@ fn render_scope(r: &ScopeReport) -> String {
     let mut out = String::new();
     out.push_str(&format!("[{}]\n", r.scope));
 
-    if r.is_empty() {
+    // No index at all: nothing to check.
+    if !r.index_present {
+        out.push_str("  no index / empty\n");
+        out.push_str("  hint: nothing to check for this scope.\n");
+        return out;
+    }
+
+    // The index exists but could not be read — surface the reason instead of
+    // misreporting it as "empty".
+    if let Some(err) = &r.read_error {
+        out.push_str(&format!("  error reading index: {err}\n"));
+        out.push_str("  hint: the index exists but could not be read (corrupt or locked?).\n");
+        return out;
+    }
+
+    // Present and readable, but no indexed chunks.
+    if r.indexed_paths == 0 {
         out.push_str("  no index / empty\n");
         out.push_str("  hint: nothing to check for this scope.\n");
         return out;
@@ -123,9 +161,17 @@ fn render_scope(r: &ScopeReport) -> String {
     }
     out.push_str("    hint: indexed files that no longer exist; a reindex will prune them.\n");
 
-    match &r.reindex_claim {
-        Some(v) => out.push_str(&format!("  stuck reindex claim: {v}\n")),
-        None => out.push_str("  stuck reindex claim: none\n"),
+    match (&r.reindex_claim, r.reindex_claim_age_secs) {
+        (None, _) => out.push_str("  stuck reindex claim: none\n"),
+        (Some(v), Some(age)) if age > STALE_CLAIM_SECS => {
+            out.push_str(&format!("  stuck reindex claim: {v} (age {age}s)\n"));
+        }
+        (Some(v), Some(age)) => {
+            out.push_str(&format!("  active reindex claim: {v} (age {age}s)\n"));
+        }
+        (Some(v), None) => {
+            out.push_str(&format!("  malformed reindex claim: {v}\n"));
+        }
     }
     out.push_str("    hint: a leftover reindex lock resets after the stale threshold.\n");
 
@@ -149,7 +195,7 @@ fn render_scope(r: &ScopeReport) -> String {
     }
     if r.redundancy_truncated {
         out.push_str(&format!(
-            "    note: only the first {MAX_REDUNDANCY_CHUNKS} chunks were compared.\n"
+            "    note: only the newest {MAX_REDUNDANCY_CHUNKS} chunks (by created_at desc) were compared.\n"
         ));
     }
     out.push_str("    hint: suspected duplicates only - review before merging.\n");
@@ -160,12 +206,12 @@ fn render_scope(r: &ScopeReport) -> String {
 /// Diagnose the memory index for both scopes. Read-only; never panics.
 pub fn diagnose(storage: &MemoryStorage) -> DoctorReport {
     DoctorReport {
-        global: diagnose_scope(storage, "global", storage.global_dir()),
-        workspace: diagnose_scope(storage, "workspace", storage.workspace_dir()),
+        global: diagnose_scope("global", storage.global_dir()),
+        workspace: diagnose_scope("workspace", storage.workspace_dir()),
     }
 }
 
-fn diagnose_scope(storage: &MemoryStorage, scope: &str, dir: &Path) -> ScopeReport {
+fn diagnose_scope(scope: &str, dir: &Path) -> ScopeReport {
     let mut report = ScopeReport {
         scope: scope.to_string(),
         ..ScopeReport::default()
@@ -178,98 +224,135 @@ fn diagnose_scope(storage: &MemoryStorage, scope: &str, dir: &Path) -> ScopeRepo
     }
     report.index_present = true;
 
-    // Read per-chunk facts + the stored embedding dimensions over a read-only
-    // connection (never creates or alters the file).
-    let (dims, chunks) = match read_readonly(&db_path) {
-        Some(v) => v,
-        None => return report,
+    let snap = match read_readonly(&db_path) {
+        Ok(s) => s,
+        Err(e) => {
+            report.read_error = Some(e);
+            return report;
+        }
     };
 
-    // Reuse the doctor helpers on `MemoryIndex`. Opened only because the file
-    // already exists; `dims` is passed so the dimension check is a no-op.
-    if let Ok(index) = MemoryIndex::open_or_create(
-        &db_path,
-        storage.clone(),
-        MemoryIndexConfig::default(),
-        dims,
-    ) {
-        if let Ok(paths) = index.all_indexed_paths() {
-            report.indexed_paths = paths.len();
-            for path in paths {
-                if !Path::new(&path).exists() {
-                    report.orphan_paths.push(path);
-                }
-            }
-        }
-        let claim = index.get_reindex_claim();
-        if !claim.trim().is_empty() {
-            report.reindex_claim = Some(claim);
+    report.indexed_paths = snap.indexed_paths.len();
+    for path in &snap.indexed_paths {
+        if !Path::new(path).exists() {
+            report.orphan_paths.push(path.clone());
         }
     }
+    report.reindex_claim = snap.reindex_claim;
+    report.reindex_claim_age_secs = snap.reindex_claim_age_secs;
 
     let stale_cutoff = unix_now() - STALE_AGE_DAYS * SECS_PER_DAY;
-    report.stale_chunks = chunks
+    report.stale_chunks = snap
+        .chunk_meta
         .iter()
         .filter(|c| c.created_at < stale_cutoff && c.access_count == 0)
         .count();
 
-    let (clusters, truncated) = find_redundant_clusters(&chunks);
-    report.redundant_clusters = clusters;
-    report.redundancy_truncated = truncated;
+    report.redundancy_truncated = snap.chunk_meta.len() > MAX_REDUNDANCY_CHUNKS;
+    report.redundant_clusters = find_redundant_clusters(&snap.redundancy_chunks);
 
     report
 }
 
-/// Read chunk-level facts and stored embedding dimensions via a read-only
-/// connection. Returns `None` if the database cannot be opened/queried.
-fn read_readonly(db_path: &Path) -> Option<(usize, Vec<ChunkFact>)> {
+/// Read a read-only snapshot of the index at `db_path`.
+///
+/// Returns `Err(reason)` when the database cannot be opened or a required
+/// query fails — deliberately distinct from a successfully-read but empty
+/// index, so the report never renders a read failure as "empty".
+///
+/// Two queries keep memory bounded and the redundancy subset reproducible:
+/// - **A** (full, no `text`): `id, path, created_at, access_count` — the
+///   distinct-path (orphan) set and the stale facts.
+/// - **B** (with `text`, ordered + limited): the newest
+///   [`MAX_REDUNDANCY_CHUNKS`] chunks for the redundancy scan.
+fn read_readonly(db_path: &Path) -> Result<IndexSnapshot, String> {
     let conn = cf_sqlite_journal::JournalMode::for_db_path(db_path)
         .open_readonly(db_path)
-        .ok()?;
+        .map_err(|e| format!("cannot open index: {e}"))?;
 
-    let dims: Option<usize> = conn
+    // Query A: full chunk metadata WITHOUT text — orphan (path) + stale.
+    // `id` is selected for parity with the index schema but only `path`,
+    // `created_at` and `access_count` are consumed here.
+    let mut stmt = conn
+        .prepare("SELECT id, path, created_at, access_count FROM chunks")
+        .map_err(|e| format!("cannot read chunks: {e}"))?;
+    let chunk_meta = stmt
+        .query_map([], |row| {
+            Ok(ChunkMeta {
+                path: row.get(1)?,
+                created_at: row.get(2)?,
+                access_count: row.get(3)?,
+            })
+        })
+        .map_err(|e| format!("cannot read chunks: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("cannot read chunks: {e}"))?;
+    drop(stmt);
+
+    // Distinct indexed paths (mirrors `MemoryIndex::all_indexed_paths`).
+    let mut indexed_paths: Vec<String> = chunk_meta.iter().map(|c| c.path.clone()).collect();
+    indexed_paths.sort();
+    indexed_paths.dedup();
+
+    // Reindex claim (mirrors `MemoryIndex::get_reindex_claim`).
+    let reindex_claim: Option<String> = conn
         .query_row(
-            "SELECT value FROM meta WHERE key = 'embedding_dimensions'",
+            "SELECT value FROM meta WHERE key = 'reindex_claim'",
             [],
             |r| r.get::<_, String>(0),
         )
         .ok()
-        .and_then(|s| s.parse().ok());
+        .filter(|s| !s.trim().is_empty());
+    let reindex_claim_age_secs = reindex_claim.as_deref().and_then(claim_age_secs);
 
+    // Query B: newest chunks WITH text, ordered + limited — redundancy only.
     let mut stmt = conn
-        .prepare("SELECT id, text, access_count, created_at FROM chunks")
-        .ok()?;
-    let chunks = stmt
+        .prepare(&format!(
+            "SELECT id, text FROM chunks ORDER BY created_at DESC LIMIT {MAX_REDUNDANCY_CHUNKS}"
+        ))
+        .map_err(|e| format!("cannot read chunks: {e}"))?;
+    let redundancy_chunks = stmt
         .query_map([], |row| {
-            Ok(ChunkFact {
+            Ok(RedundancyChunk {
                 id: row.get(0)?,
                 text: row.get(1)?,
-                access_count: row.get(2)?,
-                created_at: row.get(3)?,
             })
         })
-        .ok()?
-        .filter_map(|r| r.ok())
-        .collect::<Vec<_>>();
+        .map_err(|e| format!("cannot read chunks: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("cannot read chunks: {e}"))?;
 
-    Some((dims.unwrap_or(DEFAULT_EMBED_DIMENSIONS), chunks))
+    Ok(IndexSnapshot {
+        indexed_paths,
+        reindex_claim,
+        reindex_claim_age_secs,
+        chunk_meta,
+        redundancy_chunks,
+    })
+}
+
+/// Parse a `pid:unix_ts` reindex claim and return its age in seconds.
+///
+/// Mirrors `MemoryIndex::try_claim_reindex`'s format (a numeric pid, then the
+/// unix timestamp after the first `:`). Returns `None` for a malformed value.
+fn claim_age_secs(claim: &str) -> Option<i64> {
+    let (_, ts_str) = claim.split_once(':')?;
+    let ts: i64 = ts_str.trim().parse().ok()?;
+    Some(unix_now() - ts)
 }
 
 /// Group chunks into connected components whose pairwise token-Jaccard
 /// similarity is at or above [`REDUNDANCY_THRESHOLD`].
 ///
-/// Returns the clusters plus whether the scan was capped. Each cluster's
+/// The input is already capped (and ordered) by the caller; each cluster's
 /// `similarity` is the highest pairwise similarity within it (always >= the
 /// threshold for any reported cluster).
-fn find_redundant_clusters(chunks: &[ChunkFact]) -> (Vec<RedundantCluster>, bool) {
-    let truncated = chunks.len() > MAX_REDUNDANCY_CHUNKS;
-    let considered = &chunks[..chunks.len().min(MAX_REDUNDANCY_CHUNKS)];
-
+fn find_redundant_clusters(chunks: &[RedundancyChunk]) -> Vec<RedundantCluster> {
     // Lowercase once (mmr::tokenize expects pre-lowered input), then tokenize.
-    let lowered: Vec<String> = considered.iter().map(|c| c.text.to_lowercase()).collect();
+    let lowered: Vec<String> = chunks.iter().map(|c| c.text.to_lowercase()).collect();
     let tokens: Vec<HashSet<&str>> = lowered.iter().map(|s| tokenize(s)).collect();
 
-    let n = considered.len();
+    let n = chunks.len();
     let mut parent: Vec<usize> = (0..n).collect();
 
     for i in 0..n {
@@ -306,7 +389,7 @@ fn find_redundant_clusters(chunks: &[ChunkFact]) -> (Vec<RedundantCluster>, bool
                 }
             }
         }
-        let mut ids: Vec<String> = members.iter().map(|&i| considered[i].id.clone()).collect();
+        let mut ids: Vec<String> = members.iter().map(|&i| chunks[i].id.clone()).collect();
         ids.sort();
         clusters.push(RedundantCluster {
             similarity: max_sim,
@@ -315,7 +398,7 @@ fn find_redundant_clusters(chunks: &[ChunkFact]) -> (Vec<RedundantCluster>, bool
     }
     clusters.sort_by(|a, b| a.members.first().cmp(&b.members.first()));
 
-    (clusters, truncated)
+    clusters
 }
 
 /// Union-find root lookup with path compression.
@@ -352,7 +435,8 @@ fn unix_now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::init_sqlite_vec;
+    use crate::index::{init_sqlite_vec, MemoryIndex};
+    use cf_config::xai_grok_config_types::MemoryIndexConfig;
     use tempfile::TempDir;
 
     fn test_storage(tmp: &TempDir) -> MemoryStorage {
@@ -361,13 +445,24 @@ mod tests {
         MemoryStorage::with_paths(global, workspace)
     }
 
-    fn chunk_fact(id: &str, text: &str) -> ChunkFact {
-        ChunkFact {
+    fn redundancy_chunk(id: &str, text: &str) -> RedundancyChunk {
+        RedundancyChunk {
             id: id.to_string(),
             text: text.to_string(),
-            access_count: 0,
-            created_at: 0,
         }
+    }
+
+    /// Overwrite the `reindex_claim` meta value via a short-lived write
+    /// connection (test setup only — `diagnose` itself is read-only).
+    fn set_claim(db_path: &Path, value: &str) {
+        let conn = cf_sqlite_journal::JournalMode::for_db_path(db_path)
+            .open(db_path)
+            .unwrap();
+        conn.execute(
+            "UPDATE meta SET value = ?1 WHERE key = 'reindex_claim'",
+            rusqlite::params![value],
+        )
+        .unwrap();
     }
 
     /// Empty / nonexistent index must yield an empty report and never panic.
@@ -443,14 +538,13 @@ mod tests {
     #[test]
     fn detects_redundant_clusters() {
         let chunks = vec![
-            chunk_fact("a", "rust async programming patterns"),
-            chunk_fact("b", "rust async programming patterns tutorial"),
-            chunk_fact("c", "completely unrelated cooking recipe"),
+            redundancy_chunk("a", "rust async programming patterns"),
+            redundancy_chunk("b", "rust async programming patterns tutorial"),
+            redundancy_chunk("c", "completely unrelated cooking recipe"),
         ];
 
-        let (clusters, truncated) = find_redundant_clusters(&chunks);
+        let clusters = find_redundant_clusters(&chunks);
 
-        assert!(!truncated);
         assert_eq!(clusters.len(), 1, "exactly one cluster expected");
         assert_eq!(clusters[0].members, vec!["a".to_string(), "b".to_string()]);
         assert!(clusters[0].similarity >= REDUNDANCY_THRESHOLD);
@@ -464,9 +558,11 @@ mod tests {
             global: ScopeReport {
                 scope: "global".to_string(),
                 index_present: true,
+                read_error: None,
                 indexed_paths: 4,
                 orphan_paths: vec!["/mem/old.md".to_string()],
                 reindex_claim: Some("4242:1700000000".to_string()),
+                reindex_claim_age_secs: Some(120),
                 stale_chunks: 2,
                 redundant_clusters: vec![RedundantCluster {
                     similarity: 0.85,
@@ -491,7 +587,7 @@ Memory doctor report
   orphan chunks: 1
     - /mem/old.md
     hint: indexed files that no longer exist; a reindex will prune them.
-  stuck reindex claim: 4242:1700000000
+  stuck reindex claim: 4242:1700000000 (age 120s)
     hint: a leftover reindex lock resets after the stale threshold.
   stale / low-access chunks (>30d, 0 accesses): 2
     hint: review whether these never-accessed chunks are still useful.
@@ -504,5 +600,189 @@ Memory doctor report
   hint: nothing to check for this scope.
 ";
         assert_eq!(rendered, expected);
+    }
+
+    /// R2: `diagnose` must never write to the index. A read-write open would
+    /// re-create the missing `embedding_dimensions` meta row and could touch
+    /// the schema; here we remove that row, set a distinctive claim, run the
+    /// scan, and assert both survived untouched (read back via a separate
+    /// read-only connection).
+    #[test]
+    fn diagnose_never_writes_to_the_index() {
+        let tmp = TempDir::new().unwrap();
+        let storage = test_storage(&tmp);
+        let db_path = storage.workspace_dir().join("index.sqlite");
+        std::fs::create_dir_all(storage.workspace_dir()).unwrap();
+
+        init_sqlite_vec();
+        let idx =
+            MemoryIndex::open_or_create(&db_path, storage.clone(), MemoryIndexConfig::default(), 4)
+                .unwrap();
+        // Simulate an index missing its dimension record, with a live claim.
+        idx.db()
+            .execute("DELETE FROM meta WHERE key = 'embedding_dimensions'", [])
+            .unwrap();
+        idx.db()
+            .execute(
+                "UPDATE meta SET value = '9999:1700000000' WHERE key = 'reindex_claim'",
+                [],
+            )
+            .unwrap();
+        drop(idx);
+
+        let report = diagnose(&storage);
+        assert!(report.workspace.index_present);
+        assert!(report.workspace.read_error.is_none());
+
+        // Read the meta table back through a fresh read-only connection so the
+        // check itself cannot write.
+        let conn = cf_sqlite_journal::JournalMode::for_db_path(&db_path)
+            .open_readonly(&db_path)
+            .unwrap();
+        let dims: Option<String> = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'embedding_dimensions'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        assert!(
+            dims.is_none(),
+            "diagnose must not write embedding_dimensions back (got {dims:?})"
+        );
+        let claim: String = conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'reindex_claim'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            claim, "9999:1700000000",
+            "diagnose must not touch the reindex claim"
+        );
+    }
+
+    /// R3: a readable failure must be reported as an error, not "empty".
+    #[test]
+    fn read_failure_is_distinct_from_empty() {
+        let tmp = TempDir::new().unwrap();
+        let storage = test_storage(&tmp);
+        let dir = storage.workspace_dir();
+        std::fs::create_dir_all(dir).unwrap();
+        // A file named index.sqlite that is not a SQLite database.
+        std::fs::write(dir.join("index.sqlite"), b"not a sqlite database").unwrap();
+
+        let report = diagnose(&storage);
+        assert!(report.workspace.index_present);
+        assert!(
+            report.workspace.read_error.is_some(),
+            "expected a read error, got {:?}",
+            report.workspace.read_error
+        );
+
+        let rendered = report.render();
+        println!("{rendered}");
+        assert!(
+            rendered.contains("error reading index"),
+            "render must surface the read error, got:\n{rendered}"
+        );
+    }
+
+    /// R3: a present but chunk-less index still renders as empty (not error).
+    #[test]
+    fn empty_but_present_index_renders_empty() {
+        let tmp = TempDir::new().unwrap();
+        let storage = test_storage(&tmp);
+        let db_path = storage.workspace_dir().join("index.sqlite");
+        std::fs::create_dir_all(storage.workspace_dir()).unwrap();
+
+        init_sqlite_vec();
+        drop(
+            MemoryIndex::open_or_create(
+                &db_path,
+                storage.clone(),
+                MemoryIndexConfig::default(),
+                4,
+            )
+            .unwrap(),
+        );
+
+        let report = diagnose(&storage);
+        assert!(report.workspace.index_present);
+        assert!(report.workspace.read_error.is_none());
+        assert_eq!(report.workspace.indexed_paths, 0);
+
+        let rendered = render_scope(&report.workspace);
+        assert!(rendered.contains("no index / empty"), "got:\n{rendered}");
+        assert!(!rendered.contains("error reading index"));
+    }
+
+    /// R6: only a claim older than [`STALE_CLAIM_SECS`] is "stuck".
+    #[test]
+    fn claim_staleness_is_time_aware() {
+        let tmp = TempDir::new().unwrap();
+        let storage = test_storage(&tmp);
+        let db_path = storage.workspace_dir().join("index.sqlite");
+        std::fs::create_dir_all(storage.workspace_dir()).unwrap();
+
+        init_sqlite_vec();
+        let mut idx =
+            MemoryIndex::open_or_create(&db_path, storage.clone(), MemoryIndexConfig::default(), 4)
+                .unwrap();
+        // One indexed chunk so the claim section is not short-circuited by the
+        // "empty" branch.
+        let file = tmp.path().join("note.md");
+        std::fs::write(&file, "# Note\n\nsome content.").unwrap();
+        idx.reindex_file(&file, "workspace").unwrap();
+        drop(idx);
+
+        // Fresh claim (10s old) → active, not stuck.
+        set_claim(&db_path, &format!("1234:{}", unix_now() - 10));
+        let report = diagnose(&storage);
+        assert!(report.workspace.reindex_claim.is_some());
+        let rendered = render_scope(&report.workspace);
+        assert!(
+            rendered.contains("active reindex claim"),
+            "fresh claim must not be stuck, got:\n{rendered}"
+        );
+        assert!(!rendered.contains("stuck"));
+
+        // Stale claim (300s old) → stuck, with value + age shown.
+        set_claim(&db_path, &format!("1234:{}", unix_now() - 300));
+        let report = diagnose(&storage);
+        let rendered = render_scope(&report.workspace);
+        assert!(
+            rendered.contains("stuck reindex claim: 1234:"),
+            "stale claim must be reported, got:\n{rendered}"
+        );
+        assert!(rendered.contains("age 3"), "age shown, got:\n{rendered}");
+    }
+
+    /// R6: an unparseable claim value is reported as malformed.
+    #[test]
+    fn malformed_claim_is_reported() {
+        let tmp = TempDir::new().unwrap();
+        let storage = test_storage(&tmp);
+        let db_path = storage.workspace_dir().join("index.sqlite");
+        std::fs::create_dir_all(storage.workspace_dir()).unwrap();
+
+        init_sqlite_vec();
+        let mut idx =
+            MemoryIndex::open_or_create(&db_path, storage.clone(), MemoryIndexConfig::default(), 4)
+                .unwrap();
+        let file = tmp.path().join("note.md");
+        std::fs::write(&file, "# Note\n\nsome content.").unwrap();
+        idx.reindex_file(&file, "workspace").unwrap();
+        drop(idx);
+
+        set_claim(&db_path, "not-a-timestamp");
+        let report = diagnose(&storage);
+        assert_eq!(report.workspace.reindex_claim.as_deref(), Some("not-a-timestamp"));
+        assert!(report.workspace.reindex_claim_age_secs.is_none());
+
+        let rendered = render_scope(&report.workspace);
+        assert!(rendered.contains("malformed"), "got:\n{rendered}");
+        assert!(!rendered.contains("stuck"));
     }
 }
