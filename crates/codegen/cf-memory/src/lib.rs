@@ -28,6 +28,7 @@ pub mod doctor;
 pub mod dream;
 pub mod dream_lock;
 pub mod embedding;
+pub mod git_backup;
 pub mod index;
 pub mod mmr;
 pub mod observation;

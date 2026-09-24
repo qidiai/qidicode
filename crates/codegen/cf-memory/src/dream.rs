@@ -435,6 +435,19 @@ pub fn execute_dream(
         }
     };
 
+    // Hook 1 (A1′): snapshot *before* the consolidated response is written and,
+    // crucially, before `clean_processed_sessions` deletes the digested session
+    // logs — so the soon-to-be-deleted logs enter git history first.
+    // Best-effort: a failure never disturbs the dream flow.
+    if !storage.is_ephemeral()
+        && let Err(e) = super::git_backup::snapshot(
+            storage.global_dir(),
+            "pre-dream snapshot (session logs about to be consolidated)",
+        )
+    {
+        tracing::debug!(target: LOG, error = %e, "DREAM_EXECUTE: pre-dream git snapshot failed (ignored)");
+    }
+
     let chars_written = content.chars().count();
     if let Err(e) = storage.write_long_term(super::storage::MemoryScope::Workspace, &content) {
         let _ = lock.rollback(prior);
@@ -444,6 +457,17 @@ pub fn execute_dream(
             sessions_eligible,
             cleaned_stems: Vec::new(),
         };
+    }
+
+    // Hook 2: snapshot the freshly consolidated MEMORY.md so the new state
+    // (and any hand edits) is captured. Best-effort, like hook 1.
+    if !storage.is_ephemeral()
+        && let Err(e) = super::git_backup::snapshot(
+            storage.global_dir(),
+            "post-dream: consolidated MEMORY.md",
+        )
+    {
+        tracing::debug!(target: LOG, error = %e, "DREAM_EXECUTE: post-dream git snapshot failed (ignored)");
     }
 
     // Consolidation succeeded — clean up the session files that were read.
@@ -875,6 +899,83 @@ mod tests {
         let memory = fs::read_to_string(ws.join("MEMORY.md")).unwrap();
         assert!(memory.contains("We chose Rust."));
         assert!(memory.contains("Event-driven."));
+    }
+
+    // ⑤ A successful dream run leaves at least two snapshots (pre + post) in
+    // the memory-root git repository, and the session log it deletes is still
+    // recoverable from history (A1′).
+    #[test]
+    fn execute_dream_snapshots_memory_repo() {
+        let dir = TempDir::new().unwrap();
+        let lock = DreamLock::new(dir.path());
+        let global = dir.path().join("memory");
+        let workspace = global.join("test-ws");
+        let storage = MemoryStorage::with_paths(global.clone(), workspace.clone());
+        let sdir = workspace.join("sessions");
+        fs::create_dir_all(&sdir).unwrap();
+
+        // An aged session log so the cleanup recency guard lets it be deleted.
+        let stem = "2024-01-01-foo-abcd1234".to_string();
+        write_session(&sdir, &stem, 3600);
+
+        let response = "## Decisions\n\nWe chose Rust.";
+        let result = execute_dream(
+            &lock,
+            &storage,
+            response,
+            5,
+            300,
+            &sdir,
+            std::slice::from_ref(&stem),
+        );
+
+        assert!(
+            matches!(result.status, DreamStatus::Completed { .. }),
+            "status: {:?}",
+            result.status
+        );
+        assert_eq!(
+            result.cleaned_stems,
+            vec![stem.clone()],
+            "session log should have been deleted"
+        );
+
+        // Two hooks fired (pre + post) => at least two commits.
+        let count = git_count(&global);
+        assert!(count >= 2, "expected >=2 commits (pre + post), got {count}");
+
+        // A1′: the deleted session log is still recoverable from history.
+        let hash = git_stdout(&global, &["rev-list", "--max-parents=0", "HEAD"]);
+        let hash = hash.trim();
+        let shown = git_stdout(
+            &global,
+            &["show", &format!("{hash}:test-ws/sessions/{stem}.md")],
+        );
+        assert!(shown.contains("test"), "recovered session log:\n{shown}");
+    }
+
+    /// Run `git -C <root> <args>`, asserting success, returning stdout.
+    fn git_stdout(root: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// Number of commits reachable from HEAD.
+    fn git_count(root: &Path) -> usize {
+        git_stdout(root, &["rev-list", "--count", "HEAD"])
+            .trim()
+            .parse()
+            .unwrap()
     }
 
     #[test]
