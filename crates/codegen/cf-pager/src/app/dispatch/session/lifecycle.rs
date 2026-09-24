@@ -297,18 +297,37 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
     // With the memory gate CLOSED the command is NOT advertised, so the shell
     // resolver would treat a stray "/flush" as an ordinary user prompt — an
     // extra LLM turn that pollutes the outgoing session's history instead of
-    // flushing it. Checking the advertised command keeps us from regressing
-    // that way.
-    let outgoing = get_active_agent(app).and_then(|a| {
-        a.session.session_id.clone().map(|sid| {
-            let has_flush = a
-                .session
-                .available_commands
-                .iter()
-                .any(|c| c.name == "flush");
-            (a.session.id, sid, has_flush)
-        })
-    });
+    // flushing it.
+    //
+    // Honesty note on what this guard does and does not cover:
+    // `available_commands` is only a *snapshot* taken at session start (and
+    // refreshed on each `AvailableCommandsUpdate`), so this check is
+    // best-effort protection against misfiring — NOT a live guarantee that the
+    // memory gate is open. A mid-session gate change such as `/memory off` is
+    // not reflected here until the shell pushes a fresh update, so the "stale
+    // snapshot" window (gate closed, no update delivered yet) is left
+    // uncovered by this guard; the shell narrows that window by
+    // re-advertising the commands after a switch.
+    //
+    // Resolve the outgoing session off `active_view` directly rather than via
+    // `get_active_agent`: the latter penetrates into a focused subagent view
+    // (`ctx.rs:38-49`), and that child's `session.available_commands` is never
+    // populated → the guard would always read "no /flush" and silently skip
+    // the flush whenever a subagent view is focused. The root `AgentView` is
+    // the one that owns the outgoing session.
+    let outgoing = match app.active_view {
+        ActiveView::Agent(id) => app.agents.get(&id).and_then(|a| {
+            a.session.session_id.clone().map(|sid| {
+                let has_flush = a
+                    .session
+                    .available_commands
+                    .iter()
+                    .any(|c| c.name == "flush");
+                (a.session.id, sid, has_flush)
+            })
+        }),
+        _ => None,
+    };
     let flushing_previous = outgoing
         .as_ref()
         .is_some_and(|(_, _, has_flush)| *has_flush);

@@ -852,6 +852,67 @@ fn new_session_skips_flush_when_previous_session_lacks_flush_command() {
         app.agents[&new_id].toast
     );
 }
+/// A focused subagent view must not defeat the `/new` flush guard. The
+/// outgoing session lives on the ROOT `AgentView`, but `get_active_agent`
+/// penetrates into a focused child view (`ctx.rs:38-49`) whose
+/// `session.available_commands` is never populated — so a guard reading through
+/// `get_active_agent` always sees "no /flush" and silently skips the flush
+/// whenever a subagent view is focused. `/new` must still flush the ROOT
+/// session (and only the root agent/session).
+#[test]
+fn new_session_flushes_root_session_when_subagent_view_focused() {
+    let mut app = test_app_with_agent();
+    let root_id = AgentId(0);
+    // The ROOT session advertises `/flush`.
+    app.agents.get_mut(&root_id).unwrap().session.available_commands =
+        vec![acp::AvailableCommand::new(
+            "flush".to_string(),
+            "Flush conversation memory to disk now".to_string(),
+        )];
+    let root_sid = app.agents[&root_id]
+        .session
+        .session_id
+        .clone()
+        .expect("precondition: root session is bound");
+    // Focus a subagent view on the root agent. The child view advertises no
+    // commands, so the old `get_active_agent`-based guard would have read the
+    // CHILD and skipped the flush.
+    {
+        let child = AgentView::new(
+            make_test_agent_session(&app, AgentId(99), "child-sess"),
+            ScrollbackState::new(),
+        );
+        let agent = app.agents.get_mut(&root_id).unwrap();
+        agent.subagent_views.insert("child-1".into(), Box::new(child));
+        agent.active_subagent = Some("child-1".into());
+    }
+    // Precondition: active-agent resolution really does penetrate into the
+    // child, so this test exercises the regression the fix targets.
+    assert_eq!(
+        get_active_agent(&app).map(|a| a.session.id),
+        Some(AgentId(99)),
+        "precondition: get_active_agent must resolve to the focused child"
+    );
+    let effects = dispatch(Action::NewSession, &mut app);
+    let flush = effects
+        .iter()
+        .find(|e| matches!(e, Effect::SendPrompt { text, .. } if text == "/flush"))
+        .unwrap_or_else(|| panic!("expected a /flush effect, got: {effects:?}"));
+    match flush {
+        Effect::SendPrompt {
+            agent_id,
+            session_id,
+            ..
+        } => {
+            assert_eq!(*agent_id, root_id, "flush must target the ROOT agent");
+            assert_eq!(
+                *session_id, root_sid,
+                "flush must target the ROOT session, not the child or the new placeholder"
+            );
+        }
+        other => panic!("expected SendPrompt, got {other:?}"),
+    }
+}
 #[test]
 fn new_session_falls_back_to_app_cwd_on_welcome_screen() {
     let mut app = test_app();
