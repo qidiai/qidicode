@@ -5,7 +5,7 @@
 //!
 //! 1. **Orphan chunks** — indexed paths whose source file no longer exists.
 //! 2. **Stuck reindex claims** — a leftover `reindex_claim` lock value whose
-//!    age exceeds [`STALE_CLAIM_SECS`].
+//!    age exceeds the claim threshold (see [`stale_claim_secs`]).
 //! 3. **Stale / low-access chunks** — older than [`STALE_AGE_DAYS`] and never
 //!    accessed.
 //! 4. **Suspected redundant clusters** — chunk texts whose token-Jaccard
@@ -35,8 +35,13 @@ const REDUNDANCY_THRESHOLD: f64 = 0.8;
 /// Upper bound on chunks fed into the O(n²) redundancy scan.
 const MAX_REDUNDANCY_CHUNKS: usize = 2000;
 
-/// A `pid:unix_ts` reindex claim older than this many seconds is "stuck".
-const STALE_CLAIM_SECS: i64 = 60;
+/// Doctor's "stuck" threshold follows the watcher/claim default
+/// (`MemoryWatcherConfig::default().stale_claim_secs`), the same source the
+/// reindex mechanism's `try_claim_reindex(stale_threshold_secs)` uses by
+/// default; per-session overrides are out of scope for this read-only CLI tool.
+fn stale_claim_secs() -> i64 {
+    cf_config::xai_grok_config_types::MemoryWatcherConfig::default().stale_claim_secs
+}
 
 const SECS_PER_DAY: i64 = 86_400;
 
@@ -163,8 +168,13 @@ fn render_scope(r: &ScopeReport) -> String {
 
     match (&r.reindex_claim, r.reindex_claim_age_secs) {
         (None, _) => out.push_str("  stuck reindex claim: none\n"),
-        (Some(v), Some(age)) if age > STALE_CLAIM_SECS => {
+        (Some(v), Some(age)) if age > stale_claim_secs() => {
             out.push_str(&format!("  stuck reindex claim: {v} (age {age}s)\n"));
+        }
+        // A claim timestamp in the future yields a negative age; render it
+        // explicitly instead of showing a nonsensical "(age -Ns)".
+        (Some(v), Some(age)) if age < 0 => {
+            out.push_str(&format!("  future-dated reindex claim: {v}\n"));
         }
         (Some(v), Some(age)) => {
             out.push_str(&format!("  active reindex claim: {v} (age {age}s)\n"));
@@ -264,7 +274,9 @@ fn diagnose_scope(scope: &str, dir: &Path) -> ScopeReport {
 /// - **A** (full, no `text`): `id, path, created_at, access_count` — the
 ///   distinct-path (orphan) set and the stale facts.
 /// - **B** (with `text`, ordered + limited): the newest
-///   [`MAX_REDUNDANCY_CHUNKS`] chunks for the redundancy scan.
+///   [`MAX_REDUNDANCY_CHUNKS`] chunks for the redundancy scan. The `id DESC`
+///   tiebreaker makes the selected subset reproducible when many chunks share
+///   the same `created_at`.
 fn read_readonly(db_path: &Path) -> Result<IndexSnapshot, String> {
     let conn = cf_sqlite_journal::JournalMode::for_db_path(db_path)
         .open_readonly(db_path)
@@ -306,9 +318,10 @@ fn read_readonly(db_path: &Path) -> Result<IndexSnapshot, String> {
     let reindex_claim_age_secs = reindex_claim.as_deref().and_then(claim_age_secs);
 
     // Query B: newest chunks WITH text, ordered + limited — redundancy only.
+    // `id DESC` breaks `created_at` ties so the truncated subset is stable.
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT id, text FROM chunks ORDER BY created_at DESC LIMIT {MAX_REDUNDANCY_CHUNKS}"
+            "SELECT id, text FROM chunks ORDER BY created_at DESC, id DESC LIMIT {MAX_REDUNDANCY_CHUNKS}"
         ))
         .map_err(|e| format!("cannot read chunks: {e}"))?;
     let redundancy_chunks = stmt
@@ -718,7 +731,7 @@ Memory doctor report
         assert!(!rendered.contains("error reading index"));
     }
 
-    /// R6: only a claim older than [`STALE_CLAIM_SECS`] is "stuck".
+    /// R6: only a claim older than the claim threshold is "stuck".
     #[test]
     fn claim_staleness_is_time_aware() {
         let tmp = TempDir::new().unwrap();
@@ -784,5 +797,98 @@ Memory doctor report
         let rendered = render_scope(&report.workspace);
         assert!(rendered.contains("malformed"), "got:\n{rendered}");
         assert!(!rendered.contains("stuck"));
+    }
+
+    /// F3: the doctor's "stuck" threshold must follow the watcher/claim
+    /// default, not a doctor-local hardcode.
+    #[test]
+    fn stale_claim_threshold_matches_watcher_default() {
+        assert_eq!(
+            stale_claim_secs(),
+            cf_config::xai_grok_config_types::MemoryWatcherConfig::default().stale_claim_secs,
+            "doctor must share the watcher/claim default threshold"
+        );
+        assert_eq!(
+            stale_claim_secs(),
+            60,
+            "watcher default stale_claim_secs is 60"
+        );
+    }
+
+    /// F4: with many chunks sharing `created_at`, query B's `id DESC` tiebreak
+    /// makes the selected subset reproducible across reads.
+    #[test]
+    fn redundancy_query_tiebreak_is_reproducible() {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("index.sqlite");
+        let conn = cf_sqlite_journal::JournalMode::for_db_path(&db_path)
+            .open(&db_path)
+            .unwrap();
+        conn.execute_batch(
+            "CREATE TABLE chunks (\
+                 id TEXT PRIMARY KEY, path TEXT, text TEXT, \
+                 created_at INTEGER, access_count INTEGER);\
+             CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);",
+        )
+        .unwrap();
+        // Five chunks, all with the SAME created_at, distinct ids.
+        for i in 0..5 {
+            conn.execute(
+                "INSERT INTO chunks (id, path, text, created_at, access_count) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![format!("c{i}"), "/p.md", "same text", 1_000i64, 0i64],
+            )
+            .unwrap();
+        }
+        drop(conn);
+
+        let snap_a = read_readonly(&db_path).unwrap();
+        let snap_b = read_readonly(&db_path).unwrap();
+        let ids_a: Vec<String> = snap_a.redundancy_chunks.iter().map(|c| c.id.clone()).collect();
+        let ids_b: Vec<String> = snap_b.redundancy_chunks.iter().map(|c| c.id.clone()).collect();
+
+        assert_eq!(ids_a, ids_b, "tied created_at must give a reproducible subset");
+        // `id DESC` tiebreak → descending ids.
+        assert_eq!(ids_a, vec!["c4", "c3", "c2", "c1", "c0"]);
+    }
+
+    /// F4: a future-dated claim (negative age) renders explicitly, never as a
+    /// negative "(age -Ns)".
+    #[test]
+    fn future_dated_claim_renders_without_negative_age() {
+        let tmp = TempDir::new().unwrap();
+        let storage = test_storage(&tmp);
+        let db_path = storage.workspace_dir().join("index.sqlite");
+        std::fs::create_dir_all(storage.workspace_dir()).unwrap();
+
+        init_sqlite_vec();
+        let mut idx =
+            MemoryIndex::open_or_create(&db_path, storage.clone(), MemoryIndexConfig::default(), 4)
+                .unwrap();
+        let file = tmp.path().join("note.md");
+        std::fs::write(&file, "# Note\n\nsome content.").unwrap();
+        idx.reindex_file(&file, "workspace").unwrap();
+        drop(idx);
+
+        // Claim timestamp one hour in the future → age is negative.
+        set_claim(&db_path, &format!("1234:{}", unix_now() + 3600));
+        let report = diagnose(&storage);
+        assert!(
+            report.workspace.reindex_claim_age_secs.unwrap() < 0,
+            "expected a negative age, got {:?}",
+            report.workspace.reindex_claim_age_secs
+        );
+
+        let rendered = render_scope(&report.workspace);
+        assert!(
+            rendered.contains("future-dated reindex claim: 1234:"),
+            "got:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("age -"),
+            "must not render a negative age, got:\n{rendered}"
+        );
+        assert!(!rendered.contains("active reindex claim"), "got:\n{rendered}");
+        assert!(!rendered.contains("stuck reindex claim"), "got:\n{rendered}");
     }
 }

@@ -785,6 +785,12 @@ impl SessionActor {
                     format!("Memory is already {state}.")
                 };
                 self.send_slash_command_output(&msg).await;
+                // Refresh the advertised command set so the pager's
+                // `available_commands` reflects the post-toggle memory
+                // enable/disable state (and read-tool registration)
+                // immediately, rather than staying stale until the next
+                // unrelated refresh.
+                self.send_available_commands_update().await;
                 self.refresh_goal_harness_enabled().await;
                 ok_end_turn(0, None)
             }
