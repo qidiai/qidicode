@@ -44,8 +44,8 @@ metadata:
 |---|---|
 | turbo 4步 @1024² | 127s 热跑 / 6min 冷启动 |
 | turbo 4步 @1328² | ~9.5 分钟/张（含 TE 编码） |
-| 原版 25步 @1024² cfg1 | 冷 15:17 / 估算热 ~12min |
-| 原版 25步 @1328² **cfg4.5** | ~40-45 分钟/张（**CFG>1 时每步正负双跑，耗时×2**） |
+| UC 25步 @1024² cfg1（**实测数据；原版 stock GGUF 下载后从未实测**——2026-09-25 GLM-5.3 审计发现原表误标） | 冷 15:17（26.35s/步） |
+| 原版/UC 25步 @1328² **cfg4.5** | **未实测外推值** ~40-45 分钟/张；"CFG>1 每步双跑×2"逻辑已被代码证实（comfy\samplers.py:610 cfg1 跳负向），但该行数字无运行记录背书 |
 | 分辨率换算 | 步耗时 ∝ token 数 ∝ 面积：2K(2048²)≈1024² 的 4 倍 |
 | 显存峰值 | ~4.7GB/6GB；TE 7.9GB 常驻 RAM 流式上卡（16GB RAM 机器需关重载进程） |
 
@@ -53,11 +53,12 @@ metadata:
 
 | 方案 | 结果 |
 |---|---|
-| `--force-fp16`（全局 fp16） | ❌ 病态：卡 Model Initializing、GPU 100% 空转，永久禁用 |
-| `UnetLoaderGGUFAdvanced(dequant_dtype=fp16)` | ❌ 零提速（26.2 vs 26.0s/步）——反量化 fp16 后计算仍按 fp32 投影 |
-| `--fp16-unet`（DiT 级 fp16） | ❌ **输出哈希与 fp32 逐字节相同=彻底 no-op**（该开关只作用于原生 safetensors 权重路径，GGUF 无效） |
-| `QwenImage21Cache`（前缀 KV 缓存） | ⚠️ T2I 零提速（26.0-26.2s/步，文本前缀占比太小）；**仅编辑/多参考图任务有意义**，应接入该场景 |
-| int8_convrot 权重 + comfy-kitchen INT8 内核 | 🔲 未测候选：图灵原生 INT8 tensor core，city96 dequant 列表有 int8 内核；需重下 Comfy-Org int8_convrot 权重（7.26G）再测。**GGUF 路径吃不到 tensor core，这是算子层唯一可能翻盘点** |
+| `--force-fp16`（全局 fp16） | ❌ 病态：卡 Model Initializing、GPU 100% 空转，永久禁用。**机制（GLM 审计微基准坐实）：TU116 无 fp16 加速单元，fp16 GEMM 实测比 fp32 慢 6×（219ms vs 36.1ms @4096³）——fp16 方向永久关闭** |
+| `UnetLoaderGGUFAdvanced(dequant_dtype=fp16)` | ❌ 零提速（26.2 vs 26.0s/步）——dequant.py 里 fp16 只是反量化中间量，随后 `.to(dtype)` 转回 fp32 计算（参数真生效：输出字节与基线不同） |
+| `--fp16-unet`（DiT 级 fp16） | ❌ **输出哈希与 fp32 逐字节相同=彻底 no-op**。正向证据（GLM 审计补齐）：该次会话日志确有 `model weight dtype torch.float16, manual cast: torch.float32`（flag 已应用）；根因 nodes.py:175 —— **GGUF 加载链不把 unet_dtype 传进 load_diffusion_model_state_dict** |
+| `QwenImage21Cache`（前缀 KV 缓存） | ⚠️ T2I 零提速（26.0-26.2s/步）；GLM 审计修正：缓存机制**默认就是开的**（model_base.py reset_prefix_cache），节点只调 device/dtype，文本前缀实为几十 token 量级（非数百）；**仅编辑/多参考图任务有意义**，该场景应接入 |
+| int8_convrot 权重 | 🔲 未测候选（**GLM-5.3 审计已修正预期**）：GTX 16 系无 IMMA/tensor core，实际路径=eager 纯 torch 包装 + cuBLASLt INT8（**DP4A shader 路径**）。本机微基准：int8 GEMM 7.4ms vs fp32 36.1ms（**4.9×**），完整 int8_linear(convrot=True) 15.7ms vs fp32 linear 30.1ms（**1.9×**）→ 预期步时缩减 15-30%（26→18-22s/步），非 2×；**RAM 是真瓶颈**（TE 7.9G 卸载 + int8 7.26G vs 16G 内存，页换悬崖） |
+| **环境事实（GLM 审计发现，改认知）** | portable 为 cu126 → ComfyUI 核心把 comfy_kitchen **cuda 后端整体禁用**（需 CUDA 13+，quant_ops.py:26-27），全部算子实际走 eager；该 pyd 亦无 int8_linear 注册（无 cuBLASLt）、SM75 cutlass int8 内核仅服务 W4A8 回退且**按设备名拉黑 GTX 16 系**（is_turing AND NOT is_16series） |
 | xformers / flash-attention | 预判无增益：flash 不支持 sm_75；ComfyUI "pytorch attention" 已走 SDPA mem-efficient 分支 |
 
 ## 三、全新机器复装配方（F:\AI 损毁时按此重建）
