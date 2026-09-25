@@ -10,6 +10,17 @@ metadata:
 
 # 标书效果图生成技能
 
+## 产物呈现（强制）
+
+本技能任何产出交付文件（docx/xlsx/pptx/pdf/png 等）的任务：
+
+1. 文件落盘成功后立即登记：
+   `python ~/.qidi/skills/office-artifact/scripts/card.py add <产物路径> --skill bid-render --note <一句话说明>`
+2. 任务最终回复前必须输出卡片总览：
+   `python ~/.qidi/skills/office-artifact/scripts/card.py show`
+3. 不许只回一行文件路径就结束；卡片失败则降级为 Markdown 表格列出全部产物。
+
+
 用 image_gen 工具生成标书插图。标书配图的特殊要求：**工程感真实、无虚构元素、
 与方案数据一致**（塔吊数量、场地布置与平面图对应）。
 

@@ -47,7 +47,7 @@ tool_timeouts = { slow_op = 120 }     # Per-tool timeout overrides, seconds
 > - env `GROK_MAX_MCP_OUTPUT_BYTES` or `MAX_MCP_OUTPUT_BYTES` (bytes; Grok-native
 >   wins if both set; Claude-style name, but we bound by **bytes** not tokens)
 > - `config.toml` — user-level (`~/.qidi/config.toml`) **or repo-level**
->   (`.grok/config.toml` anywhere on the cwd → git-root chain; the deepest
+>   (`.qidi/config.toml` anywhere on the cwd → git-root chain; the deepest
 >   file wins, and the repo value applies only once the folder is trusted):
 >
 > ```toml
@@ -55,7 +55,7 @@ tool_timeouts = { slow_op = 120 }     # Per-tool timeout overrides, seconds
 > max_output_bytes = 40000
 > ```
 >
-> Precedence: requirements.toml > env > repo `.grok/config.toml` >
+> Precedence: requirements.toml > env > repo `.qidi/config.toml` >
 > user/managed config > default. Repo edits apply to running sessions in that
 > directory via config hot-reload.
 
@@ -115,7 +115,7 @@ grok mcp doctor --json        # Machine-readable output
 
 The transport defaults to `stdio`; pass `--transport http` or `--transport sse` for remote servers.
 
-By default `grok mcp add` writes to `~/.qidi/config.toml` (`--scope user`). Use `--scope project` to write to `.grok/config.toml` in the current directory instead, which can be committed and shared with your team (see [Project-Scoped MCP Servers](#project-scoped-mcp-servers)). Header and environment variable values are stored verbatim, so reference secrets as `${VAR}` instead of pasting them into a committed project config (see [Example Configurations](#example-configurations)). `grok mcp list` shows servers from both scopes, marking project-scoped ones with `(project)`.
+By default `grok mcp add` writes to `~/.qidi/config.toml` (`--scope user`). Use `--scope project` to write to `.qidi/config.toml` in the current directory instead, which can be committed and shared with your team (see [Project-Scoped MCP Servers](#project-scoped-mcp-servers)). Header and environment variable values are stored verbatim, so reference secrets as `${VAR}` instead of pasting them into a committed project config (see [Example Configurations](#example-configurations)). `grok mcp list` shows servers from both scopes, marking project-scoped ones with `(project)`.
 
 `grok mcp remove` searches both scopes and exits 0 after removing the server. It exits 1 when the name is not found, or when the name is defined in both user and project scope — pass `--scope` to say which one to remove.
 
@@ -125,18 +125,18 @@ Breaking changes from earlier releases: `--env` now takes one `KEY=value` per fl
 
 ## Project-Scoped MCP Servers
 
-MCP servers can be configured per-project by placing a `.grok/config.toml` in your repository:
+MCP servers can be configured per-project by placing a `.qidi/config.toml` in your repository:
 
 ```
 my-project/
-  .grok/
+  .qidi/
     config.toml
   src/
   ...
 ```
 
 ```toml
-# .grok/config.toml
+# .qidi/config.toml
 [mcp_servers.linear]
 url = "https://mcp.linear.app/mcp"
 enabled = true
@@ -144,13 +144,13 @@ enabled = true
 
 When a server exposes a native HTTP/SSE endpoint, prefer the `url` form over wrapping it in a stdio proxy such as `npx mcp-remote <url>`. Grok handles HTTP/SSE and OAuth directly, so the native form avoids an extra subprocess per session. It also registers Grok's own OAuth client with the provider.
 
-Grok walks from the current directory up to the git repo root, loading `.grok/config.toml` at each level:
+Grok walks from the current directory up to the git repo root, loading `.qidi/config.toml` at each level:
 
 | Location | Scope | Priority |
 |----------|-------|----------|
 | `~/.qidi/config.toml` | All projects | Lowest |
-| `<repo-root>/.grok/config.toml` | This repository | Medium |
-| `<cwd>/.grok/config.toml` | Current directory | Highest |
+| `<repo-root>/.qidi/config.toml` | This repository | Medium |
+| `<cwd>/.qidi/config.toml` | Current directory | Highest |
 
 If a project defines a server with the same name as a global one, the project version replaces it entirely (fields are not merged).
 
@@ -202,7 +202,7 @@ Grok loads MCP server configurations from multiple sources for compatibility:
 
 | Source | Format | Location | Configurable |
 |--------|--------|----------|-------------|
-| `config.toml` | Native Grok config | `~/.qidi/config.toml`, `.grok/config.toml` | Always on |
+| `config.toml` | Native Grok config | `~/.qidi/config.toml`, `.qidi/config.toml` | Always on |
 | `.claude.json` | Claude Code format | `~/.claude.json` | `[compat.claude] mcps` |
 | `.cursor/mcp.json` | Cursor format | `~/.cursor/mcp.json`, `<project>/.cursor/mcp.json` | `[compat.cursor] mcps` |
 | `.mcp.json` | MCP standard format | Project root (cwd to git root) | Loaded unless you have imported or dismissed the Claude import prompt (the import marker is set) |

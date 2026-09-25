@@ -184,6 +184,24 @@ def convert(md_path, out_path, project, bidder, anonymous):
             doc.add_paragraph()
             continue
 
+        if stripped.startswith("!["):
+            m = re.match(r"^!\[([^\]]*)\]\(([^)]+)\)", stripped)
+            if m:
+                img = Path(m.group(2))
+                if not img.is_absolute():
+                    img = md_path.parent / img
+                if img.exists():
+                    doc.add_picture(str(img), width=Cm(15.5))
+                    doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    cap = doc.add_paragraph()
+                    cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    r = cap.add_run(m.group(1) or img.stem)
+                    set_font(r, cn_font="黑体", size=10.5)
+                else:
+                    p = doc.add_paragraph()
+                    add_runs_with_bold(p, f"[缺图：{m.group(2)}]")
+                i += 1
+                continue
         if stripped.startswith("### "):
             p = doc.add_paragraph(style="Heading 3")
             add_runs_with_bold(p, stripped[4:], size=12, cn_font="黑体")

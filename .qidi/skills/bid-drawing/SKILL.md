@@ -11,6 +11,17 @@ metadata:
 
 # 标书施工图纸处理技能
 
+## 产物呈现（强制）
+
+本技能任何产出交付文件（docx/xlsx/pptx/pdf/png 等）的任务：
+
+1. 文件落盘成功后立即登记：
+   `python ~/.qidi/skills/office-artifact/scripts/card.py add <产物路径> --skill bid-drawing --note <一句话说明>`
+2. 任务最终回复前必须输出卡片总览：
+   `python ~/.qidi/skills/office-artifact/scripts/card.py show`
+3. 不许只回一行文件路径就结束；卡片失败则降级为 Markdown 表格列出全部产物。
+
+
 施工图是技术标评审的硬材料，缺图、图号不连续、目录与图不一致都会导致扣分甚至废标。
 本技能覆盖四类能力：
 
@@ -22,8 +33,11 @@ metadata:
 ## 前置依赖
 
 ```bash
-pip install ezdxf pymupdf Pillow python-docx
+pip install ezdxf pymupdf Pillow python-docx matplotlib
 ```
+
+DWG格式需 [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter)（免费），
+未安装时工具会输出结构化引导；DXF无需任何额外软件。
 
 ## 使用流程
 
@@ -33,10 +47,23 @@ pip install ezdxf pymupdf Pillow python-docx
 # 批量检查 DOCX 内嵌图纸和引用
 python scripts/drawing_audit.py <投标书.docx> --project "<项目名称>"
 
-# 检查指定 DWG/DXF 文件
-python scripts/drawing_audit.py <dwg目录或文件> --check-figures
+# DXF 图纸元数据提取（R2新增：图号/图名/比例/图幅/图层语义/天正兼容）
+python scripts/dxf_meta.py <图纸.dxf 或目录>
+
+# 目录-图纸交叉比对（R3新增：四清单 missing/extra/name_mismatch/duplicates）
+python scripts/compare_catalog.py --catalog <图纸清单.txt或index.json> --drawings <dxf_meta输出.json>
 ```
 
+dxf_meta 输出JSON字段：
+- `fig_id`（来源filename/titleblock）、`fig_name`（含置信度high/medium/low）
+- `scale`（1:xxx）、`sheet_size`（A系列+来源layout_setup/geometry_est）
+- `units`（$INSUNITS归一）、`layer_semantics`（GB专业分类实体占比）
+- `proxy_entities`（天正代理实体数，>0提示人工核验）、`recover_mode_used`
+
+compare_catalog 输出四清单（图号归一化：全/半角、破折号五胞胎、"图"前缀、前导零）：
+- `missing[]` 清单有图无纸 / `extra[]` 有图无清单
+- `name_mismatch[]` 图号同图名差异（相似度<0.6）
+- `duplicates[]` 同图号多张
 输出 JSON 报告，包含：
 - 图号列表（含页码、图名、图幅、比例）
 - 缺失图清单（与招标文件图纸清单对比）
@@ -54,15 +81,18 @@ python scripts/pdf_extract_drawings.py <招标文件.pdf> --output-dir drawings/
 - 每页转 300dpi PNG + 原始 PDF 切片
 - 输出图号列表（供代理后续人工核对）
 
-### 场景 3：DWG → 高清图 PNG（供插入 Word）
+### 场景 3：DWG/DXF → 高清图 PNG（供插入 Word）
 
 ```bash
-python scripts/dwg_to_png.py <图纸.dwg> -o <输出目录> --dpi 300
+python scripts/dwg_to_png.py <图纸.dwg|.dxf> -o <输出目录> --dpi 300
 ```
 
-- 按布局（Layout）逐一输出（Model space + 所有 Paper space）
-- PNG 白底黑线，矢量级清晰度
-- 自动居中/裁剪边界外空白
+- 渲染引擎（R1改造 2026-09-07）：默认 `official`（ezdxf官方MatplotlibBackend——
+  真实文字渲染/全实体支持/finalize自动定界）；`--engine legacy` 回滚旧自研渲染器
+  （已知缺陷：文字"Aa"占位/缺INSERT/SPLINE画不出）
+- 布局选择：非空 Paper space 优先，全空则回退 Model space（空布局不出白图）
+- 天正/损坏DXF自动走 `ezdxf.recover` 容错（输出 `recover_used: true` 提示人工复核）
+- DWG输入：自动经 ODA File Converter 转换（未装则结构化引导，不再裸报错）
 
 ## 图纸质量铁律（合肥 AI 评标实战经验）
 

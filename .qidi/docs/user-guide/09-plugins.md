@@ -40,7 +40,7 @@ Grok discovers plugins from these locations, in priority order:
 |----------|-------|-------|
 | `_meta.pluginDirs` (`session/new` / `session/load`) | Session -- loaded for that session only | Trusted automatically |
 | `--plugin-dir` (CLI flag, `grok agent`) | Process -- loaded for that agent process only | Trusted automatically |
-| `.grok/plugins/` | Project -- shared with the team through version control | Requires trust |
+| `.qidi/plugins/` | Project -- shared with the team through version control | Requires trust |
 | `~/.qidi/plugins/` | User -- personal plugins for every project | Trusted automatically |
 | `[plugins].paths` (config) | Custom directories you add in `config.toml` | Depends on location |
 
@@ -235,7 +235,7 @@ Place this file at `~/.qidi/settings.json` or `~/.claude/settings.json`.
 
 Enabling a plugin loads its skills, slash commands, and agents. Trust is separate and controls whether a plugin's code runs: even for an enabled plugin, its hooks, MCP servers, and LSP servers stay inactive until you trust it. This prevents an untrusted repository from running code on your machine.
 
-Grok trusts plugins from `~/.qidi/plugins/` automatically. Project plugins in `.grok/plugins/` require explicit trust. To trust a plugin, install it with `--trust`:
+Grok trusts plugins from `~/.qidi/plugins/` automatically. Project plugins in `.qidi/plugins/` require explicit trust. To trust a plugin, install it with `--trust`:
 
 ```bash
 grok plugin install <source> --trust

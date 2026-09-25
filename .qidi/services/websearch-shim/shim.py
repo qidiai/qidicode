@@ -47,6 +47,8 @@ from flask import Flask, request, jsonify, Response
 
 UPSTREAM = "http://127.0.0.1:8765/v1/chat/completions"
 SHIM_MODEL = "deepseek-v4-flash"
+# 0909: 上游已下架 deepseek-v4-flash，转发前自动映射到 codely-flash（同一底层模型）；对外仍通告原名
+MODEL_REMAP = {"deepseek-v4-flash": "codely-flash"}
 SHIM_VERSION = "2.3"
 PORT = 8766
 
@@ -542,7 +544,7 @@ def v1_responses():
     if data.get("instructions"):
         log.info("instructions=%s", str(data.get("instructions"))[:1500])
 
-    model = data.get("model") or SHIM_MODEL
+    model = MODEL_REMAP.get(data.get("model") or SHIM_MODEL, data.get("model") or SHIM_MODEL)
     messages = build_messages(data)
 
     tools = data.get("tools") or []

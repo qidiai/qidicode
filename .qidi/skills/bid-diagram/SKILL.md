@@ -12,6 +12,17 @@ metadata:
 
 # 标书施工图表生成技能
 
+## 产物呈现（强制）
+
+本技能任何产出交付文件（docx/xlsx/pptx/pdf/png 等）的任务：
+
+1. 文件落盘成功后立即登记：
+   `python ~/.qidi/skills/office-artifact/scripts/card.py add <产物路径> --skill bid-diagram --note <一句话说明>`
+2. 任务最终回复前必须输出卡片总览：
+   `python ~/.qidi/skills/office-artifact/scripts/card.py show`
+3. 不许只回一行文件路径就结束；卡片失败则降级为 Markdown 表格列出全部产物。
+
+
 四类程序化图表（脚本生成 PNG）+ 两类规范图（平面图/流程图）。
 所有图表输出 150dpi PNG，中文字体自动适配（SimSun/微软雅黑）。
 

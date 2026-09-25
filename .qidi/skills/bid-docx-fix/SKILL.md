@@ -12,6 +12,17 @@ metadata:
 
 # 标书DOCX修复技能
 
+## 产物呈现（强制）
+
+本技能任何产出交付文件（docx/xlsx/pptx/pdf/png 等）的任务：
+
+1. 文件落盘成功后立即登记：
+   `python ~/.qidi/skills/office-artifact/scripts/card.py add <产物路径> --skill bid-docx-fix --note <一句话说明>`
+2. 任务最终回复前必须输出卡片总览：
+   `python ~/.qidi/skills/office-artifact/scripts/card.py show`
+3. 不许只回一行文件路径就结束；卡片失败则降级为 Markdown 表格列出全部产物。
+
+
 ## 核心原则
 
 **DOCX本质是ZIP，用python zipfile直接读写document.xml最可靠**（python-docx存在命名空间检测bug，不可靠）。

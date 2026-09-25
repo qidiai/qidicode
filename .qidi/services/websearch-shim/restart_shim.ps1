@@ -23,7 +23,7 @@ if ($conn) {
 
 # 2) spawn new shim via WMI (survives this script's lifetime)
 $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-    CommandLine    = "python shim.py"
+    CommandLine    = "wscript.exe `"$dir\run_hidden.vbs`""  # v3: hidden console via wscript GUI host
     CurrentDirectory = $dir
 }
 if ($r.ReturnValue -ne 0) {

@@ -14,10 +14,17 @@ QIDI Code 免编译便携版 (v0.1.220-alpha.4)
 
 三、配置说明
   - 配置文件位于 .qidi\config.toml,包含各 AI Provider 的 API Key。
-  - 默认模型 agnes-2.5-flash,公网可用,开箱即用。
-  - 若目标电脑装有本机 ai-bridge(127.0.0.1:9800),可切换 glm-5.2 / deepseek-v4-flash-free;
-    没有也不影响公网模型。
-  - 如需修改配置,直接编辑 .qidi\config.toml。
+  - 默认模型 glm-5.3(经本机 8765 中转)。
+  - 模型来源分组(group): config.toml 里给 [model.*] 条目标 group = "来源"
+    (如 workbuddy / vibex / smtell / agnes / chipcloud...),/model 选择器会把
+    同来源模型折叠成一行 "<来源> ▸ N 个模型",选中该行或输入来源名才展开;
+    不标 group 的模型保持顶层平铺。当前 71 个模型中 59 个已按来源折叠,
+    主力 codely 池(glm-5.3/kimi-k3/codely-* 等 12 个)保持顶层。
+  - 已关闭自动升级([cli] auto_update=false): 本包是自编译 fork,
+    官方升级提示会误导且升级会覆盖自制 exe,请勿开启。
+  - [model."名字带点"] 表头必须加引号(如 [model."qwen3.8-27b"]),
+    否则 TOML 会解析成嵌套表导致条目失效。
+  - 如需修改配置,直接编辑 .qidi\config.toml(改完需重开会话生效)。
 
 四、运行要求
   - 64 位 Windows 7 及以上

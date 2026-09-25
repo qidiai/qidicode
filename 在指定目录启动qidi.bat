@@ -16,7 +16,7 @@ set "XAI_API_KEY=lan-no-key"
 set "TARGET=%~1"
 
 if not defined TARGET (
-    for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Select the project folder to start QIDI Code in'; if ($f.ShowDialog() -eq 'OK') { Write-Output $f.SelectedPath }"`) do set "TARGET=%%D"
+    for /f "usebackq delims=" %%D in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0.qidi\ops\pick_folder.ps1"`) do set "TARGET=%%D"
 )
 
 if not defined TARGET (
