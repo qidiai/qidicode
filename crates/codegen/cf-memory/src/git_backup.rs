@@ -53,6 +53,26 @@
 //!
 //! We shell out to the `git` CLI via [`std::process::Command`] rather than
 //! linking a library — the workflow already depends on a `git` binary.
+//!
+//! ## Takeover semantics (whose repository is this?)
+//!
+//! A repository is considered **ours** only if it carries the
+//! [`MANAGED_MARKER`] file inside its `.git/` directory. We write that marker
+//! exactly when *we* run `git init` on a memory root.
+//!
+//! If a memory root already contains a `.git/` **without** the marker, it is a
+//! *foreign* repository (for example a user ran `git init` there, or pointed
+//! the memory root at a checkout). In that case [`snapshot`] refuses outright —
+//! it returns `Err` and performs **no** write of any kind: no `git config`, no
+//! `git add`, no `git commit`, and not even our `.gitignore`. Reasons:
+//!
+//! * the user's own `.gitignore` might allow the live SQLite WAL database to be
+//!   committed, corrupting it; and
+//! * pinning our local `user.name` / `user.email` would shadow the user's own
+//!   identity for their repository.
+//!
+//! A foreign repository is therefore never touched; the user manages their own
+//! backup of it.
 
 use std::path::Path;
 use std::process::Command;
@@ -74,6 +94,38 @@ const GITIGNORE: &str = "\
 !*.md
 ";
 
+/// Marker file (inside `.git/`) that identifies a repository created by
+/// cf-memory. See the "Takeover semantics" module docs: a `.git/` without this
+/// marker is a foreign repository and is never written to.
+const MANAGED_MARKER: &str = "qidi-memory-managed";
+
+/// Environment variables that can redirect `git` at a *different* repository
+/// than the one named by `-C`. `git -C` does **not** immunise us against them,
+/// so every invocation scrubs them: otherwise a CI job that exports `GIT_DIR`
+/// could make us commit the memory markdown into an unrelated repository.
+const HOSTILE_GIT_ENV: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+];
+
+/// Build a `git` command rooted at `root` with a scrubbed environment.
+///
+/// Every git invocation in this module goes through here so that (a) `-C root`
+/// is always applied and (b) the [`HOSTILE_GIT_ENV`] variables inherited from
+/// the host are removed.
+fn git_command(root: &Path) -> Command {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(root);
+    for var in HOSTILE_GIT_ENV {
+        cmd.env_remove(var);
+    }
+    cmd
+}
+
 /// Best-effort git snapshot of the memory root. Never panics; all failures are
 /// returned as `Err` (caller logs and ignores).
 ///
@@ -91,8 +143,27 @@ pub fn snapshot(memory_root: &Path, message: &str) -> Result<(), String> {
     }
 
     // 1. Initialise the repository + whitelist on first use.
-    if !memory_root.join(".git").exists() {
+    //
+    // Takeover guard (M6): we only ever touch a repository we created. Ours
+    // carry the `qidi-memory-managed` marker inside `.git/`; a `.git/` without
+    // it is a *foreign* repository (e.g. the user ran `git init` in the memory
+    // root) and is left completely untouched — no config, no add, no commit,
+    // not even a `.gitignore`. We return `Err` for the caller to log.
+    let git_dir = memory_root.join(".git");
+    let managed_marker = git_dir.join(MANAGED_MARKER);
+    if git_dir.exists() {
+        if !managed_marker.exists() {
+            return Err(format!(
+                "foreign git repository at memory root; snapshot skipped: {}",
+                memory_root.display()
+            ));
+        }
+    } else {
         run_git(memory_root, &["init", "-q"])?;
+        // Mark the repo as ours. The marker lives inside `.git/` so it never
+        // pollutes the worktree and never needs whitelisting.
+        std::fs::write(&managed_marker, b"cf-memory managed repository\n")
+            .map_err(|e| format!("failed to write managed marker: {e}"))?;
     }
     let gitignore = memory_root.join(".gitignore");
     if !gitignore.exists() {
@@ -129,9 +200,7 @@ fn ensure_identity(root: &Path) -> Result<(), String> {
         ("user.name", "qidi-memory"),
         ("user.email", "qidi-memory@local"),
     ] {
-        let current = Command::new("git")
-            .arg("-C")
-            .arg(root)
+        let current = git_command(root)
             .args(["config", "--local", key])
             .output()
             .map_err(|e| format!("failed to run git config: {e}"))?;
@@ -147,9 +216,7 @@ fn ensure_identity(root: &Path) -> Result<(), String> {
 /// `true` if the index has staged changes (`git diff --cached --quiet` exits
 /// with code 1 when differences exist).
 fn has_staged_changes(root: &Path) -> Result<bool, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
+    let out = git_command(root)
         .args(["diff", "--cached", "--quiet"])
         .output()
         .map_err(|e| format!("failed to run git diff: {e}"))?;
@@ -165,9 +232,7 @@ fn has_staged_changes(root: &Path) -> Result<bool, String> {
 
 /// `true` if the repository has at least one commit (`HEAD` resolves).
 fn has_head(root: &Path) -> bool {
-    Command::new("git")
-        .arg("-C")
-        .arg(root)
+    git_command(root)
         .args(["rev-parse", "--verify", "--quiet", "HEAD"])
         .output()
         .map(|o| o.status.success())
@@ -178,17 +243,18 @@ fn has_head(root: &Path) -> bool {
 /// successful no-op. When `allow_empty` is set the initial commit is forced so
 /// a fresh memory root still gets a baseline.
 fn commit(root: &Path, message: &str, allow_empty: bool) -> Result<(), String> {
-    let mut args = vec!["commit", "-q"];
+    // M3: pin `commit.gpgsign=false` and pass `--no-verify` so an enterprise
+    // global `commit.gpgsign=true` or a strict pre-commit hook cannot make
+    // every snapshot fail silently. `-c` is a git *global* option, so it must
+    // come before the `commit` subcommand (i.e. after `-C root`).
+    let mut cmd = git_command(root);
+    cmd.args(["-c", "commit.gpgsign=false", "commit", "--no-verify", "-q"]);
     if allow_empty {
-        args.push("--allow-empty");
+        cmd.arg("--allow-empty");
     }
-    args.push("-m");
-    args.push(message);
+    cmd.arg("-m").arg(message);
 
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(&args)
+    let out = cmd
         .output()
         .map_err(|e| format!("failed to run git commit: {e}"))?;
 
@@ -210,9 +276,7 @@ fn commit(root: &Path, message: &str, allow_empty: bool) -> Result<(), String> {
 
 /// Run a `git -C <root> <args>` command, mapping a non-zero exit to `Err`.
 fn run_git(root: &Path, args: &[&str]) -> Result<(), String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
+    let out = git_command(root)
         .args(args)
         .output()
         .map_err(|e| format!("failed to run git {}: {e}", args.join(" ")))?;
@@ -257,9 +321,26 @@ mod tests {
             .unwrap()
     }
 
+    /// Put the hermetic git on `PATH` (via `GIT_BIN_PATH`, per the shared
+    /// `storage` test convention) and report whether a usable `git` is
+    /// available. Tests that shell out to git call this first and `return`
+    /// early when it yields `false`, so a machine without git *skips* them
+    /// instead of failing.
+    fn require_git(test: &str) -> bool {
+        crate::storage::ensure_hermetic_git_on_path();
+        let ok = crate::storage::git_cli_available();
+        if !ok {
+            eprintln!("skipping {test}: git not available");
+        }
+        ok
+    }
+
     // ① Empty directory: snapshot must init the repo and make a first commit.
     #[test]
     fn empty_dir_snapshot_inits_and_makes_first_commit() {
+        if !require_git("empty_dir_snapshot_inits_and_makes_first_commit") {
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
 
@@ -278,6 +359,9 @@ mod tests {
     // ② Unchanged snapshot: no-op, still Ok, no new commit.
     #[test]
     fn unchanged_snapshot_is_noop_and_ok() {
+        if !require_git("unchanged_snapshot_is_noop_and_ok") {
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::write(root.join("MEMORY.md"), "hello").unwrap();
@@ -300,6 +384,9 @@ mod tests {
     // recoverable from git history.
     #[test]
     fn pre_snapshot_preserves_deleted_session_log() {
+        if !require_git("pre_snapshot_preserves_deleted_session_log") {
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
 
@@ -329,6 +416,9 @@ mod tests {
     // ④ SQLite databases and lock files must never be tracked (audit red line).
     #[test]
     fn sqlite_and_lock_files_are_never_tracked() {
+        if !require_git("sqlite_and_lock_files_are_never_tracked") {
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
 
@@ -370,5 +460,125 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let missing = tmp.path().join("does-not-exist");
         assert!(snapshot(&missing, "msg").is_err());
+    }
+
+    // M3: a repo-local (or enterprise global) `commit.gpgsign=true` must not
+    // break snapshots — we force `-c commit.gpgsign=false`.
+    #[test]
+    fn snapshot_succeeds_with_gpgsign_configured() {
+        if !require_git("snapshot_succeeds_with_gpgsign_configured") {
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("MEMORY.md"), "hello").unwrap();
+
+        // First snapshot initialises the repo (and writes the marker).
+        snapshot(root, "init").unwrap();
+
+        // Simulate an enterprise setting leaking into this repo: without our
+        // `-c commit.gpgsign=false`, git would try (and fail) to GPG-sign.
+        git(root, &["config", "--local", "commit.gpgsign", "true"]);
+        assert_eq!(
+            git(root, &["config", "--local", "--get", "commit.gpgsign"]).trim(),
+            "true"
+        );
+
+        // Change content and snapshot again — must succeed despite gpgsign.
+        std::fs::write(root.join("MEMORY.md"), "hello again").unwrap();
+        snapshot(root, "with gpgsign on").unwrap();
+
+        let count = commit_count(root);
+        assert!(
+            count >= 2,
+            "snapshot must commit despite commit.gpgsign=true, got {count}"
+        );
+    }
+
+    // M4: every git invocation must scrub repository-redirecting env vars, so a
+    // host that exports `GIT_DIR`/`GIT_WORK_TREE` cannot hijack the commit.
+    #[test]
+    fn git_command_scrubs_hostile_env_vars() {
+        let cmd = git_command(Path::new("/tmp/whatever"));
+        let removed: std::collections::HashSet<String> = cmd
+            .get_envs()
+            .filter(|(_, v)| v.is_none())
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        for var in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_COMMON_DIR",
+        ] {
+            assert!(
+                removed.contains(var),
+                "{var} must be env_removed by git_command; removed={removed:?}"
+            );
+        }
+    }
+
+    // M6: a `.git/` we did not create (no managed marker) is foreign and must
+    // be left completely untouched.
+    #[test]
+    fn snapshot_refuses_foreign_git_repository() {
+        if !require_git("snapshot_refuses_foreign_git_repository") {
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("MEMORY.md"), "hello").unwrap();
+
+        // A user-managed repo: `git init` with no cf-memory marker.
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["init", "-q"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git init should succeed");
+        assert!(
+            !root.join(".git").join(MANAGED_MARKER).exists(),
+            "a bare `git init` must not carry our marker"
+        );
+
+        let err = snapshot(root, "should be refused").unwrap_err();
+        assert!(
+            err.contains("foreign git repository"),
+            "unexpected error: {err}"
+        );
+
+        // No commits, no local identity, no marker, no .gitignore written.
+        let log = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["rev-list", "--count", "--all"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&log.stdout).trim(),
+            "0",
+            "foreign repo must not gain commits"
+        );
+        let ident = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["config", "--local", "--get", "user.name"])
+            .output()
+            .unwrap();
+        assert!(
+            !ident.status.success(),
+            "foreign repo must not gain a local identity"
+        );
+        assert!(
+            !root.join(".git").join(MANAGED_MARKER).exists(),
+            "refusing must not write the marker"
+        );
+        assert!(
+            !root.join(".gitignore").exists(),
+            "foreign repo must not gain our .gitignore"
+        );
     }
 }
