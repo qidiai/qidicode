@@ -1,0 +1,118 @@
+﻿name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+  PROTOC: ${{ github.workspace }}/bin/bin/protoc.exe
+
+jobs:
+  check:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache target
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
+
+      # rsproxy mirror comes from the committed .cargo/config.toml; no extra setup step
+      # (a heredoc-based step here previously broke on windows-latest PowerShell).
+
+      # Advisory only: the codebase was forked non-fmt-clean from upstream
+      # (1266 diffs on stable rustfmt); reformatting would wreck upstream-merge diffs.
+      - name: Check formatting (advisory)
+        run: cargo fmt --check
+        continue-on-error: true
+
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Deny check (licenses / advisories / bans)
+        run: cargo deny check
+      - name: Build check
+        run: cargo check --workspace --locked
+
+      # Advisory only: -D warnings was never a maintained baseline for this fork.
+      - name: Clippy (advisory)
+        run: cargo clippy --workspace -- -D warnings
+        continue-on-error: true
+
+  prompt-template-drift:
+    # dsh doc-sync spirit: mechanically check that the XOR-encrypted prompt
+    # artifact matches the templates it is generated from. A silent drift here
+    # means the runtime prompt diverges from the reviewed template source.
+    # Windows-only for now: the committed artifact and templates are CRLF, and
+    # .gitattributes pins both; lift the OS restriction only after verifying
+    # byte-identical checkout on Linux runners.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Regenerate encrypted prompt artifact
+        run: python crates/codegen/cf-agent/scripts/encrypt_templates.py
+
+      - name: Fail on drift between templates and encrypted artifact
+        run: git diff --exit-code -- crates/codegen/cf-agent/src/prompt/prompt_encrypted.rs
+
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache target
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+
+      # rsproxy mirror comes from the committed .cargo/config.toml; no extra setup step
+
+      - name: Run tests
+        run: cargo test --workspace --no-fail-fast
+        env:
+          RUST_TEST_THREADS: "2"

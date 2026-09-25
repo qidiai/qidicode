@@ -1,0 +1,29 @@
+# Generated media files
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.webp
+
+# Output directories
+output/
+scripts/images/
+scripts/videos/
+images/
+videos/
+
+# Config with secrets
+agnes_config.json
+
+# Token stats
+token_stats.jsonl
+
+# Editor / OS junk
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Backups (may contain secrets)
+*.bak*

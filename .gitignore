@@ -1,17 +1,46 @@
 # ============================================================
-# Whitelist .gitignore — only infra/scripts/docs are tracked.
-# Runtime data, credentials, sessions, binaries stay untracked.
+# Whitelist .gitignore for the hybrid repo:
+#   1) QIDI Code Rust source monorepo (merged from gitee/main)
+#   2) portable Windows deployment workspace (launchers, .qidi/, vibex2api/)
+# Runtime data, credentials, sessions, binaries, scratch dirs stay untracked.
+# NOTE: top-level re-inclusions below mirror gitee/main's root entries —
+#       keep in sync when a new top-level source entry appears.
 # ============================================================
 
 # ignore everything at root by default
 /*
 
-# root: launchers & docs
+# root: source monorepo (gitee/main)
 !.gitignore
+!.gitattributes
+!.github/
+!.cargo/
+!README.md
+!LICENSE
+!CHANGELOG.md
+!CONTRIBUTING.md
+!SECURITY.md
+!BUILD-NOTES-WINDOWS.md
+!MEMORY_SCOPE.md
+!THIRD-PARTY-NOTICES
+!Cargo.toml
+!Cargo.lock
+!clippy.toml
+!deny.toml
+!rust-toolchain.toml
+!rustfmt.toml
+!build_release.ps1
+!crates/
+!bin/
+!docs/
+!prod/
+!third_party/
+!tools/
+
+# root: portable dist launchers & docs
 !启动qidi.bat
 !在指定目录启动qidi.bat
 !使用说明.txt
-!README.md
 
 # .qidi: curated subsets only (config.toml with keys is NOT tracked)
 !.qidi/
@@ -42,3 +71,47 @@ vibex2api/*.log
 vibex2api/build/
 vibex2api/dist/
 vibex2api/vibex2api.spec
+
+# ---- source build artifacts (from gitee/main) ----
+target/
+*.lock
+!Cargo.lock
+bin/protoc*.exe
+bin/protoc-*.zip
+bin/protoc-*.tar.gz
+reference/
+*.phase3
+*.bak.phase3
+
+# External tool caches & local run artifacts (not part of the codebase)
+.hologram/
+hologram_graph.json
+hologram_graph_files.json
+mem-log/
+.codely/
+.codely-cli/
+_audit_*.ps1
+_audit_check.log
+CODELY.md
+
+# ---- 本机整理:构建产物与一次性运行结果 ----
+qidi.exe
+build_log.txt
+build_result.txt
+
+# 本机专用配置(含绝对路径),勿提交
+.mcp.json
+
+# 本机数据目录
+Library/
+
+# protoc 嵌套解压副本(运行 bin/download_protoc.py 重新生成)
+bin/bin/
+# Media-gen configs (may contain API keys) - defense in depth
+tools/media-gen-agent/agnes_config.json
+tools/media-gen-agent/agnes_config.json.*
+
+# 2026-09-09 audit: local runtime dirs, never commit
+# (gitee 原有 `.qidi/` 整体忽略规则已移除——与上面 .qidi 白名单互斥，见文件头)
+.worktree-backups-*/
+*.snap.new

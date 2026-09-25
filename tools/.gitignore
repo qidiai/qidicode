@@ -1,0 +1,13 @@
+# 编译产物
+target/
+**/target/
+
+# finance-agent 运行数据库
+*.db
+*.db-journal
+
+# media-gen-agent 运行产物
+media-gen-agent/images/*
+media-gen-agent/scripts/images/*
+media-gen-agent/videos/*
+media-gen-agent/token_stats_service/token_stats.jsonl
