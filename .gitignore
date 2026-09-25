@@ -115,3 +115,9 @@ tools/media-gen-agent/agnes_config.json.*
 # (gitee 原有 `.qidi/` 整体忽略规则已移除——与上面 .qidi 白名单互斥，见文件头)
 .worktree-backups-*/
 *.snap.new
+
+# local backups & trash (2026-09-25: keep history clean, never commit)
+*.bak
+*.bak-*
+*_backup_*.py
+_trash/
