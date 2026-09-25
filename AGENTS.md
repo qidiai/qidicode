@@ -105,7 +105,7 @@
 - 触发：`/<技能名>` 或自然语言触发词（`SkillInfo.when_to_use`）；技能库 `C:\Users\ASUS\.qidi\skills\`
 - 技能 frontmatter 可带 `effort:`（枚举含独立 `Max`，见 §7 分层）与 `model:` 覆盖
 - 创建/修改技能用内置 `/create-skill`
-- 常用：办公全家桶（office-tools / bid-* / seal-extractor / pdf-to-word-ocr）、编程流程（check-work / auto-bug-fixer / python-refactoring）、编排（dev-orchestra / find-skills）、安全（pre-commit-secret-check / secret-scan / check-secrets）
+- 常用：办公全家桶（office-tools / bid-* / seal-extractor / pdf-to-word-ocr）、编程流程（check-work / auto-bug-fixer / python-refactoring）、编排（dev-orchestra / find-skills）、安全（pre-commit-secret-check / secret-scan / check-secrets）、本地AI生图（qwen-image-lowvram：1660 Ti 低显存 Qwen-Image-2.1 + 标书效果图流水线，含 ComfyUI 部署/踩坑/PIL 叠字/元数据清零全套）
 
 ## 9. 子代理编排（乐团模式，实测有效）
 
