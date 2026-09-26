@@ -31,7 +31,7 @@ metadata:
 | 项 | 内容 |
 |---|---|
 | 安装根 | `F:\AI\ComfyUI\ComfyUI_windows_portable`（ComfyUI 0.37.0 portable cu126，pytorch 2.13.0+cu126，python_embeded 已装 gguf 包） |
-| DiT ×3 并存 | `models\diffusion_models\`：`qwen_image_2.1_turbo_Q4_K_M.gguf`（4.19G，4步快稿）/ `qwen-image-2.1-stock-Q4_K_M.gguf`（4.20G，原版 25 步正式档）/ `qwen-image-2.1-UC-Q4_K_M.gguf`（4.60G，无审查档——**标书等正式交付不用**） |
+| DiT ×4 并存 | `models\diffusion_models\`：`qwen_image_2.1_int8_convrot.safetensors`（7.26G，**✅质量档新默认**：官方原生权重+int8，比 GGUF 快 2.28×，2026-09-26 三明治实测采纳）/ `qwen_image_2.1_turbo_Q4_K_M.gguf`（4.19G，4步快稿档）/ `qwen-image-2.1-stock-Q4_K_M.gguf`（4.20G，备胎，从未实测）/ `qwen-image-2.1-UC-Q4_K_M.gguf`（4.60G，无审查档——**标书等正式交付不用**） |
 | 文本编码器 | `models\text_encoders\qwen3vl_8b_heretic-Q4_K_M.gguf`（5.03G）+ **`mmproj-qwen3vl_8b_heretic-f16.gguf`（1.16G，必须同目录、文件名含 GGUF 名，不可改名）** |
 | VAE | `models\vae\qwen_image_2.1_vae_bf16.safetensors`（0.68G） |
 | 补丁节点 | `custom_nodes\ComfyUI-GGUF-main`（city96）+ `custom_nodes\ComfyUI-GGUF-Qwen3VL-TE-main`（**关键补丁**：修 12288 维 TE 报错） |
@@ -45,6 +45,8 @@ metadata:
 | turbo 4步 @1024² | 127s 热跑 / 6min 冷启动 |
 | turbo 4步 @1328² | ~9.5 分钟/张（含 TE 编码） |
 | UC 25步 @1024² cfg1（**实测数据；原版 stock GGUF 下载后从未实测**——2026-09-25 GLM-5.3 审计发现原表误标） | 冷 15:17（26.35s/步） |
+| **int8_convrot 25步 @1024² cfg1（2026-09-26 三明治实测 ✅ 新默认）** | **11.43s/步，25 步采样 6:33；全管线含冷加载 9.9 分钟（UC 同口径 16.3）；漂移校验 A 26.09 vs C 25.95（0.5%）；视觉金丝雀 8/10 与 fp32 肉眼等效** |
+| **int8 @1328² 估算** | 步时 ~19.2s（∝面积），25 步采样 ~8 分钟——**原版质量档在标书分辨率上从"太慢"变"实用"** |
 | 原版/UC 25步 @1328² **cfg4.5** | **未实测外推值** ~40-45 分钟/张；"CFG>1 每步双跑×2"逻辑已被代码证实（comfy\samplers.py:610 cfg1 跳负向），但该行数字无运行记录背书 |
 | 分辨率换算 | 步耗时 ∝ token 数 ∝ 面积：2K(2048²)≈1024² 的 4 倍 |
 | 显存峰值 | ~4.7GB/6GB；TE 7.9GB 常驻 RAM 流式上卡（16GB RAM 机器需关重载进程） |
@@ -57,7 +59,8 @@ metadata:
 | `UnetLoaderGGUFAdvanced(dequant_dtype=fp16)` | ❌ 零提速（26.2 vs 26.0s/步）——dequant.py 里 fp16 只是反量化中间量，随后 `.to(dtype)` 转回 fp32 计算（参数真生效：输出字节与基线不同） |
 | `--fp16-unet`（DiT 级 fp16） | ❌ **输出哈希与 fp32 逐字节相同=彻底 no-op**。正向证据（GLM 审计补齐）：该次会话日志确有 `model weight dtype torch.float16, manual cast: torch.float32`（flag 已应用）；根因 nodes.py:175 —— **GGUF 加载链不把 unet_dtype 传进 load_diffusion_model_state_dict** |
 | `QwenImage21Cache`（前缀 KV 缓存） | ⚠️ T2I 零提速（26.0-26.2s/步）；GLM 审计修正：缓存机制**默认就是开的**（model_base.py reset_prefix_cache），节点只调 device/dtype，文本前缀实为几十 token 量级（非数百）；**仅编辑/多参考图任务有意义**，该场景应接入 |
-| int8_convrot 权重 | 🔲 未测候选（**GLM-5.3 审计已修正预期**）：GTX 16 系无 IMMA/tensor core，实际路径=eager 纯 torch 包装 + cuBLASLt INT8（**DP4A shader 路径**）。本机微基准：int8 GEMM 7.4ms vs fp32 36.1ms（**4.9×**），完整 int8_linear(convrot=True) 15.7ms vs fp32 linear 30.1ms（**1.9×**）→ 预期步时缩减 15-30%（26→18-22s/步），非 2×；**RAM 是真瓶颈**（TE 7.9G 卸载 + int8 7.26G vs 16G 内存，页换悬崖） |
+| int8_convrot 权重 | ✅ **采纳（2026-09-26 三明治裁决：2.28×）**。GLM-5.3 审计曾修正预期为 15-30%，实测 **11.43 vs 26.09/25.95 s/步 = 2.28×**——审计漏算的关键项：GGUF Q4_K_M 在 eager 里每步要逐算子做 Q4→fp32 反量化（开销≈矩阵乘本身），而 int8 走 Hadamard 旋转+动态 W8A8+`_int_mm`（DP4A 4.9×）整链更便宜。RAM 实测：加载期 commit +9GB、机器满载（物理剩 0.3-3.3GB）下照常跑完、无页换灾难，但 16GB 机上仍属薄余量运行 |
+| **运维教训（2026-09-26 凌晨四连发车事故复盘）** | ① **PID 验身再归因**：追了 5 小时的"另一会话 11.9GB python"竟是自己的 ComfyUI 服务器（abort 后模型缓存未释放）——查 `(Get-CimInstance Win32_Process -Filter "ProcessId=$id").CommandLine` 先验身份；② **availPhys 不含待机缓存**，作止损判据必误杀（模型加载时系统自动逐出 standby，0.3GB 也能跑）；③ **TE+DiT 正常加载成本 = 10-13GB commit**，"增量>10GB 即中止"判据必误杀；④ 正确兜底 = commit 逼近上限（>48GB）+ 单片超时（25min） |
 | **环境事实（GLM 审计发现，改认知）** | portable 为 cu126 → ComfyUI 核心把 comfy_kitchen **cuda 后端整体禁用**（需 CUDA 13+，quant_ops.py:26-27），全部算子实际走 eager；该 pyd 亦无 int8_linear 注册（无 cuBLASLt）、SM75 cutlass int8 内核仅服务 W4A8 回退且**按设备名拉黑 GTX 16 系**（is_turing AND NOT is_16series） |
 | xformers / flash-attention | 预判无增益：flash 不支持 sm_75；ComfyUI "pytorch attention" 已走 SDPA mem-efficient 分支 |
 
@@ -86,7 +89,8 @@ metadata:
 节点链：`UnetLoaderGGUF(模型.gguf)` + `CLIPLoaderGGUF(qwen3vl_8b_heretic-Q4_K_M.gguf, type="qwen_image")` → `TextEncodeQwenImage21(prompt, negative_prompt, resolution=1024)`（正负条件一次出）→ `EmptyLatentImage(w,h,1)`（通道数自动对齐）→ `KSampler(seed, steps, cfg, euler/simple, denoise=1)` → `VAEDecode` → `SaveImage`。
 
 - turbo 版参数：steps=4，cfg=1.0（蒸馏版无需 CFG，负面词无效）
-- 原版正式档：**图内无文字的场景（即 PIL 叠字方案）用 cfg=1.0 即可——省一半时间**（25步@1328² 从 ~40min 降到 ~21min）；仅当需要图内文字时才用 cfg 4~5（负面提示词生效，每步双跑），或按 pottokao 分段法：前 12-17 步 cfg 1.0 锁构图、后段 cfg 3.0 重画字
+- **质量档（推荐）**：`UNETLoader(qwen_image_2.1_int8_convrot.safetensors, weight_dtype=default)` + 25 步 + cfg 1.0（PIL 叠字无字场景）——1024² 全管线 ~10 分钟、1328² 采样 ~8 分钟；比 GGUF 快 2.28× 且质量等效
+- 原版正式档（图内文字场景）：int8 + cfg 4~5 + 负面提示词（每步双跑）；或 pottokao 分段法：前 12-17 步 cfg 1.0 锁构图、后段 cfg 3.0 重画字
 - 提交：`curl -X POST -H "Content-Type: application/json" -d @api.json http://127.0.0.1:8188/prompt`；轮询 `GET /history/{prompt_id}` 直到 status_str 出现
 - 结构化批量脚本见 scripts\phase_a_drafts.py（turbo 批量）/ phase_b_refine.py（原版精修，注：该脚本默认 cfg 4.5，无字场景改 1.0 省一半）
 
@@ -115,6 +119,8 @@ metadata:
 | phase_a_drafts.py | turbo 4步无字版批量出稿（解析提示词 md + 提交 + 轮询） |
 | phase_b_refine.py | 原版 25 步 cfg4.5 带字精修批量 |
 | annotate.py | PIL 图题+标注芯片+引线叠加，保存即清 PNG 元数据 |
+| sandwich_runner.py | A/B/A 同会话对照跑批（判据已修为"commit>48GB 灾难+单片25min超时"，含 A 片环境校验短路） |
+| dlp2.ps1 | HEAD 失效 CDN 的分段下载（ranged GET + Content-Range 取总长；ModelScope CDN 不吃 HEAD） |
 | coords.example.json | 标注坐标文件格式示例（视觉代理产出的百分比坐标填这里） |
 
 ## 九、参考文档（repo 内，git 版本化）
