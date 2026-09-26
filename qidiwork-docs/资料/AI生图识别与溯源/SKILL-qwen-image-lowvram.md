@@ -83,6 +83,7 @@ metadata:
 6. **PS 5.1 `Set-Content -Encoding UTF8` 写 BOM** → aiohttp 拒收 POST JSON；用 `[System.IO.File]::WriteAllText($p,$raw,[Text.UTF8Encoding]::new($false))`
 7. **分辨率必须为 16 的倍数**（VAE 16× 压缩）：1920×1080 无效 → 用 1920×1088；1328/1664 可
 8. **中文 md/提示词经 PS 控制台会 GBK 乱码**：读文件用 read_file 工具或 Python；别靠控制台回显判断内容
+9. **会话后台任务起的常驻服务 10h 必被截杀**（实测 2026-09-26：max_runtime 36001s 掐死 ComfyUI）→ 久驻服务一律 schtasks 保活：`qidicode-comfyui-keepalive`（跑 `F:\AI\ComfyUI\start_comfyui.ps1`）与 `qidicode-hyocr-keepalive`（跑 `C:\hyocr\start_hyocr_cuda.ps1`），30 分钟幂等一跳、死了自动拉活、活着跳过；**保活脚本严禁 `2>&1 | Tee-Object`**——PS 5.1 把 llama-server 写 stderr 的正常日志包装成 ErrorRecord，配 `$ErrorActionPreference='Stop'` 服务第一行日志就让脚本秒死（OCR 节点两连扑根因），日志改用 llama 原生 `--log-file`；无人值守脚本注释用 ASCII（免 BOM 编码疑云）
 
 ## 五、出图 API 工作流模板（无 UI 直跑）
 
