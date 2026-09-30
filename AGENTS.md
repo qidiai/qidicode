@@ -127,7 +127,7 @@
 | 默认推送 | **双推 `origin` + `gitee`**；worktree 分支用 `git push <remote> feat/xxx:main` 直推 main |
 | 提交权 | 编码手/子代理禁止 commit；指挥官质检通过后统一提交 |
 | 提交信息 | `<类型>: <摘要>` + 正文列要点（orchestra 战报格式，见 git log） |
-| 密钥扫描 | ⚠️ **本仓库无任何 git 钩子兜底**（`.git/hooks/` 仅 post-commit Qoder tracker）——提交前**必须手动**跑 `pre-commit-secret-check` / `secret-scan` / `check-secrets` 技能 |
+| 密钥扫描 | ✅ **pre-commit 钩子已生效**（2026-09-30 实测：`git config core.hooksPath` 指向 `pre-commit-secret-check` 技能的 `scripts/hooks` 目录，提交时自动扫描，实测输出 `[Pre-commit] No secrets detected`）。⚠️ 注意 hooksPath 生效后 `.git/hooks/` 整体失效（含原 post-commit Qoder tracker）。敏感提交前仍建议手动复跑 `secret-scan` 技能兜底 |
 
 ## 11. 环境硬约束（本机实测，新会话必读）
 
