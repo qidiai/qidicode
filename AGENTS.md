@@ -139,6 +139,10 @@
 6. 机器上有 25+ 常驻 python/node 进程（用户其它会话的活）——**绝不擅自杀进程**
 7. `G:\quant-platform\` 是 G 盘根的**独立项目**（另一会话在用）：勿动其文件、勿杀其进程；本仓库 target 下**没有**它的构建产物
 8. 后台任务输出常延迟/丢失——**以日志文件为准**：运维日志落点 `G:\qidi-clean.log`、`G:\qidi-release-build*.log`；exe 备份落点 `G:\qidi-exe-backup\`
+9. **GPU 服务已不自启**（2026-09-30 起）：HunyuanOCR(`llama-server`@8899，~3.3GB 显存) 与 ComfyUI(@8188) 的开机 vbs、30 分钟保活计划任务（`qidicode-hyocr-keepalive` / `qidicode-comfyui-keepalive`）已全部禁用。**跑 OCR 类技能（pdf-to-word-ocr / seal-extractor / bid 文件解析）或出图前先确认端口在线**，离线则手动拉起（幂等可重复跑）：OCR → `powershell -File C:\hyocr\start_hyocr_cuda.ps1`；出图 → `powershell -File F:\AI\ComfyUI\start_comfyui.ps1`。OCR 用完跑 `C:\hyocr\stop_hyocr.ps1` 释放显存（脚本已修编码 bug，可用）
+10. **AweSun 远控自启已禁**（2026-09-30）：HKLM Run 项已删（备份 `%TEMP%\HKLM_Run_backup_20260930.reg`）、`AweSunService` 改手动。需要远程入口时先手动启动 AweSun；本机另装有 ToDesk 可用。`C:\Program Files\Oray` 下的 OrayIddDriver 虚拟显示驱动不再常驻
+11. **Intel 核显驱动** 2026-09-30 从 2019-11 版（26.20.100.7584）更新至 **31.0.101.2141**（微软更新目录 WHQL 包，修复 0x10E VidMm 蓝屏 `dxgmms2!VIDMM_CPU_HOST_APERTURE::MapRange`）。驱动库留有 31.0.101.2127 后备包。再遇蓝屏先查 `C:\Windows\Minidump\`；本机已装 WinDbg（`Get-AppxPackage Microsoft.WinDbg` 定位 cdb.exe），符号路径 `srv*C:\symbols*https://msdl.microsoft.com/download/symbols`
+12. 【临时条目-完成后请删除】2026-09-30 晚已设 `bcdedit safeboot Minimal`：用户**下一次重启会自动进入安全模式**，需在安全模式登录后双击桌面「安全模式清理Defender.bat」清理 16.7GB Defender 隔离区（该 bat 会自动恢复正常启动模式并提示再重启）。若读到本条时系统已在正常运行且隔离区已清，说明流程已完成——**请顺手删除本条并 commit**
 
 ## 12. 构建与测试
 
