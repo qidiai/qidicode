@@ -112,7 +112,7 @@
 
 | 角色 | 模型 / 类型 | 用途 |
 |---|---|---|
-| 编码手 | `spawn_subagent(model="DeepSeek-V4.1-Flash-222", capability_mode="all")` | 按规格书写码+自测；**并行前提：任务文件零交集**（同 crate 不同文件可并行，同 crate 高内聚改动合并给一人） |
+| 编码手 | `spawn_subagent(model="ling-3.1-flash", capability_mode="all")`（2026-10-02 用户指定，原 DeepSeek-V4.1-Flash-222 撤下；ling 多模态可看图，出图/图面类任务自检免派视觉子代理中转） | 按规格书写码+自测；**并行前提：任务文件零交集**（同 crate 不同文件可并行，同 crate 高内聚改动合并给一人） |
 | 审计 | `GLM-5.3-222` / `step-5-preview` / `KIMI-K3-222`（`resume_from` 续会话保留上下文） | 双模型交叉审计；结论分歧时以代码证据裁决 |
 | 只读探查 | `subagent_type="explore"` / `plan` | 只读侦察 |
 | 隔离 | `isolation="worktree"` | 需要隔离时用（有冷构建代价） |
