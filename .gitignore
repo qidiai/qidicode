@@ -41,3 +41,15 @@ tools/media-gen-agent/agnes_config.json.*
 .qidi/
 .worktree-backups-*/
 *.snap.new
+
+# ---- manhua pipeline media (2026-10-02) ----
+qidiwork-docs/manhua/**/*.png
+qidiwork-docs/manhua/**/*.jpg
+qidiwork-docs/manhua/**/*.jpeg
+qidiwork-docs/manhua/**/*.mp3
+qidiwork-docs/manhua/**/*.wav
+qidiwork-docs/manhua/**/*.mp4
+!qidiwork-docs/manhua/**/*.json
+!qidiwork-docs/manhua/**/*.md
+__pycache__/
+*.py[cod]

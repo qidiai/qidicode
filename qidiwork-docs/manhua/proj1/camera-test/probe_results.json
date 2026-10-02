@@ -1,0 +1,22 @@
+{
+  "zoom-in": {
+    "file": "camera-zoom-in.mp4",
+    "duration": 5.0,
+    "w": 720,
+    "h": 1280,
+    "fps": 30.0,
+    "pix_fmt": "yuv420p",
+    "codec": "h264",
+    "ok": true
+  },
+  "pan-right": {
+    "file": "camera-pan-right.mp4",
+    "duration": 5.0,
+    "w": 720,
+    "h": 1280,
+    "fps": 30.0,
+    "pix_fmt": "yuv420p",
+    "codec": "h264",
+    "ok": true
+  }
+}

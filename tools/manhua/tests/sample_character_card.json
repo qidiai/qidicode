@@ -1,0 +1,6 @@
+{
+  "id": "CH-01",
+  "name": "林晚",
+  "image_prompt": "1girl, solo, black long hair, red coat, brown eyes, young woman, 20s",
+  "note": "样例角色卡（M3 前仅供干跑）：image_prompt 为外观锁定短语，gen_shots 会把它拼接到每个 use_ref 镜头的提示词前"
+}
