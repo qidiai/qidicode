@@ -1,0 +1,350 @@
+{
+  "project": "proj1",
+  "aspect": "9:16",
+  "fps": 30,
+  "characters": [
+    {
+      "id": "CH-01",
+      "name": "刘大忽悠",
+      "card": "character-cards/cards/ch01.json",
+      "ref_sheet": "character-cards/images/ch01-sheet.png",
+      "tts_voice": "zh-CN-YunyangNeural",
+      "tts_fallback": "zh-CN-YunjianNeural",
+      "tts_rate": "+0%",
+      "tts_pitch": "+0Hz"
+    },
+    {
+      "id": "CH-02",
+      "name": "王厨师",
+      "card": "character-cards/cards/ch02.json",
+      "ref_sheet": "character-cards/images/ch02-sheet.png",
+      "tts_voice": "zh-CN-YunxiNeural",
+      "tts_fallback": "zh-CN-YunjianNeural",
+      "tts_rate": "+0%",
+      "tts_pitch": "+0Hz"
+    },
+    {
+      "id": "CH-03",
+      "name": "桂芳大姨",
+      "card": "character-cards/cards/ch03.json",
+      "ref_sheet": "character-cards/images/ch03-sheet.png",
+      "tts_voice": "zh-CN-XiaoxiaoNeural",
+      "tts_fallback": "zh-CN-XiaoyiNeural",
+      "tts_rate": "+0%",
+      "tts_pitch": "+0Hz"
+    }
+  ],
+  "shots": [
+    {
+      "shot_id": "S01",
+      "image_prompt": "CH-01 wide establishing shot of a snowy small-town street, CH-01 standing center frame leaning on his polished cane, head raised, shouting with open mouth and waving gesture, snow piles and old brick wall behind him, warm lamplight, a few blurred pedestrians in the distance, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-01"
+      ],
+      "framing": "center",
+      "camera": "zoom-in",
+      "camera_easing": "ease-in-out",
+      "dialogue": [
+        {
+          "character": "CH-01",
+          "line": "拐了——拐了——拐了啊——！"
+        }
+      ],
+      "narration": "北方小城，冬日的街头，刘大忽悠的生意开张了。",
+      "sfx": "",
+      "min_duration_sec": 4.0,
+      "subtitle": "北方小城，冬日的街头，刘大忽悠的生意开张了。拐了——拐了——拐了啊——！"
+    },
+    {
+      "shot_id": "S02",
+      "image_prompt": "CH-03 medium shot, CH-03 leaning in from the side with a disdainful expression, arms folded, red headscarf and red floral padded jacket, gesturing dismissively toward off-frame CH-01, snowy street background bokeh, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-03"
+      ],
+      "framing": "center",
+      "camera": "static",
+      "camera_easing": "linear",
+      "dialogue": [
+        {
+          "character": "CH-03",
+          "line": "喊啥呀喊啥，一天了，把拐都喊凉快了也没人来。"
+        }
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 3.0,
+      "subtitle": "喊啥呀喊啥，一天了，把拐都喊凉快了也没人来。"
+    },
+    {
+      "shot_id": "S03",
+      "image_prompt": "CH-01 close-up portrait of CH-01's face, confident cunning look, squinting eyes, giving a big thumbs up beside his face, sly grin, black cap and thin mustache detail, shallow depth of field, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-01"
+      ],
+      "framing": "center",
+      "camera": "zoom-in",
+      "camera_easing": "ease-in-out",
+      "dialogue": [
+        {
+          "character": "CH-01",
+          "line": "大妹子你不懂！我能把正的忽悠斜了，蔫的忽悠谑的，尖人忽悠嗫的！"
+        }
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 4.0,
+      "subtitle": "大妹子你不懂！我能把正的忽悠斜了，蔫的忽悠谑的，尖人忽悠嗫的！"
+    },
+    {
+      "shot_id": "S04",
+      "image_prompt": "CH-02 long shot of a snowy street, CH-02 riding a classic Chinese 28-inch bicycle entering the frame from the left, wheels rolling through fresh snow leaving tracks, tall white chef hat visible, cold blue sky with warm shop windows, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-02"
+      ],
+      "framing": "center",
+      "camera": "pan-right",
+      "camera_easing": "ease-in-out",
+      "dialogue": [],
+      "narration": "说曹操曹操到。",
+      "sfx": "",
+      "min_duration_sec": 3.0,
+      "subtitle": "说曹操曹操到。"
+    },
+    {
+      "shot_id": "S05",
+      "image_prompt": "CH-01 CH-02 two-shot, CH-01 stepping in front of the bicycle to block CH-02, one hand raised in a supportive gesture, leaning on his cane, serious curious stare at CH-02 who sits on the bike looking surprised, snowy street, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-01",
+        "CH-02"
+      ],
+      "framing": "center",
+      "camera": "static",
+      "camera_easing": "linear",
+      "dialogue": [
+        {
+          "character": "CH-01",
+          "line": "兄弟！看你这印堂发暗，双目无神——最近身体是不是不得劲？"
+        }
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 3.5,
+      "subtitle": "兄弟！看你这印堂发暗，双目无神——最近身体是不是不得劲？"
+    },
+    {
+      "shot_id": "S06",
+      "image_prompt": "CH-02 medium close-up, CH-02 touching his own cheeks with both hands, bewildered honest expression, round face, tall white chef hat, white apron, bicycle handlebar nearby, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-02"
+      ],
+      "framing": "center",
+      "camera": "static",
+      "camera_easing": "linear",
+      "dialogue": [
+        {
+          "character": "CH-02",
+          "line": "我没觉着啊？我就觉着我这脸，是不是越来越大？"
+        }
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 3.0,
+      "subtitle": "我没觉着啊？我就觉着我这脸，是不是越来越大？"
+    },
+    {
+      "shot_id": "S07",
+      "image_prompt": "CH-01 close-up, CH-01 leaning in to examine an off-frame face with solemn scholarly expression, squinting eyes narrowed, cane in hand, exaggerated seriousness, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-01"
+      ],
+      "framing": "center",
+      "camera": "zoom-in",
+      "camera_easing": "ease-in-out",
+      "dialogue": [
+        {
+          "character": "CH-01",
+          "line": "知道你的脸为啥大吗？末梢神经坏死，把上边憋大的！"
+        }
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 3.5,
+      "subtitle": "知道你的脸为啥大吗？末梢神经坏死，把上边憋大的！"
+    },
+    {
+      "shot_id": "S08",
+      "image_prompt": "CH-03 medium shot, CH-03 interrupting with animated hand gestures, pointing up and down, amused helpful expression, red headscarf, army green canvas bag on arm, blurred street background, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-03"
+      ],
+      "framing": "center",
+      "camera": "static",
+      "camera_easing": "linear",
+      "dialogue": [
+        {
+          "character": "CH-03",
+          "line": "腰——以下！腿——往上！可不得憋大了嘛！"
+        }
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 3.0,
+      "subtitle": "腰——以下！腿——往上！可不得憋大了嘛！"
+    },
+    {
+      "shot_id": "S09",
+      "image_prompt": "CH-02 medium shot, CH-02 scratching his head with a doubtful half-convinced expression, slight frown, white chef hat and apron, snow falling behind him, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-02"
+      ],
+      "framing": "center",
+      "camera": "static",
+      "camera_easing": "linear",
+      "dialogue": [
+        {
+          "character": "CH-02",
+          "line": "那……那咋整啊？"
+        }
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 2.5,
+      "subtitle": "那……那咋整啊？"
+    },
+    {
+      "shot_id": "S10",
+      "image_prompt": "CH-01 CH-02 two-shot, CH-01 tapping his cane firmly on the frozen ground with a stern serious face, CH-02 standing beside looking cautious, snowy street with footprints, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-01",
+        "CH-02"
+      ],
+      "framing": "center",
+      "camera": "static",
+      "camera_easing": "linear",
+      "dialogue": [
+        {
+          "character": "CH-01",
+          "line": "先自测！腿麻不麻？"
+        },
+        {
+          "character": "CH-02",
+          "line": "不麻呀。"
+        }
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 3.0,
+      "subtitle": "先自测！腿麻不麻？ 不麻呀。"
+    },
+    {
+      "shot_id": "S11",
+      "image_prompt": "CH-01 CH-02 wide shot, CH-01 demonstrating an exaggerated limping stomping walk with his cane, left leg dragging, CH-02 watching beside the bicycle, snowy street, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-01",
+        "CH-02"
+      ],
+      "framing": "center",
+      "camera": "pan-left",
+      "camera_easing": "ease-in-out",
+      "dialogue": [
+        {
+          "character": "CH-01",
+          "line": "没病走两步！来——这样，跶！跶！"
+        }
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 3.0,
+      "subtitle": "没病走两步！来——这样，跶！跶！"
+    },
+    {
+      "shot_id": "S12",
+      "image_prompt": "CH-02 close-up, CH-02 stomping his feet while imitating, suddenly puzzled doubtful expression mid-stomp, eyes narrowed, white chef hat, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-02"
+      ],
+      "framing": "center",
+      "camera": "zoom-in",
+      "camera_easing": "ease-in-out",
+      "dialogue": [
+        {
+          "character": "CH-02",
+          "line": "哎？你别说……走两步，好像真有点不得劲！"
+        }
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 3.5,
+      "subtitle": "哎？你别说……走两步，好像真有点不得劲！"
+    },
+    {
+      "shot_id": "S13",
+      "image_prompt": "CH-01 close-up, CH-01 looking back over his shoulder with a suppressed grin, squinting eyes full of delight, hand on his cane, mischievous satisfaction, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-01"
+      ],
+      "framing": "center",
+      "camera": "zoom-in",
+      "camera_easing": "ease-in-out",
+      "dialogue": [],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 3.5,
+      "subtitle": "缘分呐！"
+    },
+    {
+      "shot_id": "S14",
+      "image_prompt": "CH-03 medium shot, CH-03 covering her face with both black cotton mittens, shaking her head with an exasperated look, red headscarf, canvas bag slipping on her shoulder, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-03"
+      ],
+      "framing": "center",
+      "camera": "static",
+      "camera_easing": "linear",
+      "dialogue": [
+        {
+          "character": "CH-03",
+          "line": "哎呀妈呀，可别祸害人家了……"
+        }
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 3.0,
+      "subtitle": "哎呀妈呀，可别祸害人家了……"
+    },
+    {
+      "shot_id": "S15",
+      "image_prompt": "CH-01 CH-02 CH-03 group shot of all three characters together, CH-02 holding the wooden cane up examining it closely, CH-01 with arm around CH-02's shoulder grinning, CH-03 standing beside shaking her head and smiling, snowy brick street background, festive warm light, manhua drama style, flat illustration with light texture, warm street tones under cold grey winter sky, gentle snowfall, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": [
+        "CH-01",
+        "CH-02",
+        "CH-03"
+      ],
+      "framing": "center",
+      "camera": "zoom-out",
+      "camera_easing": "ease-in-out",
+      "dialogue": [],
+      "narration": "一副拐，一炕嘴，东北大地的幽默，三十年后仍然好使。",
+      "sfx": "",
+      "min_duration_sec": 4.0,
+      "subtitle": "一副拐，一炕嘴，东北大地的幽默，三十年后仍然好使。本片为 AI 生成样片，仅内部验证。"
+    }
+  ],
+  "transitions": [
+    {
+      "after_shot": "S01",
+      "type": "fade",
+      "duration": 0.3
+    },
+    {
+      "after_shot": "S13",
+      "type": "fade",
+      "duration": 0.3
+    },
+    {
+      "after_shot": "S15",
+      "type": "fade",
+      "duration": 3.0
+    }
+  ]
+}

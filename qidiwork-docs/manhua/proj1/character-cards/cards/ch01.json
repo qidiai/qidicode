@@ -1,0 +1,13 @@
+{
+  "id": "CH-01",
+  "name": "刘大忽悠",
+  "tier": "main",
+  "role": "卖拐的精瘦东北汉子，五十多岁，腿微跛",
+  "appearance": "黑色前进帽，深绿色旧军大衣，右手拄一根磨得发亮的木拐杖，左腿微跛姿态，眯眯眼嘴角上翘一副精明相，八字胡",
+  "image_prompt": "CH-01, 1boy, solo, wiry sharp-looking Northeastern Chinese man in his early 50s, lean face, black leather forward cap, dark green worn old army overcoat, right hand leaning on a polished wooden cane, slight left-leg limp, squinting eyes, upturned sly mouth, thin mustache, cunning confident expression, original stylized manhua character design",
+  "voice": "zh-CN-YunyangNeural",
+  "voice_fallback": "zh-CN-YunjianNeural",
+  "voice_rate": "+0%",
+  "voice_pitch": "+0Hz",
+  "note": "外观锁定短语供 gen_shots 拼接；原创风格化设计，不模仿任何真人面部特征"
+}

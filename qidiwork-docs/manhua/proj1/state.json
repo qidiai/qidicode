@@ -1,0 +1,64 @@
+{
+  "shots": {
+    "S01": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S02": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S03": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S04": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S05": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S06": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S07": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S08": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S09": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S10": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S11": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S12": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S13": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S14": {
+      "status": "pending",
+      "attempts": 2
+    },
+    "S15": {
+      "status": "pending",
+      "attempts": 2
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "CH-02",
+  "name": "王厨师",
+  "tier": "main",
+  "role": "微胖圆脸厨师，三十多岁，骑二八自行车",
+  "appearance": "白色高厨师帽，白围裙配藏蓝棉袄，红脸蛋憨厚困惑表情，身旁一辆二八自行车",
+  "image_prompt": "CH-02, 1boy, solo, chubby round-faced Chinese man in his mid 30s, rosy cheeks, tall white chef hat, white apron over navy blue cotton padded jacket, honest puzzled expression, original stylized manhua character design",
+  "voice": "zh-CN-YunxiNeural",
+  "voice_fallback": "zh-CN-YunjianNeural",
+  "voice_rate": "+0%",
+  "voice_pitch": "+0Hz",
+  "note": "外观锁定短语供 gen_shots 拼接；原创风格化设计，不模仿任何真人面部特征"
+}

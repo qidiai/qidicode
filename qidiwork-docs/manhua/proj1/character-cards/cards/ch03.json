@@ -1,0 +1,13 @@
+{
+  "id": "CH-03",
+  "name": "桂芳大姨",
+  "tier": "main",
+  "role": "圆脸大姨，五十多岁，直率爱看热闹",
+  "appearance": "红头巾红花棉袄，黑色棉手闷子，挎军绿帆布包，性格直率，一脸看热闹的表情",
+  "image_prompt": "CH-03, 1girl, solo, round-faced Northeastern Chinese auntie in her early 50s, red headscarf, red floral cotton padded jacket, black cotton mittens, army green canvas tote bag on arm, straightforward gossipy expression, original stylized manhua character design",
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "voice_fallback": "zh-CN-XiaoyiNeural",
+  "voice_rate": "+0%",
+  "voice_pitch": "+0Hz",
+  "note": "外观锁定短语供 gen_shots 拼接；原创风格化设计，不模仿任何真人面部特征"
+}
