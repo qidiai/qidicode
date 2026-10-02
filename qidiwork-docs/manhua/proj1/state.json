@@ -1,64 +1,75 @@
 {
   "shots": {
     "S01": {
-      "status": "pending",
-      "attempts": 2
+      "status": "done",
+      "attempts": 4,
+      "prompt_id": "11ee60a3-9b0d-47f2-a3e4-f53914dd0687",
+      "image": "shots\\S01.png"
     },
     "S02": {
-      "status": "pending",
-      "attempts": 2
+      "status": "done",
+      "attempts": 4,
+      "prompt_id": "9e76da88-62b4-4679-8d76-8cf17257227c",
+      "image": "shots\\S02.png"
     },
     "S03": {
-      "status": "pending",
-      "attempts": 2
+      "status": "done",
+      "attempts": 4,
+      "prompt_id": "9ab158c8-243a-48fb-ac42-a802d0f47f03",
+      "image": "shots\\S03.png"
     },
     "S04": {
-      "status": "pending",
-      "attempts": 2
+      "status": "done",
+      "attempts": 4,
+      "prompt_id": "201c75eb-fb46-410e-ae08-e42f0a31fb7c",
+      "image": "shots\\S04.png"
     },
     "S05": {
-      "status": "pending",
-      "attempts": 2
+      "status": "done",
+      "attempts": 4,
+      "prompt_id": "c7ee5419-783c-45f2-83ee-2aaab84e072c",
+      "image": "shots\\S05.png"
     },
     "S06": {
       "status": "pending",
-      "attempts": 2
+      "attempts": 4,
+      "prompt_id": "050c4dba-470f-472a-9aa5-4709331942ab"
     },
     "S07": {
       "status": "pending",
-      "attempts": 2
+      "attempts": 3
     },
     "S08": {
       "status": "pending",
-      "attempts": 2
+      "attempts": 3
     },
     "S09": {
       "status": "pending",
-      "attempts": 2
+      "attempts": 3
     },
     "S10": {
       "status": "pending",
-      "attempts": 2
+      "attempts": 3
     },
     "S11": {
       "status": "pending",
-      "attempts": 2
+      "attempts": 3
     },
     "S12": {
       "status": "pending",
-      "attempts": 2
+      "attempts": 3
     },
     "S13": {
       "status": "pending",
-      "attempts": 2
+      "attempts": 3
     },
     "S14": {
       "status": "pending",
-      "attempts": 2
+      "attempts": 3
     },
     "S15": {
       "status": "pending",
-      "attempts": 2
+      "attempts": 3
     }
   }
 }
