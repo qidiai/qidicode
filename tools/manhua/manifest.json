@@ -1,0 +1,48 @@
+{
+  "comfyui": {
+    "version": "0.37.0 portable cu126",
+    "port": 8188,
+    "launch": "powershell -File F:\\AI\\ComfyUI\\start_comfyui.ps1",
+    "note": "启动脚本幂等；禁止 --force-fp16（图形变静态，见 qwen-image-lowvram 技能）"
+  },
+  "custom_nodes": [
+    {
+      "name": "ComfyUI-GGUF-main",
+      "author": "city96",
+      "purpose": "GGUF DiT 加载（UNETLoader/UnetLoaderGGUF）"
+    },
+    {
+      "name": "ComfyUI-GGUF-Qwen3VL-TE-main",
+      "author": "community",
+      "purpose": "Qwen3-VL TE 关键补丁（12288 维编码器，TextEncodeQwenImage21/QwenImage21Cache）"
+    }
+  ],
+  "models": [
+    {
+      "path": "diffusion_models/qwen_image_2.1_int8_convrot.safetensors",
+      "size_gib": 6.758,
+      "role": "int8 DiT 主模型（默认，25步 cfg1.0）",
+      "license": "Qwen RESEARCH LICENSE（商用需授权）"
+    },
+    {
+      "path": "text_encoders/qwen3vl_8b_heretic-Q4_K_M.gguf",
+      "size_gib": 4.682,
+      "role": "Qwen3-VL 文本编码器 Q4"
+    },
+    {
+      "path": "text_encoders/mmproj-qwen3vl_8b_heretic-f16.gguf",
+      "size_gib": 1.079,
+      "role": "TE 多模态投影（须与 TE 同目录）"
+    },
+    {
+      "path": "vae/qwen_image_2.1_vae_bf16.safetensors",
+      "size_gib": 0.629,
+      "role": "VAE"
+    }
+  ],
+  "workflows": {
+    "workflows/workflow_text2img.json": "7106f4e5d5cf7273df12c0c88bc0aca88bbf94ae453594f8d588e0e4656cf297",
+    "workflows/workflow_refimg.json": "d4e87da90f95b855381797182e9ab77d353d231c31f706e5384cf67eff822f7f"
+  },
+  "note": "模型只记文件名+大小（不记大文件 hash）；gen_shots 启动时校验 workflow sha256 + 节点/模型存在性"
+}

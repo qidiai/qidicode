@@ -1,0 +1,52 @@
+{
+  "project": "proj1",
+  "aspect": "9:16",
+  "fps": 30,
+  "characters": [
+    {
+      "id": "CH-01",
+      "name": "林晚",
+      "card": "character-cards/cards/ch-01.json",
+      "ref_sheet": "character-cards/images/ch01-sheet.png",
+      "tts_voice": "zh-CN-XiaoxiaoNeural",
+      "tts_fallback": "zh-CN-XiaoyiNeural",
+      "tts_rate": "+0%",
+      "tts_pitch": "+0Hz"
+    }
+  ],
+  "shots": [
+    {
+      "shot_id": "S01",
+      "image_prompt": "1girl, solo, black long hair, red coat, standing at a rainy night train station, holding an old umbrella, cinematic lighting, bokeh, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": ["CH-01"],
+      "framing": "center",
+      "camera": "zoom-in",
+      "camera_easing": "ease-in-out",
+      "dialogue": [
+        {"character": "CH-01", "line": "你终于回来了。"}
+      ],
+      "narration": "",
+      "sfx": "",
+      "min_duration_sec": 3.0,
+      "subtitle": "你终于回来了"
+    },
+    {
+      "shot_id": "S02",
+      "image_prompt": "1girl, solo, black long hair, red coat, close-up portrait, wet hair sticking to cheeks, tearful eyes, dramatic side light, subject centered in the middle 576x1024 vertical safe area",
+      "use_ref": ["CH-01"],
+      "framing": "center",
+      "camera": "static",
+      "camera_easing": "linear",
+      "dialogue": [
+        {"character": "CH-01", "line": "别过来！我再警告你最后一次。"}
+      ],
+      "narration": "三年了，她以为这辈子不会再见他。",
+      "sfx": "",
+      "min_duration_sec": 3.0,
+      "subtitle": "别过来！我再警告你最后一次。"
+    }
+  ],
+  "transitions": [
+    {"after_shot": "S01", "type": "fade", "duration": 0.3}
+  ]
+}
