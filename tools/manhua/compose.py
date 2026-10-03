@@ -21,8 +21,13 @@ framing 语义（观察项①，方图阶段）：
 后置校验：ffprobe 实测成片时长 vs storyboard 累计时长，
 误差 <100ms 否则 exit 1。
 
+M6 I2V 混编：i2v=true 的镜头以 videos/{sid}.mp4 为视觉源
+（运动已烘焙进视频，不再做肯布拉斯运镜），音轨仍用该镜头
+配音（视频原生音轨丢弃）；统一 30fps/720x1280/sar=1 归一
+后进 concat。视频时长不足需求帧数时由后置校验兜底报错。
+
 用法：
-    python compose.py [--project-dir DIR]
+    python compose.py [--project-dir DIR] [--out-name final_v2]
 """
 import argparse
 import json
@@ -59,6 +64,28 @@ def frame_count(dur: float) -> int:
     return math.ceil(dur * common.FPS - 1e-9)
 
 
+# ---------------------------------------------------------------- I2V 镜头（M6）
+def build_i2v_filter(shot: dict, seg_dur: float,
+                         fade_in: float, fade_out: float) -> str:
+    """I2V 镜头 filter chain：运动已烘焙在视频里，
+    不做 scale 预放大/crop 运镜，仅归一
+    30fps / 720x1280 / sar=1，后接转场 fade。"""
+    chain = (
+        f"fps={common.FPS},"
+        f"scale={common.OUT_W}:{common.OUT_H}"
+        f":force_original_aspect_ratio=decrease"
+        f":flags=lanczos,"
+        f"pad={common.OUT_W}:{common.OUT_H}"
+        f":(ow-iw)/2:(oh-ih)/2,setsar=1")
+    if fade_in > 0:
+        chain += f",fade=t=in:st=0:d={fade_in}"
+    if fade_out > 0:
+        chain += (f",fade=t=out:st={max(seg_dur - fade_out, 0)}"
+                  f":d={fade_out}")
+    chain += f",format={common.PIX_FMT}"
+    return chain
+
+
 # ---------------------------------------------------------------- 运镜表达式
 def _t_guard() -> str:
     return "if(isnan(t),0,t)"
@@ -75,6 +102,11 @@ def easing_expr(easing: str, dur: float) -> str:
 def build_video_filter(shot: dict, seg_dur: float,
                          fade_in: float, fade_out: float) -> str:
     """组装单镜头视频 filter chain。"""
+    if shot.get("i2v"):
+        # M6：I2V 镜头运动已烘焙进视频，只归一
+        return build_i2v_filter(shot, seg_dur,
+                                fade_in, fade_out)
+
     camera = shot.get("camera", "static")
     easing = shot.get("camera_easing", "linear")
     framing = shot.get("framing", "center")
@@ -217,6 +249,8 @@ def build_ass(sb: dict, seg_durs: list) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="合成成片")
     ap.add_argument("--project-dir", default=r"qidiwork-docs\manhua\proj1")
+    ap.add_argument("--out-name", default="final",
+                    help="成片文件名前缀（final_v2 等）")
     args = ap.parse_args()
 
     proj = Path(args.project_dir)
@@ -237,11 +271,21 @@ def main() -> int:
     seg_durs = []
     for i, shot in enumerate(shots):
         sid = shot["shot_id"]
-        img = proj / "shots" / f"{sid}.png"
-        if not img.exists():
-            common.log_error(f"{sid}: 分镜图缺失 {img}，"
-                             "先跑 gen_shots.py")
-            return 1
+        # ---- 视觉源：I2V 视频 或 静帧图 ----
+        if shot.get("i2v"):
+            visual = proj / "videos" / f"{sid}.mp4"
+            if not visual.exists():
+                common.log_error(
+                    f"{sid}: i2v 视频缺失 {visual}，"
+                    "先跑 gen_video.py")
+                return 1
+        else:
+            visual = proj / "shots" / f"{sid}.png"
+            if not visual.exists():
+                common.log_error(
+                    f"{sid}: 分镜图缺失 {visual}，"
+                    "先跑 gen_shots.py")
+                return 1
         audio = proj / "audio" / f"{sid}.mp3"
         has_audio = audio.exists()
 
@@ -269,11 +313,17 @@ def main() -> int:
         vf = build_video_filter(shot, seg_dur, fade_in, fade_out)
         seg = SEG_DIR / f"seg_{sid}.mp4"
 
-        cmd = [
-            common.FFMPEG, "-y",
-            "-loop", "1", "-framerate", str(common.FPS),
-            "-i", str(img),
-        ]
+        cmd = [common.FFMPEG, "-y"]
+        if shot.get("i2v"):
+            # I2V 视频源：原生音轨丢弃（显式映射只取
+            # filtergraph 的 [v]/[a]，音轨用该镜头配音）
+            cmd += ["-i", str(visual)]
+        else:
+            cmd += [
+                "-loop", "1",
+                "-framerate", str(common.FPS),
+                "-i", str(visual),
+            ]
         if has_audio:
             cmd += ["-i", str(audio)]
             afilter = "[1:a]aresample=" \
@@ -298,7 +348,8 @@ def main() -> int:
         ]
         common.log_info(
             f"{sid}: {seg_dur:.3f}s -> {n} 帧 "
-            f"(audio={has_audio})")
+            f"(audio={has_audio}, "
+            f"src={'i2v' if shot.get('i2v') else 'img'})")
         r = common.subprocess_run(cmd, timeout=900)
         if r.returncode != 0:
             common.log_error(f"{sid}: 渲染失败\n{r.stderr[-1500:]}")
@@ -312,7 +363,9 @@ def main() -> int:
         encoding="utf-8")
     out_dir = proj / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
-    final = out_dir / "final.mp4"
+    out_name = args.out_name or "final"
+    final = out_dir / f"{out_name}.mp4"
+    final_sub = out_dir / f"{out_name}_sub.mp4"
 
     cmd = [
         common.FFMPEG, "-y",
@@ -326,6 +379,7 @@ def main() -> int:
         str(final),
     ]
     common.log_info(f"concat -> {final}")
+
     r = common.subprocess_run(cmd, timeout=1800)
     if r.returncode != 0:
         common.log_error(f"concat 失败\n{r.stderr[-1500:]}")
@@ -346,7 +400,7 @@ def main() -> int:
         "-profile:v", common.PROFILE, "-level:v", common.LEVEL,
         "-pix_fmt", common.PIX_FMT,
         "-c:a", "copy",
-        str(out_dir / "final_sub.mp4"),
+        str(final_sub),
     ]
     common.log_info(f"烧录字幕 {ass}")
     r = common.subprocess_run(cmd, timeout=1800)
@@ -365,7 +419,7 @@ def main() -> int:
         common.log_error("时长误差 >=100ms，校验失败")
         return 1
     common.log_info(
-        f"成片完成: {out_dir / 'final_sub.mp4'} "
+        f"成片完成: {final_sub} "
         f"({st['width']}x{st['height']}, {st['fps']}fps, "
         f"{st['duration']:.3f}s)")
     return 0
