@@ -31,45 +31,69 @@
       "image": "shots\\S05.png"
     },
     "S06": {
-      "status": "pending",
+      "status": "done",
       "attempts": 4,
-      "prompt_id": "050c4dba-470f-472a-9aa5-4709331942ab"
+      "prompt_id": "050c4dba-470f-472a-9aa5-4709331942ab",
+      "image": "shots\\S06.png"
     },
     "S07": {
-      "status": "pending",
-      "attempts": 3
+      "status": "done",
+      "attempts": 1,
+      "error": "3 retries exhausted",
+      "prompt_id": "451019bc-4f21-43e9-8e23-d98e64f2bd99",
+      "image": "shots\\S07.png"
     },
     "S08": {
-      "status": "pending",
-      "attempts": 3
+      "status": "done",
+      "attempts": 1,
+      "error": "3 retries exhausted",
+      "prompt_id": "faa1635f-0832-41cb-9486-c832c0bec60b",
+      "image": "shots\\S08.png"
     },
     "S09": {
-      "status": "pending",
-      "attempts": 3
+      "status": "done",
+      "attempts": 1,
+      "error": "3 retries exhausted",
+      "prompt_id": "4b5e3a22-36a4-418e-8b98-2a87b383687f",
+      "image": "shots\\S09.png"
     },
     "S10": {
-      "status": "pending",
-      "attempts": 3
+      "status": "done",
+      "attempts": 1,
+      "error": "3 retries exhausted",
+      "prompt_id": "2184e8ab-be47-48a4-9407-3efe3d122750",
+      "image": "shots\\S10.png"
     },
     "S11": {
-      "status": "pending",
-      "attempts": 3
+      "status": "done",
+      "attempts": 1,
+      "error": "3 retries exhausted",
+      "prompt_id": "57be1c6c-948e-4bf6-9cf8-5fd890f003b8",
+      "image": "shots\\S11.png"
     },
     "S12": {
-      "status": "pending",
-      "attempts": 3
+      "status": "done",
+      "attempts": 4,
+      "prompt_id": "23a0011b-beac-4554-a45b-44c372d4eebc",
+      "image": "shots\\S12.png"
     },
     "S13": {
-      "status": "pending",
-      "attempts": 3
+      "status": "done",
+      "attempts": 4,
+      "prompt_id": "6df34f5a-8f7b-465b-a14d-ea13ef5a1960",
+      "image": "shots\\S13.png"
     },
     "S14": {
-      "status": "pending",
-      "attempts": 3
+      "status": "done",
+      "attempts": 4,
+      "prompt_id": "226123bc-26df-4f70-bf9c-84ebec27fdb0",
+      "image": "shots\\S14.png"
     },
     "S15": {
-      "status": "pending",
-      "attempts": 3
+      "status": "done",
+      "attempts": 4,
+      "prompt_id": "85679ec5-ee50-4445-8a45-8fec8292eea1",
+      "image": "shots\\S15.png"
     }
   }
 }

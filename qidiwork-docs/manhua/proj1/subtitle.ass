@@ -1,0 +1,27 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 720
+PlayResY: 1280
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Source Han Sans CN,52,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,4,0,2,60,60,200,1
+
+[Events]
+Format: Layer, Start, End, Style, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:07.37,Default,,0,0,200,,北方小城，冬日的街头，\N刘大忽悠的生意开张了。\N拐了——拐了——拐了啊——！
+Dialogue: 0,0:00:07.37,0:00:13.07,Default,,0,0,200,,喊啥呀喊啥，一天了，\N把拐都喊凉快了也没人来。
+Dialogue: 0,0:00:13.07,0:00:19.80,Default,,0,0,200,,大妹子你不懂！我能把正的忽悠斜了\N，蔫的忽悠谑的，尖人忽悠嗫的！
+Dialogue: 0,0:00:19.80,0:00:22.80,Default,,0,0,200,,说曹操曹操到。
+Dialogue: 0,0:00:22.80,0:00:28.97,Default,,0,0,200,,兄弟！看你这印堂发暗，\N双目无神——最近身体是不是不得劲\N？
+Dialogue: 0,0:00:28.97,0:00:34.47,Default,,0,0,200,,我没觉着啊？我就觉着我这脸，\N是不是越来越大？
+Dialogue: 0,0:00:34.47,0:00:40.33,Default,,0,0,200,,知道你的脸为啥大吗？末梢神经坏死\N，把上边憋大的！
+Dialogue: 0,0:00:40.33,0:00:46.07,Default,,0,0,200,,腰——以下！腿——往上！可不得憋\N大了嘛！
+Dialogue: 0,0:00:46.07,0:00:49.03,Default,,0,0,200,,那……那咋整啊？
+Dialogue: 0,0:00:49.03,0:00:54.23,Default,,0,0,200,,先自测！腿麻不麻？ 不麻呀。
+Dialogue: 0,0:00:54.23,0:00:59.20,Default,,0,0,200,,没病走两步！来——这样，\N跶！跶！
+Dialogue: 0,0:00:59.20,0:01:04.90,Default,,0,0,200,,哎？你别说……走两步，\N好像真有点不得劲！
+Dialogue: 0,0:01:04.90,0:01:08.40,Default,,0,0,200,,缘分呐！
+Dialogue: 0,0:01:08.40,0:01:11.80,Default,,0,0,200,,哎呀妈呀，可别祸害人家了……
+Dialogue: 0,0:01:11.80,0:01:17.63,Default,,0,0,200,,一副拐，一炕嘴，\N东北大地的幽默，\N三十年后仍然好使。\N本片为 AI 生成样片，\N仅内部验证。

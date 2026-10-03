@@ -53,7 +53,22 @@
       "narration": "北方小城，冬日的街头，刘大忽悠的生意开张了。",
       "sfx": "",
       "min_duration_sec": 4.0,
-      "subtitle": "北方小城，冬日的街头，刘大忽悠的生意开张了。拐了——拐了——拐了啊——！"
+      "subtitle": "北方小城，冬日的街头，刘大忽悠的生意开张了。拐了——拐了——拐了啊——！",
+      "audio_sec": 6.834,
+      "audio_segments": [
+        {
+          "file": "S01_d0_CH-01.mp3",
+          "sec": 2.304,
+          "voice": "zh-CN-YunyangNeural",
+          "role": "d0"
+        },
+        {
+          "file": "S01_n.mp3",
+          "sec": 4.392,
+          "voice": "zh-CN-YunyangNeural",
+          "role": "n"
+        }
+      ]
     },
     {
       "shot_id": "S02",
@@ -73,7 +88,16 @@
       "narration": "",
       "sfx": "",
       "min_duration_sec": 3.0,
-      "subtitle": "喊啥呀喊啥，一天了，把拐都喊凉快了也没人来。"
+      "subtitle": "喊啥呀喊啥，一天了，把拐都喊凉快了也没人来。",
+      "audio_sec": 5.184,
+      "audio_segments": [
+        {
+          "file": "S02_d0_CH-03.mp3",
+          "sec": 5.184,
+          "voice": "zh-CN-XiaoxiaoNeural",
+          "role": "d0"
+        }
+      ]
     },
     {
       "shot_id": "S03",
@@ -93,7 +117,16 @@
       "narration": "",
       "sfx": "",
       "min_duration_sec": 4.0,
-      "subtitle": "大妹子你不懂！我能把正的忽悠斜了，蔫的忽悠谑的，尖人忽悠嗫的！"
+      "subtitle": "大妹子你不懂！我能把正的忽悠斜了，蔫的忽悠谑的，尖人忽悠嗫的！",
+      "audio_sec": 6.216,
+      "audio_segments": [
+        {
+          "file": "S03_d0_CH-01.mp3",
+          "sec": 6.216,
+          "voice": "zh-CN-YunyangNeural",
+          "role": "d0"
+        }
+      ]
     },
     {
       "shot_id": "S04",
@@ -108,7 +141,16 @@
       "narration": "说曹操曹操到。",
       "sfx": "",
       "min_duration_sec": 3.0,
-      "subtitle": "说曹操曹操到。"
+      "subtitle": "说曹操曹操到。",
+      "audio_sec": 2.256,
+      "audio_segments": [
+        {
+          "file": "S04_n.mp3",
+          "sec": 2.256,
+          "voice": "zh-CN-YunyangNeural",
+          "role": "n"
+        }
+      ]
     },
     {
       "shot_id": "S05",
@@ -129,7 +171,16 @@
       "narration": "",
       "sfx": "",
       "min_duration_sec": 3.5,
-      "subtitle": "兄弟！看你这印堂发暗，双目无神——最近身体是不是不得劲？"
+      "subtitle": "兄弟！看你这印堂发暗，双目无神——最近身体是不是不得劲？",
+      "audio_sec": 5.664,
+      "audio_segments": [
+        {
+          "file": "S05_d0_CH-01.mp3",
+          "sec": 5.664,
+          "voice": "zh-CN-YunyangNeural",
+          "role": "d0"
+        }
+      ]
     },
     {
       "shot_id": "S06",
@@ -149,7 +200,16 @@
       "narration": "",
       "sfx": "",
       "min_duration_sec": 3.0,
-      "subtitle": "我没觉着啊？我就觉着我这脸，是不是越来越大？"
+      "subtitle": "我没觉着啊？我就觉着我这脸，是不是越来越大？",
+      "audio_sec": 4.992,
+      "audio_segments": [
+        {
+          "file": "S06_d0_CH-02.mp3",
+          "sec": 4.992,
+          "voice": "zh-CN-YunxiNeural",
+          "role": "d0"
+        }
+      ]
     },
     {
       "shot_id": "S07",
@@ -169,7 +229,16 @@
       "narration": "",
       "sfx": "",
       "min_duration_sec": 3.5,
-      "subtitle": "知道你的脸为啥大吗？末梢神经坏死，把上边憋大的！"
+      "subtitle": "知道你的脸为啥大吗？末梢神经坏死，把上边憋大的！",
+      "audio_sec": 5.352,
+      "audio_segments": [
+        {
+          "file": "S07_d0_CH-01.mp3",
+          "sec": 5.352,
+          "voice": "zh-CN-YunyangNeural",
+          "role": "d0"
+        }
+      ]
     },
     {
       "shot_id": "S08",
@@ -189,7 +258,16 @@
       "narration": "",
       "sfx": "",
       "min_duration_sec": 3.0,
-      "subtitle": "腰——以下！腿——往上！可不得憋大了嘛！"
+      "subtitle": "腰——以下！腿——往上！可不得憋大了嘛！",
+      "audio_sec": 5.208,
+      "audio_segments": [
+        {
+          "file": "S08_d0_CH-03.mp3",
+          "sec": 5.208,
+          "voice": "zh-CN-XiaoxiaoNeural",
+          "role": "d0"
+        }
+      ]
     },
     {
       "shot_id": "S09",
@@ -209,7 +287,16 @@
       "narration": "",
       "sfx": "",
       "min_duration_sec": 2.5,
-      "subtitle": "那……那咋整啊？"
+      "subtitle": "那……那咋整啊？",
+      "audio_sec": 2.448,
+      "audio_segments": [
+        {
+          "file": "S09_d0_CH-02.mp3",
+          "sec": 2.448,
+          "voice": "zh-CN-YunxiNeural",
+          "role": "d0"
+        }
+      ]
     },
     {
       "shot_id": "S10",
@@ -234,7 +321,22 @@
       "narration": "",
       "sfx": "",
       "min_duration_sec": 3.0,
-      "subtitle": "先自测！腿麻不麻？ 不麻呀。"
+      "subtitle": "先自测！腿麻不麻？ 不麻呀。",
+      "audio_sec": 4.698,
+      "audio_segments": [
+        {
+          "file": "S10_d0_CH-01.mp3",
+          "sec": 2.808,
+          "voice": "zh-CN-YunyangNeural",
+          "role": "d0"
+        },
+        {
+          "file": "S10_d1_CH-02.mp3",
+          "sec": 1.752,
+          "voice": "zh-CN-YunxiNeural",
+          "role": "d1"
+        }
+      ]
     },
     {
       "shot_id": "S11",
@@ -255,7 +357,16 @@
       "narration": "",
       "sfx": "",
       "min_duration_sec": 3.0,
-      "subtitle": "没病走两步！来——这样，跶！跶！"
+      "subtitle": "没病走两步！来——这样，跶！跶！",
+      "audio_sec": 4.44,
+      "audio_segments": [
+        {
+          "file": "S11_d0_CH-01.mp3",
+          "sec": 4.44,
+          "voice": "zh-CN-YunyangNeural",
+          "role": "d0"
+        }
+      ]
     },
     {
       "shot_id": "S12",
@@ -275,7 +386,16 @@
       "narration": "",
       "sfx": "",
       "min_duration_sec": 3.5,
-      "subtitle": "哎？你别说……走两步，好像真有点不得劲！"
+      "subtitle": "哎？你别说……走两步，好像真有点不得劲！",
+      "audio_sec": 5.184,
+      "audio_segments": [
+        {
+          "file": "S12_d0_CH-02.mp3",
+          "sec": 5.184,
+          "voice": "zh-CN-YunxiNeural",
+          "role": "d0"
+        }
+      ]
     },
     {
       "shot_id": "S13",
@@ -310,7 +430,16 @@
       "narration": "",
       "sfx": "",
       "min_duration_sec": 3.0,
-      "subtitle": "哎呀妈呀，可别祸害人家了……"
+      "subtitle": "哎呀妈呀，可别祸害人家了……",
+      "audio_sec": 2.88,
+      "audio_segments": [
+        {
+          "file": "S14_d0_CH-03.mp3",
+          "sec": 2.88,
+          "voice": "zh-CN-XiaoxiaoNeural",
+          "role": "d0"
+        }
+      ]
     },
     {
       "shot_id": "S15",
@@ -327,7 +456,16 @@
       "narration": "一副拐，一炕嘴，东北大地的幽默，三十年后仍然好使。",
       "sfx": "",
       "min_duration_sec": 4.0,
-      "subtitle": "一副拐，一炕嘴，东北大地的幽默，三十年后仍然好使。本片为 AI 生成样片，仅内部验证。"
+      "subtitle": "一副拐，一炕嘴，东北大地的幽默，三十年后仍然好使。本片为 AI 生成样片，仅内部验证。",
+      "audio_sec": 5.304,
+      "audio_segments": [
+        {
+          "file": "S15_n.mp3",
+          "sec": 5.304,
+          "voice": "zh-CN-YunyangNeural",
+          "role": "n"
+        }
+      ]
     }
   ],
   "transitions": [

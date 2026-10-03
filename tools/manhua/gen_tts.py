@@ -26,6 +26,7 @@ import common
 
 GAP_SEC = 0.15          # 段间静音
 GAP_FILE = "_gap.mp3"   # 静音Gap缓存名
+NARRATOR_VOICE = "zh-CN-YunyangNeural"  # 旁白默认音色：无对白角色可借时用
 
 
 async def _tts_once(text: str, voice: str, rate: str, pitch: str,
@@ -118,15 +119,21 @@ def process_shot(shot: dict, char_by_id: dict,
         p = audio_dir / f"{sid}_d{i}_{d['character']}.mp3"
         tasks.append((d["line"], char, p, f"d{i}"))
     if shot.get("narration"):
-        # 旁白用第一个角色音色（可后续扩展独立旁白音色）
+        # 旁白音色 fallback：第一个对白角色音色 → 无对白时 NARRATOR_VOICE
         first_char = char_by_id.get(
             (shot.get("dialogue") or [{}])[0].get("character"))
         p = audio_dir / f"{sid}_n.mp3"
         if first_char is not None:
             tasks.append((shot["narration"], first_char, p, "n"))
         else:
-            common.log_warn(f"{sid}: 有旁白但无角色可借音色，"
-                            "跳过旁白")
+            # synth_segment 读 tts_voice/tts_fallback/tts_rate/tts_pitch
+            narrator = {
+                "id": "NAR", "name": "旁白",
+                "tts_voice": NARRATOR_VOICE,
+                "tts_fallback": "",
+                "tts_rate": "+0%", "tts_pitch": "+0Hz",
+            }
+            tasks.append((shot["narration"], narrator, p, "n"))
 
     if not tasks:
         common.log_info(f"{sid}: 无台词/旁白，audio_sec=0")
