@@ -68,7 +68,10 @@
           "voice": "zh-CN-YunyangNeural",
           "role": "n"
         }
-      ]
+      ],
+      "i2v": true,
+      "video_prompt": "a peddler in a dark green coat waves his arm and shouts hawking on a snowy small-town street, camera slowly zooms in, vertical 9:16 composition",
+      "video_seconds": "8"
     },
     {
       "shot_id": "S02",
@@ -150,7 +153,10 @@
           "voice": "zh-CN-YunyangNeural",
           "role": "n"
         }
-      ]
+      ],
+      "i2v": true,
+      "video_prompt": "a chubby chef rides a vintage bicycle into frame across a snowy street, camera pans right following him",
+      "video_seconds": "4"
     },
     {
       "shot_id": "S05",
@@ -366,7 +372,10 @@
           "voice": "zh-CN-YunyangNeural",
           "role": "d0"
         }
-      ]
+      ],
+      "i2v": true,
+      "video_prompt": "a sly man in a dark coat demonstrates a limping walk with a wooden cane, stamping steps, exaggerated limp, on a snowy street",
+      "video_seconds": "5"
     },
     {
       "shot_id": "S12",
@@ -395,7 +404,10 @@
           "voice": "zh-CN-YunxiNeural",
           "role": "d0"
         }
-      ]
+      ],
+      "i2v": true,
+      "video_prompt": "a confused chef in a tall white hat stamps his feet trying the walk, then looks puzzled at his own leg",
+      "video_seconds": "6"
     },
     {
       "shot_id": "S13",
@@ -465,7 +477,10 @@
           "voice": "zh-CN-YunyangNeural",
           "role": "n"
         }
-      ]
+      ],
+      "i2v": true,
+      "video_prompt": "three people in a group scene on a snowy street: the sly man puts his hand on the chef's shoulder, the chef holds the cane up examining it, the auntie shakes her head, camera slowly zooms out, vertical composition",
+      "video_seconds": "7"
     }
   ],
   "transitions": [
