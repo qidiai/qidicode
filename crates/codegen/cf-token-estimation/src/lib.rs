@@ -18,6 +18,86 @@ pub fn estimate_tokens(s: &str) -> u64 {
     (s.len() as u64) / BYTES_PER_TOKEN
 }
 
+/// Numerator of the per-CJK-character token ratio used by
+/// [`estimate_tokens_aware`]: each CJK character counts as
+/// `CJK_TOKEN_NUMERATOR / CJK_TOKEN_DENOMINATOR` tokens.
+///
+/// Measured Chinese text tokenizes at roughly 0.5–0.6 token/字, while
+/// UTF-8 encodes those characters at 3 bytes each — so the plain
+/// bytes/4 heuristic over-estimates Chinese by ~30–50% (token
+/// optimization plan §5-1). We take 3/5 = 0.6, the conservative
+/// (higher) end of the measured band:宁可高估（早压缩）不可低估
+/// （溢出）, per plan §6 gate 4. Exposed as a constant so the ratio
+/// can be re-tuned against a real tokenizer without touching call
+/// sites.
+pub const CJK_TOKEN_NUMERATOR: u64 = 3;
+
+/// Denominator of the per-CJK-character token ratio
+/// ([`CJK_TOKEN_NUMERATOR`] / [`CJK_TOKEN_DENOMINATOR`] tokens per
+/// CJK character). See [`CJK_TOKEN_NUMERATOR`] for the rationale.
+pub const CJK_TOKEN_DENOMINATOR: u64 = 5;
+
+/// True when `c` falls in one of the CJK Unicode blocks counted by
+/// [`estimate_tokens_aware`]: CJK radicals and Han (U+2E80–U+9FFF,
+/// which also covers CJK punctuation U+3000–U+303F and Extension A
+/// U+3400–U+4DBF), compatibility ideographs (U+F900–U+FAFF), and
+/// fullwidth forms (U+FF00–U+FFEF).
+fn is_cjk(c: char) -> bool {
+    // U+3000–303F（CJK 标点）与 Extension A（U+3400–4DBF）均为
+    // U+2E80–U+9FFF 的子区间，故不单列——单列反而是不可达模式。
+    matches!(
+        c as u32,
+        0x2E80..=0x9FFF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF
+    )
+}
+
+/// Character-aware token estimate: ASCII bytes at [`BYTES_PER_TOKEN`],
+/// CJK characters at [`CJK_TOKEN_NUMERATOR`] / [`CJK_TOKEN_DENOMINATOR`]
+/// tokens each (ceiling of the aggregate), and every other non-ASCII
+/// byte at [`BYTES_PER_TOKEN`].
+///
+/// Formula: `ascii_len / 4 + ceil(cjk_chars * 3 / 5) + other_bytes / 4`.
+///
+/// The bytes/4 heuristic ([`estimate_tokens`]) assumes 4 bytes per
+/// token, but a CJK character costs 3 UTF-8 bytes while tokenizing at
+/// ~0.5–0.6 tokens/字， so bytes/4 over-counts Chinese text by
+/// ~30–50%. This variant splits the string into ASCII / CJK / other
+/// and applies the appropriate rate to each class; pure-ASCII input
+/// yields exactly the same value as [`estimate_tokens`] for a single
+/// string, so ASCII-only callers see no change at the string level.
+/// The equality is per string: callers that fold the estimate over
+/// several segments (such as `estimate_item_tokens` in cf-chat-state,
+/// which sums per user text part, per assistant content and per
+/// tool-call arguments) floor each segment separately, so a
+/// multi-segment item can land up to (segments − 1) tokens below
+/// the old merged Σbytes/4 figure — pure ASCII included.
+///
+/// Other non-ASCII scripts and emoji are counted as raw bytes at
+/// [`BYTES_PER_TOKEN`] — their per-script token ratios are not
+/// measured here, and the bytes/4 default stays on the conservative
+/// side for them.
+#[inline]
+pub fn estimate_tokens_aware(s: &str) -> u64 {
+    let mut ascii_len: u64 = 0;
+    let mut cjk_chars: u64 = 0;
+    let mut other_bytes: u64 = 0;
+    for c in s.chars() {
+        if c.is_ascii() {
+            ascii_len += 1;
+        } else if is_cjk(c) {
+            cjk_chars += 1;
+        } else {
+            other_bytes += c.len_utf8() as u64;
+        }
+    }
+    // ceil(cjk * 3 / 5) in integer arithmetic: (x + d - 1) / d.
+    let cjk_tokens = (cjk_chars
+        .saturating_mul(CJK_TOKEN_NUMERATOR)
+        .saturating_add(CJK_TOKEN_DENOMINATOR - 1))
+        / CJK_TOKEN_DENOMINATOR;
+    ascii_len / BYTES_PER_TOKEN + cjk_tokens + other_bytes / BYTES_PER_TOKEN
+}
+
 /// Inverse of [`estimate_tokens`]: convert a token budget into a character
 /// budget. Used by skill discovery to size text passages against the model's
 /// context window.
@@ -113,6 +193,93 @@ mod tests {
         assert_eq!(estimate_tokens("abc"), 0);
         assert_eq!(estimate_tokens("abcd"), 1);
         assert_eq!(estimate_tokens(&"x".repeat(4000)), 1000);
+    }
+
+    #[test]
+    fn cjk_ratio_constants_expose_the_tunable() {
+        // Locks the current tuning surface; re-tuning against a real
+        // tokenizer updates these two numbers deliberately.
+        assert_eq!(CJK_TOKEN_NUMERATOR, 3);
+        assert_eq!(CJK_TOKEN_DENOMINATOR, 5);
+    }
+
+    #[test]
+    fn estimate_tokens_aware_matches_bytes_over_four_for_ascii() {
+        // Pure ASCII never diverges from the legacy heuristic.
+        assert_eq!(estimate_tokens_aware(""), 0);
+        assert_eq!(estimate_tokens_aware("abc"), 0);
+        assert_eq!(estimate_tokens_aware("abcd"), 1);
+        assert_eq!(estimate_tokens_aware("hello world"), estimate_tokens("hello world"));
+        assert_eq!(estimate_tokens_aware(&"x".repeat(4000)), 1000);
+    }
+
+    #[test]
+    fn estimate_tokens_aware_chinese_sits_in_measured_band() {
+        // 100 CJK chars -> ceil(100 * 3 / 5) = 60 tokens, i.e. 0.6
+        // token/字. Assert the measured 0.5–0.6 band (50..=62) rather
+        // than the exact value, and that we stay strictly below the
+        // bytes/4 over-estimate (100 * 3 bytes / 4 = 75).
+        let s = "你".repeat(100);
+        let t = estimate_tokens_aware(&s);
+        assert!(
+            (50..=62).contains(&t),
+            "100 CJK chars should land in the 0.5-0.6 token/字 band, got {t}"
+        );
+        assert!(t < estimate_tokens(&s), "aware must under-cut the bytes/4 over-estimate");
+    }
+
+    #[test]
+    fn estimate_tokens_aware_mixed_ascii_and_cjk() {
+        // 你好世界 = 4 CJK -> ceil(12/5) = 3; "hello" = 5 ASCII bytes
+        // -> 5/4 = 1. Total 4.
+        assert_eq!(estimate_tokens_aware("你好世界hello"), 4);
+        // Trailing CJK rounds up on its own aggregate: 1 CJK ->
+        // ceil(3/5) = 1, plus "ab" -> 0.
+        assert_eq!(estimate_tokens_aware("ab你"), 1);
+    }
+
+    #[test]
+    fn estimate_tokens_aware_empty() {
+        assert_eq!(estimate_tokens_aware(""), 0);
+    }
+
+    #[test]
+    fn estimate_tokens_aware_treats_emoji_as_other_bytes() {
+        // 🙂 (U+1F642) is 4 UTF-8 bytes and outside every counted CJK
+        // block, so it falls in the "other" bucket at bytes/4.
+        assert_eq!(estimate_tokens_aware("🙂"), 1);
+        assert_eq!(estimate_tokens_aware("🙂🙂"), 2);
+    }
+
+    #[test]
+    fn estimate_tokens_aware_counts_fullwidth_punctuation_as_cjk() {
+        // ，= U+FF0C and ！= U+FF01 (fullwidth forms), 。= U+3002 (CJK
+        // punctuation): 3 CJK chars -> ceil(9/5) = 2.
+        assert_eq!(estimate_tokens_aware("，。！"), 2);
+    }
+
+    #[test]
+    fn estimate_tokens_aware_cjk_block_boundaries() {
+        // U+2E80 (first CJK radical) and U+9FFF (last Han) are both
+        // counted: 2 CJK -> ceil(6/5) = 2.
+        assert_eq!(estimate_tokens_aware("\u{2E80}\u{9FFF}"), 2);
+        // U+A000 (Yi syllable) is NOT in any counted block -> other,
+        // 3 bytes -> 0 tokens at bytes/4.
+        assert_eq!(estimate_tokens_aware("\u{A000}"), 0);
+        // One non-CJK char plus one Han char: ceil(3/5) = 1 + 0.
+        assert_eq!(estimate_tokens_aware("\u{A000}\u{4E00}"), 1);
+        // U+3000 (ideographic space, CJK punctuation block) counts.
+        assert_eq!(estimate_tokens_aware("\u{3000}"), 1);
+    }
+
+    #[test]
+    fn estimate_tokens_aware_counts_cjk_punctuation_via_han_arm() {
+        // U+3001 (、) and U+3002 (。) sit in the CJK punctuation
+        // block U+3000–U+303F, which is a sub-range of the
+        // U+2E80–U+9FFF arm (not listed separately): they must
+        // still be counted as CJK via that arm. 2 CJK chars ->
+        // ceil(6/5) = 2.
+        assert_eq!(estimate_tokens_aware("\u{3001}\u{3002}"), 2);
     }
 
     #[test]

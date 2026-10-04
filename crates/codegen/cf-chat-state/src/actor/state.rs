@@ -34,7 +34,10 @@ pub fn estimate_tool_definitions_tokens(tds: &[cf_sampling_types::ToolDefinition
     tds.iter().map(estimate_tool_definition_tokens).sum()
 }
 
-/// Bytes/4 estimate for a single [`ConversationItem`].
+/// Character-aware estimate for a single [`ConversationItem`]:
+/// text content goes through [`cf_token_estimation::estimate_tokens_aware`]
+/// (bytes/4 for ASCII, ~0.6 token per CJK character), so Chinese-heavy
+/// sessions are no longer over-estimated by the raw bytes/4 heuristic.
 ///
 /// Images are counted at [`cf_token_estimation::IMAGE_TOKEN_ESTIMATE`] each.
 /// Shared by [`estimate_conversation_tokens`] and [`estimate_messages_tokens`]
@@ -42,38 +45,41 @@ pub fn estimate_tool_definitions_tokens(tds: &[cf_sampling_types::ToolDefinition
 pub fn estimate_item_tokens(item: &ConversationItem) -> u64 {
     use cf_sampling_types::ContentPart;
     match item {
-        ConversationItem::System(s) => cf_token_estimation::estimate_tokens(&s.content),
+        ConversationItem::System(s) => cf_token_estimation::estimate_tokens_aware(&s.content),
         ConversationItem::User(u) => {
-            let mut bytes: usize = 0;
+            let mut tokens: u64 = 0;
             let mut images: u64 = 0;
             for p in &u.content {
                 match p {
-                    ContentPart::Text { text } => bytes += text.len(),
+                    ContentPart::Text { text } => {
+                        tokens += cf_token_estimation::estimate_tokens_aware(text);
+                    }
                     ContentPart::Image { .. } => images += 1,
                 }
             }
-            (bytes as u64) / cf_token_estimation::BYTES_PER_TOKEN
-                + cf_token_estimation::estimate_image_tokens(images)
+            tokens + cf_token_estimation::estimate_image_tokens(images)
         }
         ConversationItem::Assistant(a) => {
-            let bytes = a.content.len()
-                + a.tool_calls
-                    .iter()
-                    .map(|tc| tc.arguments.len())
-                    .sum::<usize>();
-            (bytes as u64) / cf_token_estimation::BYTES_PER_TOKEN
+            let mut tokens = cf_token_estimation::estimate_tokens_aware(&a.content);
+            for tc in &a.tool_calls {
+                tokens += cf_token_estimation::estimate_tokens_aware(&tc.arguments);
+            }
+            tokens
         }
-        ConversationItem::ToolResult(tr) => cf_token_estimation::estimate_tokens(&tr.content),
+        ConversationItem::ToolResult(tr) => {
+            cf_token_estimation::estimate_tokens_aware(&tr.content)
+        }
         ConversationItem::BackendToolCall(b) => {
-            cf_token_estimation::estimate_tokens(&b.text_summary())
+            cf_token_estimation::estimate_tokens_aware(&b.text_summary())
         }
         ConversationItem::Reasoning(r) => {
-            // Summary + content text follow the standard bytes-per-token
-            // estimate; encrypted blobs are base64 and don't survive
-            // tokenization 1:1, so estimate at len/4 as well.
-            let text_bytes = cf_sampling_types::reasoning_item_text(r).len();
+            // Summary + content text use the character-aware estimate;
+            // encrypted blobs are base64 (pure ASCII) and don't survive
+            // tokenization 1:1, so they stay at the plain bytes/4 rate.
+            let text = cf_sampling_types::reasoning_item_text(r);
             let enc_bytes = r.encrypted_content.as_deref().map(str::len).unwrap_or(0);
-            ((text_bytes + enc_bytes) as u64) / cf_token_estimation::BYTES_PER_TOKEN
+            cf_token_estimation::estimate_tokens_aware(&text)
+                + ((enc_bytes as u64) / cf_token_estimation::BYTES_PER_TOKEN)
         }
     }
 }
@@ -137,13 +143,16 @@ pub(crate) struct ChatState {
     /// Opaque credential secrets (api key, optional extra auth, client version).
     /// Stored opaquely — the actor never interprets them.
     pub credentials: Credentials,
-    /// Bytes/4 estimate of tokens added since the last `record_token_usage`.
-    /// Used by `check_preflight_overflow` to detect context window overflows
+    /// Character-aware estimate of tokens added since the last
+    /// `record_token_usage` (text via
+    /// `cf_token_estimation::estimate_tokens_aware`). Used by
+    /// `check_preflight_overflow` to detect context window overflows
     /// between model responses.
     pub estimated_tokens_since_model: u64,
-    /// Bytes/4 estimate of the conversation as of the last `record_token_usage`
-    /// (or last reseed). `total_tokens − estimate_at_last_response` is the
-    /// provider-side overhead carried across compaction.
+    /// Character-aware estimate of the conversation as of the last
+    /// `record_token_usage` (or last reseed). `total_tokens −
+    /// estimate_at_last_response` is the provider-side overhead
+    /// carried across compaction.
     pub estimate_at_last_response: u64,
     /// Per-turn token usage from the most recent model response.
     /// Stashed by `record_last_turn_usage()` and read at `PromptResponse`
@@ -297,6 +306,114 @@ mod tests {
                 "counter must report the same trusted count as estimate_item_tokens"
             );
         }
+    }
+
+    #[test]
+    fn estimate_item_tokens_uses_character_aware_text_estimate() {
+        // 100 CJK chars -> ceil(100 * 3 / 5) = 60 tokens, not
+        // the 75 the raw bytes/4 heuristic would report.
+        let sys = ConversationItem::system("你".repeat(100));
+        assert_eq!(estimate_item_tokens(&sys), 60);
+
+        // User text: 你好世界 = 4 CJK -> ceil(12/5) = 3,
+        // "hello" = 5 ASCII bytes -> 1.
+        let user = ConversationItem::user("你好世界hello");
+        assert_eq!(estimate_item_tokens(&user), 4);
+
+        // Assistant content follows the same aware path.
+        let asst = ConversationItem::assistant("你好世界hello");
+        assert_eq!(estimate_item_tokens(&asst), 4);
+
+        // Assistant tool-call arguments are text too.
+        // `{"路径":"你好"}`: 7 ASCII bytes -> 1, 4 CJK -> 3.
+        let tc = cf_sampling_types::ToolCall {
+            id: std::sync::Arc::from("tc1"),
+            name: "write_file".to_string(),
+            arguments: std::sync::Arc::from("{\"路径\":\"你好\"}"),
+        };
+        let asst_tc = ConversationItem::assistant_tool_calls(vec![tc]);
+        assert_eq!(estimate_item_tokens(&asst_tc), 4);
+
+        // Tool results carry text content.
+        let tr = ConversationItem::tool_result("tc1", "你好世界hello");
+        assert_eq!(estimate_item_tokens(&tr), 4);
+
+        // Each user text part is estimated as its own segment:
+        // 2 CJK -> ceil(6/5) = 2 per part, 2 parts -> 4.
+        let parts = vec![
+            cf_sampling_types::ContentPart::Text {
+                text: std::sync::Arc::from("你好"),
+            },
+            cf_sampling_types::ContentPart::Text {
+                text: std::sync::Arc::from("世界"),
+            },
+        ];
+        let multi = ConversationItem::user_with_parts(parts);
+        assert_eq!(estimate_item_tokens(&multi), 4);
+    }
+
+    #[test]
+    fn estimate_item_tokens_ascii_matches_legacy_bytes_over_four() {
+        // Pure-ASCII items must keep the exact bytes/4 values the
+        // auto-compact gates were calibrated against.
+        let items = vec![
+            ConversationItem::system("you are a helpful assistant"),
+            ConversationItem::user("fix the login bug in auth.rs"),
+            ConversationItem::assistant("let me look at the file"),
+            ConversationItem::tool_result("tc1", "fn login() {}"),
+        ];
+        let expected = [27 / 4, 28 / 4, 23 / 4, 13 / 4];
+        for (item, want) in items.iter().zip(expected) {
+            assert_eq!(estimate_item_tokens(item), want);
+        }
+    }
+
+    #[test]
+    fn estimate_item_tokens_multisegment_ascii_is_sum_of_per_segment_floors() {
+        // Per-segment semantics pin: `estimate_item_tokens` floors
+        // each text segment separately and sums the floors, so a
+        // multi-segment item can land up to (segments - 1) tokens
+        // below the old merged floor(sum_bytes / 4) — pure ASCII
+        // included. These assertions lock the NEW per-segment
+        // values; the old merged values are in the comments so a
+        // future reader does not mistake the delta for a bug or
+        // "fix" the arithmetic back to the merged semantics.
+
+        // User, three text parts: "ab" (2 bytes) + "cd" (2 bytes)
+        // + "efgh" (4 bytes).
+        // New (per-segment floors): floor(2/4) + floor(2/4) +
+        // floor(4/4) = 0 + 0 + 1 = 1.
+        // Old (merged 8 bytes / 4): 2.  -> 1 token lower.
+        let parts = vec![
+            cf_sampling_types::ContentPart::Text {
+                text: std::sync::Arc::from("ab"),
+            },
+            cf_sampling_types::ContentPart::Text {
+                text: std::sync::Arc::from("cd"),
+            },
+            cf_sampling_types::ContentPart::Text {
+                text: std::sync::Arc::from("efgh"),
+            },
+        ];
+        let user = ConversationItem::user_with_parts(parts);
+        assert_eq!(estimate_item_tokens(&user), 1);
+
+        // Assistant content "ab" (2 bytes) plus one tool call whose
+        // arguments are "cd" (2 bytes).
+        // New (per-segment floors): floor(2/4) + floor(2/4) = 0 + 0 = 0.
+        // Old (merged 4 bytes / 4): 1.  -> 1 token lower.
+        let assistant = ConversationItem::Assistant(cf_sampling_types::AssistantItem {
+            content: std::sync::Arc::from("ab"),
+            tool_calls: vec![cf_sampling_types::ToolCall {
+                id: std::sync::Arc::from("tc1"),
+                name: "write_file".to_string(),
+                arguments: std::sync::Arc::from("cd"),
+            }],
+            model_id: None,
+            model_fingerprint: None,
+            reasoning_effort: None,
+        });
+        assert_eq!(estimate_item_tokens(&assistant), 0);
     }
 
     #[test]
