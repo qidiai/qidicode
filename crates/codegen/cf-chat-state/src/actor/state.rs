@@ -10,12 +10,17 @@ use cf_sampling_types::{
 use crate::types::Credentials;
 use crate::usage::UsageLedger;
 
-/// Bytes/4 estimate of the system prompt portion of a [`ConversationItem`].
+/// Character-aware estimate of the system prompt portion of a
+/// [`ConversationItem`] — same basis as the message path
+/// ([`estimate_item_tokens`]): bytes/4 for ASCII, 3/5 token per
+/// CJK character, so `/context`'s `system_prompt_tokens` row no
+/// longer over-reports a Chinese system prompt against
+/// `message_tokens`.
 /// Returns 0 for non-system items so callers can pipe through whatever they
 /// have without unwrapping.
 pub fn estimate_system_message_tokens(item: &ConversationItem) -> u64 {
     match item {
-        ConversationItem::System(s) => cf_token_estimation::estimate_tokens(&s.content),
+        ConversationItem::System(s) => cf_token_estimation::estimate_tokens_aware(&s.content),
         _ => 0,
     }
 }
