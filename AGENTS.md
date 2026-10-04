@@ -99,7 +99,8 @@
 
 - `max` 是 `xhigh` 的 **CLI 别名**；但技能/代理 frontmatter 的 `Effort` 枚举中 `Max` 是**独立值**——两层语义不同，写技能时勿混
 - 仅对支持推理的模型生效（模型目录 meta `supportsReasoningEffort` 门控）；`/effort` 默认会话级，`--save` 才持久化
-- 默认值即 `Some(0.35)`（对齐 `memory_search` 工具路径；`None` 仅显式配置时出现，回退历史 0.0）
+- 推理强度默认：`ReasoningEffort` 枚举 `#[default] Medium`（`cf-sampling-types/src/types.rs`）；`SamplingConfig.reasoning_effort` 字段默认 `None`（未显式设置时不带 effort 参数）
+- （勘误 2026-10-04）`Some(0.35)` 是 `memory_search` 的 `min_score` 默认（`cf-config/src/types.rs:2189/2343`、`cf-memory/src/search.rs:926`），与推理强度无关——本节原误植该数字，勿再混入
 
 ## 8. Skills（技能）
 
