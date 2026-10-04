@@ -43,8 +43,9 @@ pub const CJK_TOKEN_DENOMINATOR: u64 = 5;
 /// U+3400–U+4DBF), compatibility ideographs (U+F900–U+FAFF), and
 /// fullwidth forms (U+FF00–U+FFEF).
 fn is_cjk(c: char) -> bool {
-    // U+3000–303F（CJK 标点）与 Extension A（U+3400–4DBF）均为
-    // U+2E80–U+9FFF 的子区间，故不单列——单列反而是不可达模式。
+    // CJK 标点 U+3000–303F 与 Extension A U+3400–4DBF 均为
+    // U+2E80–U+9FFF 的子区间，单列只会冗余；若排在 Han 臂之后
+    // 还会触发 unreachable_patterns。
     matches!(
         c as u32,
         0x2E80..=0x9FFF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF
@@ -68,9 +69,13 @@ fn is_cjk(c: char) -> bool {
 /// The equality is per string: callers that fold the estimate over
 /// several segments (such as `estimate_item_tokens` in cf-chat-state,
 /// which sums per user text part, per assistant content and per
-/// tool-call arguments) floor each segment separately, so a
+/// tool-call arguments) floor each ASCII/other-bytes segment
+/// separately and ceil each CJK segment separately, so a
 /// multi-segment item can land up to (segments − 1) tokens below
-/// the old merged Σbytes/4 figure — pure ASCII included.
+/// the old merged Σbytes/4 figure only via its ASCII/other-bytes
+/// segments (pure ASCII included) — CJK segments ceil per segment
+/// and only aggregate upward (conservative), pinned by the
+/// multi-part CJK test in cf-chat-state.
 ///
 /// Other non-ASCII scripts and emoji are counted as raw bytes at
 /// [`BYTES_PER_TOKEN`] — their per-script token ratios are not
