@@ -68,11 +68,51 @@ pub(crate) async fn test_agent_with_tools(
     )
     .await
 }
+/// Agent with backend-hosted search enabled and the local
+/// `web_search` tool registered, so the backend-search
+/// `web_search` drop (shared by `turn_base_tool_specs`,
+/// `build_session_info` and compaction via
+/// `drop_web_search_for_backend_search`) is observable end to end.
+#[cfg(test)]
+pub(crate) async fn test_agent_backend_search() -> cf_agent::Agent {
+    use cf_tools::implementations::qidi_build::web_search::WebSearchTool;
+    use cf_tools::registry::types::ToolConfig;
+    test_agent_from_config_with_search(
+        cf_tools::registry::types::ToolServerConfig {
+            tools: vec![
+                ToolConfig::for_tool::<WebSearchTool>(),
+                ToolConfig::for_tool::<cf_tools::implementations::qidi_build::ReadFileTool>(),
+            ],
+            behavior_preset: None,
+        },
+        cf_agent::AgentDefinition::default_qidi_build(),
+        std::sync::Arc::new(cf_tools::computer::local::LocalTerminalBackend::new()),
+        vec![cf_sampling_types::HostedTool::WebSearch {
+            allowed_domains: None,
+        }],
+        true,
+    )
+    .await
+}
 #[cfg(test)]
 async fn test_agent_from_config(
     config: cf_tools::registry::types::ToolServerConfig,
     definition: cf_agent::AgentDefinition,
     backend: std::sync::Arc<dyn cf_tools::computer::types::TerminalBackend>,
+) -> cf_agent::Agent {
+    test_agent_from_config_with_search(config, definition, backend, Vec::new(), false).await
+}
+
+/// Like [`test_agent_from_config`] but with an explicit hosted-tools
+/// set and backend-search toggle, so tests can exercise the
+/// backend-search `web_search` drop.
+#[cfg(test)]
+async fn test_agent_from_config_with_search(
+    config: cf_tools::registry::types::ToolServerConfig,
+    definition: cf_agent::AgentDefinition,
+    backend: std::sync::Arc<dyn cf_tools::computer::types::TerminalBackend>,
+    hosted_tools: Vec<cf_sampling_types::HostedTool>,
+    backend_search_enabled: bool,
 ) -> cf_agent::Agent {
     use cf_tools::computer::local::LocalFs;
     use cf_tools::computer::types::AsyncFileSystem;
@@ -115,8 +155,8 @@ async fn test_agent_from_config(
         tool_bridge,
         cf_agent::ReminderPolicy::default(),
         cf_agent::CompactionPolicy::default(),
-        vec![],
-        false,
+        hosted_tools,
+        backend_search_enabled,
     )
 }
 #[cfg(test)]

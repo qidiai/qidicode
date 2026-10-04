@@ -564,12 +564,14 @@ impl SessionActor {
             .unwrap_or(0);
         let use_backend_search =
             self.agent.borrow().backend_search_enabled() && self.supports_backend_search.get();
-        let tool_defs: Vec<_> = self
-            .prepare_tool_definitions_inner()
-            .await
-            .into_iter()
-            .filter(|td| !use_backend_search || td.function.name != "web_search")
-            .collect();
+        // Same `web_search` drop as the per-turn tool list
+        // (`turn_base_tool_specs`) — shared via
+        // `drop_web_search_for_backend_search`, so the /context
+        // token/count accounting matches the toolset a turn sends.
+        let tool_defs = drop_web_search_for_backend_search(
+            self.prepare_tool_definitions_inner().await,
+            use_backend_search,
+        );
         let tool_definitions_count = tool_defs.len();
         let tool_definitions_tokens = cf_chat_state::estimate_tool_definitions_tokens(&tool_defs);
         let message_count = self.chat_state_handle.get_conversation_len().await;

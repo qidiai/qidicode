@@ -572,10 +572,13 @@ pub(crate) async fn run(
             }
         }
     }
+    // --tools/--disallowed-tools are TUI + headless flags
+    // (threaded through ConnectFlags → cli_agent_overrides in
+    // both modes; leader mode warns and ignores them — agent
+    // config is fixed at leader startup), so they no longer
+    // belong on this headless-only warning list.
     let headless_only: &[(&str, bool)] = &[
         ("--agents", args.agents_json.is_some()),
-        ("--tools", args.cli_tools.is_some()),
-        ("--disallowed-tools", args.cli_disallowed_tools.is_some()),
         ("--max-turns", args.max_turns.is_some()),
     ];
     for &(flag, set) in headless_only {

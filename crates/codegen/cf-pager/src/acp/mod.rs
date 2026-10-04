@@ -143,6 +143,16 @@ pub struct ConnectFlags {
     /// Seed agent sessions with auto (classifier) permission mode.
     /// Ignored when `default_yolo_mode` is true.
     pub default_auto_mode: bool,
+    /// CLI `--tools` allowlist (parsed comma-separated). Threads
+    /// into `AgentConfig::cli_agent_overrides` so the main
+    /// session's agent-definition tool allowlist is replaced —
+    /// the same override struct (and `apply_to_definition`
+    /// semantics) the headless path fills. Not supported in
+    /// leader mode (agent config is set at leader startup).
+    pub tools: Option<Vec<String>>,
+    /// CLI `--disallowed-tools` denylist (parsed comma-separated).
+    /// Same override path as [`Self::tools`], for the denylist.
+    pub disallowed_tools: Option<Vec<String>>,
 }
 
 /// Connect to an agent: spawn, initialize, authenticate.
@@ -185,6 +195,7 @@ pub async fn connect(cancel: &CancellationToken, flags: ConnectFlags) -> Result<
     if !flags.permission_rules.is_empty() {
         agent_config.cli_agent_overrides.permission_rules = flags.permission_rules.clone();
     }
+    apply_cli_tool_overrides(&flags, &mut agent_config);
 
     apply_config_writes(&flags);
 
@@ -402,7 +413,24 @@ fn unsupported_leader_flags(flags: &ConnectFlags) -> Vec<&'static str> {
     if !flags.permission_rules.is_empty() {
         out.push("--allow/--deny permission rules");
     }
+    if flags.tools.is_some() {
+        out.push("--tools");
+    }
+    if flags.disallowed_tools.is_some() {
+        out.push("--disallowed-tools");
+    }
     out
+}
+
+/// Thread the CLI `--tools`/`--disallowed-tools` flags into
+/// `AgentConfig::cli_agent_overrides` — the same override struct
+/// the headless path fills, so both entry points converge on one
+/// `CliAgentOverrides` (main sessions: direct replace via
+/// `apply_to_definition`; spawned subagents: session-clamp via
+/// `apply_to_subagent_definition`).
+fn apply_cli_tool_overrides(flags: &ConnectFlags, agent_config: &mut AgentConfig) {
+    agent_config.cli_agent_overrides.tools = flags.tools.clone();
+    agent_config.cli_agent_overrides.disallowed_tools = flags.disallowed_tools.clone();
 }
 
 /// Write config.toml fields based on CLI flags.
@@ -1001,6 +1029,62 @@ mod tests {
         assert!(detected.contains(&"--disable-web-search"));
         assert!(detected.contains(&"--storage-mode"));
         assert!(detected.contains(&"--subagents"));
+    }
+
+    #[test]
+    fn unsupported_leader_flags_detects_tool_overrides() {
+        let flags = ConnectFlags {
+            tools: Some(vec!["read_file".into()]),
+            disallowed_tools: Some(vec!["web_search".into()]),
+            ..Default::default()
+        };
+        let detected = unsupported_leader_flags(&flags);
+        assert!(
+            detected.contains(&"--tools"),
+            "leader-mode unsupported flags must include --tools: {detected:?}"
+        );
+        assert!(
+            detected.contains(&"--disallowed-tools"),
+            "leader-mode unsupported flags must include --disallowed-tools: {detected:?}"
+        );
+    }
+
+    #[test]
+    fn cli_tool_overrides_thread_into_agent_config() {
+        let empty: toml::Value = toml::Value::Table(toml::map::Map::new());
+        let mut agent_config =
+            AgentConfig::new_from_toml_cfg(&empty).expect("empty config should parse");
+        // Unset flags leave the overrides untouched (no clobber).
+        apply_cli_tool_overrides(&ConnectFlags::default(), &mut agent_config);
+        assert!(
+            agent_config.cli_agent_overrides.tools.is_none(),
+            "unset --tools must not clobber cli_agent_overrides.tools"
+        );
+        assert!(
+            agent_config
+                .cli_agent_overrides
+                .disallowed_tools
+                .is_none(),
+            "unset --disallowed-tools must not clobber cli_agent_overrides.disallowed_tools"
+        );
+        // Set flags thread into the same CliAgentOverrides the
+        // headless path fills.
+        let flags = ConnectFlags {
+            tools: Some(vec!["read_file".into(), "grep".into()]),
+            disallowed_tools: Some(vec!["web_search".into()]),
+            ..Default::default()
+        };
+        apply_cli_tool_overrides(&flags, &mut agent_config);
+        assert_eq!(
+            agent_config.cli_agent_overrides.tools,
+            Some(vec!["read_file".to_string(), "grep".to_string()]),
+            "set --tools must thread into cli_agent_overrides.tools (same target as headless)"
+        );
+        assert_eq!(
+            agent_config.cli_agent_overrides.disallowed_tools,
+            Some(vec!["web_search".to_string()]),
+            "set --disallowed-tools must thread into cli_agent_overrides.disallowed_tools"
+        );
     }
 
     #[test]
