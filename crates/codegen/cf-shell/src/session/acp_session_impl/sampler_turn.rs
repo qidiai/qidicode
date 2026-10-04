@@ -107,6 +107,27 @@ where
         result
     }
 }
+/// The `web_search` exclusion applied when backend-hosted search is
+/// the active search path: the server-side `HostedTool::WebSearch`
+/// replaces the local tool, so the local definition must not also
+/// ship on the request. Single source of truth shared by the
+/// per-turn tool list ([`SessionActor::turn_base_tool_specs`]), the
+/// `/context` tool-definition accounting (`build_session_info`) and
+/// the compaction request, so the three can never drift apart.
+/// Known exception: the recap/btw side-question path
+/// (`acp_session_impl/recap.rs`) intentionally does NOT route through
+/// this filter — its prompt declares "NO tools available", so the
+/// tool list it ships is irrelevant and left untouched (pre-existing
+/// outlier, deliberately not converged).
+pub(crate) fn drop_web_search_for_backend_search(
+    defs: impl IntoIterator<Item = ToolDefinition>,
+    use_backend_search: bool,
+) -> Vec<ToolDefinition> {
+    defs.into_iter()
+        .filter(|td| !use_backend_search || td.function.name != "web_search")
+        .collect()
+}
+
 impl SessionActor {
     pub(super) async fn prepare_tool_definitions_timed(&self) -> (Vec<ToolDefinition>, u64) {
         let mcp_wait_start = std::time::Instant::now();
@@ -138,9 +159,8 @@ impl SessionActor {
     pub(crate) fn turn_base_tool_specs(&self, defs: &[ToolDefinition]) -> Vec<ToolSpec> {
         let use_backend_search =
             self.agent.borrow().backend_search_enabled() && self.supports_backend_search.get();
-        defs.iter()
-            .filter(|td| !use_backend_search || td.function.name != "web_search")
-            .cloned()
+        drop_web_search_for_backend_search(defs.iter().cloned(), use_backend_search)
+            .into_iter()
             .map(ToolSpec::from)
             .collect()
     }
@@ -1084,5 +1104,43 @@ impl SessionActor {
         }
         self.chat_state_handle
             .push_assistant_response(assistant_item);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool_def(name: &str) -> ToolDefinition {
+        ToolDefinition::function(name, Some("fixture"), serde_json::json!({ "type": "object" }))
+    }
+
+    #[test]
+    fn drop_web_search_only_under_backend_search() {
+        let defs = vec![
+            tool_def("read_file"),
+            tool_def("web_search"),
+            tool_def("run_terminal_cmd"),
+        ];
+        // Backend search off: the local web_search tool ships.
+        let kept = drop_web_search_for_backend_search(defs.clone(), false);
+        assert_eq!(
+            kept.len(),
+            3,
+            "kept tool defs with backend search OFF (web_search must ship): {} vs 3",
+            kept.len()
+        );
+        // Backend search on: only web_search is dropped.
+        let dropped = drop_web_search_for_backend_search(defs, true);
+        assert_eq!(
+            dropped.len(),
+            2,
+            "kept tool defs with backend search ON (only web_search dropped): {} vs 2",
+            dropped.len()
+        );
+        assert!(
+            dropped.iter().all(|td| td.function.name != "web_search"),
+            "web_search must be absent from the dropped set (backend search ON): {dropped:?}"
+        );
     }
 }

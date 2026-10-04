@@ -558,6 +558,13 @@ pub async fn run(
         ),
         default_yolo_mode: launch_yolo.yolo,
         default_auto_mode: launch_auto && !launch_yolo.yolo,
+        // D channel: --tools/--disallowed-tools are no longer
+        // headless-only; parse with the same helper the headless
+        // path uses so both modes converge on one CliAgentOverrides.
+        tools: crate::headless::parse_comma_list(args.cli_tools.as_deref()),
+        disallowed_tools: crate::headless::parse_comma_list(
+            args.cli_disallowed_tools.as_deref(),
+        ),
     };
     let connection = if use_leader {
         let conn = crate::acp::connect_via_leader(&cancel, connect_flags, &raw_config).await?;

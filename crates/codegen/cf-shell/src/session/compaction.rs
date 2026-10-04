@@ -6,6 +6,7 @@
 //! persistence. These methods form a second `impl SessionActor` block that
 //! lives alongside the primary one in `acp_session.rs`.
 use super::SessionActor;
+use super::drop_web_search_for_backend_search;
 use super::is_project_instructions;
 use crate::remote::DEFAULT_CONTEXT_WINDOW;
 use crate::session::compaction_config::{
@@ -932,12 +933,13 @@ impl SessionActor {
         let sampling_client = self.prepare_chat_completion(false).await?;
         let use_backend_search =
             self.agent.borrow().backend_search_enabled() && self.supports_backend_search.get();
-        let effective_tool_defs: Vec<cf_sampling_types::ToolDefinition> = self
-            .prepare_tool_definitions()
-            .await
-            .into_iter()
-            .filter(|td| !use_backend_search || td.function.name != "web_search")
-            .collect();
+        // Same `web_search` drop as the per-turn tool list
+        // (`turn_base_tool_specs`) — shared via
+        // `drop_web_search_for_backend_search`.
+        let effective_tool_defs = drop_web_search_for_backend_search(
+            self.prepare_tool_definitions().await,
+            use_backend_search,
+        );
         let compaction_tool_tokens =
             cf_chat_state::estimate_tool_definitions_tokens(&effective_tool_defs);
         let compaction_tools: Vec<cf_sampling_types::ToolSpec> = effective_tool_defs

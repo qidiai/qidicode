@@ -1617,6 +1617,11 @@ mod prompt_queue_actor_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/record_response_token_usage_tests.rs"]
 mod record_response_token_usage_tests;
+/// P0-2 A-closure: `/context` tool-definition accounting must
+/// match the per-turn tool-set caliber (shared web_search drop).
+#[cfg(test)]
+#[path = "acp_session_tests/tool_definition_caliber_tests.rs"]
+mod tool_definition_caliber_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/replay_buffer_send_update_tests.rs"]
 mod replay_buffer_send_update_tests;

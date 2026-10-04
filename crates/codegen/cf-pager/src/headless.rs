@@ -197,7 +197,10 @@ pub struct HeadlessOptions {
 // ── CLI flag helpers ─────────────────────────────────────────────────────
 
 /// Parse a comma-separated list into a vec, or None if empty.
-fn parse_comma_list(s: Option<&str>) -> Option<Vec<String>> {
+/// Shared by the headless `HeadlessOptions` construction and the
+/// TUI's `ConnectFlags` construction so both parse
+/// `--tools`/`--disallowed-tools` identically.
+pub(crate) fn parse_comma_list(s: Option<&str>) -> Option<Vec<String>> {
     s.and_then(|s| {
         let v: Vec<String> = s
             .split(',')
@@ -1752,6 +1755,34 @@ fn handle_ext_notification(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parse_comma_list_trims_drops_empty_and_none_when_blank() {
+        assert_eq!(
+            super::parse_comma_list(None),
+            None,
+            "None input must yield None (no flags set)"
+        );
+        assert_eq!(
+            super::parse_comma_list(Some("")),
+            None,
+            "empty string must yield None (blank --tools value)"
+        );
+        assert_eq!(
+            super::parse_comma_list(Some(" , ,")),
+            None,
+            "comma-only string (all entries blank) must yield None"
+        );
+        assert_eq!(
+            super::parse_comma_list(Some("read_file, grep ,,list_dir")),
+            Some(vec![
+                "read_file".to_string(),
+                "grep".to_string(),
+                "list_dir".to_string()
+            ]),
+            "entries must be trimmed and empty entries dropped"
+        );
+    }
+
     #[test]
     fn lifecycle_tracking_is_independent_of_wait_flag() {
         let mut pending = std::collections::HashSet::new();
