@@ -162,7 +162,14 @@ pub fn rebuild_worktree_db(
         ..Default::default()
     };
 
-    for wt in discovery.found {
+    for mut wt in discovery.found {
+        // Register the canonical spelling. `WorktreeDb::get` canonicalizes
+        // every path lookup (see its doc), so the path column must hold
+        // canonical paths — a non-canonical input spelling (e.g. an 8.3
+        // short-form TEMP such as the CI runner's `RUNNER~1`) would
+        // otherwise register a worktree that no `get(path)` lookup can
+        // ever resolve back.
+        wt.path = dunce::canonicalize(&wt.path).unwrap_or_else(|_| wt.path.clone());
         let id = id_from_path(&wt.path);
         let path_str = wt.path.to_string_lossy();
         if db.get_by_id(&id)?.is_some() || db.get(&path_str)?.is_some() {

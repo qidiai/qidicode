@@ -35,6 +35,28 @@ fn resolve_bundled_rg() -> std::io::Result<PathBuf> {
     Ok(p)
 }
 
+/// Whether the ripgrep binary resolves to a runnable executable.
+///
+/// The opencode and qidi_build grep/glob implementations shell out to
+/// `rg`; their integration tests exercise that real pipeline and need a
+/// working binary. Ripgrep is not preinstalled on GitHub's Windows
+/// runners, and Windows builds skip the auto-bundle (see `build.rs`:
+/// "Users install ripgrep separately (winget / scoop)"), so on such
+/// machines the rg-dependent tests skip with an explanatory message
+/// instead of panicking with "program not found".
+#[cfg(test)]
+pub(crate) fn ripgrep_available() -> bool {
+    let exec = rg_path();
+    std::process::Command::new(&exec)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Get the path to the ripgrep executable.
 ///
 /// In release builds with bundling enabled, this extracts the bundled ripgrep

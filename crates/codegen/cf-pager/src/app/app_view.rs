@@ -6556,6 +6556,12 @@ pub(crate) mod tests {
                 cursor: true,
                 ..Default::default()
             };
+        // The shared fixture's opaque "/tmp" cwd is not canonicalizable
+        // on Windows (per-drive resolution; a runner's D:\tmp does not
+        // exist, so dunce::canonicalize fails NotFound — production
+        // canonicalizes the app cwd for real, effects/mod.rs). Point it
+        // at a directory that exists on every platform.
+        app.cwd = std::env::temp_dir();
         let crate::app::actions::Effect::CanonicalizeForeignResumeCwd {
             requested_cwd,
             launch_token,

@@ -428,7 +428,15 @@ mod tests {
 
     #[test]
     fn test_rel_path_buf_new_absolute_fails() {
-        let result = RelPathBuf::new("/absolute/path");
+        // `Path::is_absolute()` is platform-dependent: `/…` counts on Unix,
+        // but Windows requires a drive letter or UNC prefix. Use the
+        // platform's absolute spelling so the rejection path is exercised
+        // on both platforms.
+        #[cfg(unix)]
+        let absolute = "/absolute/path";
+        #[cfg(windows)]
+        let absolute = r"C:\absolute\path";
+        let result = RelPathBuf::new(absolute);
         assert!(result.is_err());
     }
 
@@ -539,7 +547,12 @@ mod tests {
 
     #[test]
     fn test_rel_path_buf_serde_absolute_fails() {
+        // Platform-dependent absolute spelling (see
+        // `test_rel_path_buf_new_absolute_fails`).
+        #[cfg(unix)]
         let json = "\"/absolute/path\"";
+        #[cfg(windows)]
+        let json = "\"C:\\absolute\\path\"";
         let result: Result<RelPathBuf, _> = serde_json::from_str(json);
         assert!(result.is_err());
     }

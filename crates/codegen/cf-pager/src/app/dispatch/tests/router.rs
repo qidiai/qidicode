@@ -10,6 +10,12 @@ fn seed_foreign_resume_hint(
             codex: true,
             cursor: true,
         };
+    // The shared fixture's opaque "/tmp" cwd is not canonicalizable on
+    // Windows (per-drive resolution; a runner's D:\tmp does not exist,
+    // so dunce::canonicalize fails NotFound — production canonicalizes
+    // the app cwd for real, effects/mod.rs). Point it at a directory
+    // that exists on every platform.
+    app.cwd = std::env::temp_dir();
     let Effect::CanonicalizeForeignResumeCwd {
         requested_cwd,
         launch_token,

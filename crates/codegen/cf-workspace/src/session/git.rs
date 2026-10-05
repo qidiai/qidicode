@@ -232,7 +232,7 @@ pub(crate) fn strip_url_credentials(url_str: &str) -> String {
 /// # Examples
 ///
 /// ```
-/// use crate::session::git::normalize_repo_url;
+/// use cf_workspace::session::git::normalize_repo_url;
 ///
 /// assert_eq!(
 ///     normalize_repo_url("git@github.com:org/repo.git"),

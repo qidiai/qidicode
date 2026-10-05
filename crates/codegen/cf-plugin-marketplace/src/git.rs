@@ -59,6 +59,11 @@ pub fn sync_source_cache_with_mode(
     cache_root: &Path,
     mode: SyncMode,
 ) -> Result<SourceCacheLease, String> {
+    // SECURITY: Validate the URL protocol at the public entry
+    // (all three sync APIs route through here) so blocked
+    // sources — `file://`, local paths — fail fast instead of
+    // acquiring the cache lock and logging a sync failure.
+    validate_clone_url(url)?;
     let hash = cache_hash(url);
     let cache_dir = cache_root.join(&hash);
     let start = Instant::now();
@@ -157,11 +162,11 @@ fn cache_hash(url: &str) -> String {
 }
 
 /// Clone a git repo with depth 1.
+///
+/// Callers must have passed `validate_clone_url` already
+/// (`sync_source_cache_with_mode` enforces it at the public
+/// entry; this internal helper is only reached through it).
 fn clone_repo(url: &str, branch: Option<&str>, dest: &Path) -> Result<(), String> {
-    // SECURITY: Validate URL protocol before any clone attempt, so both
-    // the git2 fast-path and the CLI fallback share the same whitelist.
-    validate_clone_url(url)?;
-
     // Try git2 first.
     match clone_with_git2(url, branch, dest) {
         Ok(()) => return Ok(()),
@@ -288,10 +293,16 @@ fn validate_clone_url(url: &str) -> Result<(), String> {
 }
 
 fn clone_with_cli(url: &str, branch: Option<&str>, dest: &Path) -> Result<(), String> {
-    validate_clone_url(url)?;
-
     let mut cmd = git_command();
-    cmd.args(["clone", "--depth", "1", "--no-hooks"]);
+    // No `--no-hooks`: `git clone` has no such option (verified
+    // against the git 2.53 usage dump — it is not a clone flag),
+    // so passing it made the CLI fallback fail on EVERY clone.
+    // The git2-first path above covers the shallow case; when it
+    // falls through here (e.g. libgit2 rejects shallow fetch over
+    // the local transport for local-path remotes), the CLI clone
+    // must actually be able to run. `git` itself warns that
+    // `--depth` is ignored for local clones and succeeds.
+    cmd.args(["clone", "--depth", "1"]);
     if let Some(b) = branch {
         cmd.args(["--branch", b]);
     }
@@ -372,6 +383,45 @@ mod tests {
     }
 
     #[test]
+    fn validate_clone_url_allows_https_and_ssh() {
+        assert!(validate_clone_url("https://github.com/a/b.git").is_ok());
+        assert!(validate_clone_url("ssh://git@github.com/a/b.git").is_ok());
+        assert!(validate_clone_url("git@github.com:a/b.git").is_ok());
+    }
+
+    #[test]
+    fn validate_clone_url_blocks_file_and_local_paths() {
+        for url in [
+            "file:///C:/plugins/x.git",
+            "file:///home/user/plugins/x.git",
+            "C:\\plugins\\x",
+            "/home/user/plugins",
+            "http://github.com/a/b.git",
+            "git://github.com/a/b.git",
+        ] {
+            let err = validate_clone_url(url).unwrap_err();
+            assert!(
+                err.contains("blocked plugin clone URL"),
+                "url={url}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn sync_source_cache_rejects_local_path_url_at_entry() {
+        let cache_root = tempfile::tempdir().unwrap();
+        let err = sync_source_cache("/home/user/plugins", None, cache_root.path())
+            .unwrap_err();
+        assert!(err.contains("blocked plugin clone URL"), "{err}");
+    }
+
+    // The cache-sync logic below is exercised through the
+    // internal `sync_cache_locked` with an explicit cache dir:
+    // the public entry points enforce the https/ssh URL
+    // whitelist (`validate_clone_url`), and these fixtures
+    // clone from a local tempdir "remote". The whitelist
+    // itself is unit-tested separately below.
+    #[test]
     fn sync_source_cache_uses_ttl_by_default() {
         if !git_available() {
             eprintln!("skipping git-dependent test: git binary not available");
@@ -381,12 +431,12 @@ mod tests {
         init_remote_repo(remote.path());
         let cache_root = tempfile::tempdir().unwrap();
         let url = remote.path().to_string_lossy();
+        let cache_dir = cache_root.path().join(cache_hash(&url));
 
-        let cache_dir = sync_source_cache(&url, Some("main"), cache_root.path()).unwrap();
+        sync_cache_locked(&url, Some("main"), &cache_dir, SyncMode::UseTtl).unwrap();
         let fetch_head = cache_dir.join(".git").join("FETCH_HEAD");
         std::fs::write(&fetch_head, "ttl-sentinel").unwrap();
-        let second_cache_dir = sync_source_cache(&url, Some("main"), cache_root.path()).unwrap();
-        assert_eq!(second_cache_dir, cache_dir);
+        sync_cache_locked(&url, Some("main"), &cache_dir, SyncMode::UseTtl).unwrap();
         assert_eq!(
             std::fs::read_to_string(&fetch_head).unwrap(),
             "ttl-sentinel"
@@ -403,14 +453,13 @@ mod tests {
         init_remote_repo(remote.path());
         let cache_root = tempfile::tempdir().unwrap();
         let url = remote.path().to_string_lossy();
+        let cache_dir = cache_root.path().join(cache_hash(&url));
 
-        let cache_dir = sync_source_cache(&url, Some("main"), cache_root.path()).unwrap();
+        sync_cache_locked(&url, Some("main"), &cache_dir, SyncMode::UseTtl).unwrap();
         let first_head = current_head(&cache_dir);
         add_commit(remote.path(), "second.txt", "second");
 
-        let forced_cache_dir =
-            force_sync_source_cache(&url, Some("main"), cache_root.path()).unwrap();
-        assert_eq!(forced_cache_dir, cache_dir);
+        sync_cache_locked(&url, Some("main"), &cache_dir, SyncMode::Force).unwrap();
         assert_ne!(current_head(&cache_dir), first_head);
     }
 
@@ -426,9 +475,21 @@ mod tests {
             lock_file: acquire_cache_lock(&lock_path, Duration::from_millis(1)).unwrap(),
         };
 
+        // Unix: the second acquire polls on WouldBlock until
+        // the deadline, so the error is "cache lock timeout"
+        // and the wait is observable. Windows: the LockFileEx
+        // failure is not mapped to WouldBlock, so the acquire
+        // fails fast with "failed to lock cache" — same
+        // exclusion property, different timing (and no
+        // deadline wait to measure).
+        #[cfg(unix)]
         let start = Instant::now();
         let err = acquire_cache_lock(&lock_path, Duration::from_millis(50)).unwrap_err();
-        assert!(err.contains("cache lock timeout"));
+        assert!(
+            err.contains("cache lock timeout") || err.contains("failed to lock cache"),
+            "unexpected lock error: {err}"
+        );
+        #[cfg(unix)]
         assert!(start.elapsed() >= Duration::from_millis(50));
         drop(lease);
         let _lock = acquire_cache_lock(&lock_path, Duration::from_millis(1)).unwrap();
@@ -444,12 +505,13 @@ mod tests {
         init_remote_repo(remote.path());
         let cache_root = tempfile::tempdir().unwrap();
         let url = remote.path().to_string_lossy();
+        let cache_dir = cache_root.path().join(cache_hash(&url));
 
-        let cache_dir = sync_source_cache(&url, Some("main"), cache_root.path()).unwrap();
+        sync_cache_locked(&url, Some("main"), &cache_dir, SyncMode::UseTtl).unwrap();
         std::fs::remove_dir_all(cache_dir.join(".git").join("objects")).unwrap();
         std::fs::remove_dir_all(remote.path()).unwrap();
 
-        let result = force_sync_source_cache(&url, Some("main"), cache_root.path());
+        let result = sync_cache_locked(&url, Some("main"), &cache_dir, SyncMode::Force);
         assert!(result.is_err());
         assert!(cache_dir.exists());
         assert_eq!(
@@ -468,13 +530,12 @@ mod tests {
         init_remote_repo(remote.path());
         let cache_root = tempfile::tempdir().unwrap();
         let url = remote.path().to_string_lossy();
+        let cache_dir = cache_root.path().join(cache_hash(&url));
 
-        let cache_dir = sync_source_cache(&url, Some("main"), cache_root.path()).unwrap();
+        sync_cache_locked(&url, Some("main"), &cache_dir, SyncMode::UseTtl).unwrap();
         std::fs::remove_dir_all(cache_dir.join(".git").join("objects")).unwrap();
 
-        let forced_cache_dir =
-            force_sync_source_cache(&url, Some("main"), cache_root.path()).unwrap();
-        assert_eq!(forced_cache_dir, cache_dir);
+        sync_cache_locked(&url, Some("main"), &cache_dir, SyncMode::Force).unwrap();
         assert!(cache_dir.join(".git").join("objects").exists());
         assert_eq!(
             std::fs::read_to_string(cache_dir.join("file.txt")).unwrap(),

@@ -611,8 +611,11 @@ mod tests {
         use futures::StreamExt;
         use cf_computer_hub_sdk::ToolServerHandler;
 
+        // Args must satisfy the tool's input schema (type: object) to
+        // reach the MCP call; the error-response path under test is
+        // downstream of arg validation.
         let ctx = ToolCallContext::default();
-        let mut stream = handler.handle_call(ctx, Value::Null).await;
+        let mut stream = handler.handle_call(ctx, Value::Object(Default::default())).await;
 
         let item = stream.next().await.unwrap();
         match item {
@@ -641,8 +644,11 @@ mod tests {
         use futures::StreamExt;
         use cf_computer_hub_sdk::ToolServerHandler;
 
+        // Args must satisfy the tool's input schema (type: object) to
+        // reach the MCP call; the transport-error path under test is
+        // downstream of arg validation.
         let ctx = ToolCallContext::default();
-        let mut stream = handler.handle_call(ctx, Value::Null).await;
+        let mut stream = handler.handle_call(ctx, Value::Object(Default::default())).await;
 
         let item = stream.next().await.unwrap();
         match item {

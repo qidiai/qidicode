@@ -11,6 +11,8 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 use crate::implementations::qidi_build::grep::ripgrep::rg_path;
+#[cfg(test)]
+use crate::implementations::qidi_build::grep::ripgrep::ripgrep_available;
 use crate::types::output::ToolOutput;
 #[allow(unused_imports)]
 use crate::types::resources::{
@@ -338,6 +340,13 @@ mod tests {
 
     #[tokio::test]
     async fn glob_finds_matching_files() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("hello.ts"), "console.log('hi');\n").unwrap();
         std::fs::write(tmp.path().join("world.ts"), "export {};\n").unwrap();
@@ -365,6 +374,13 @@ mod tests {
 
     #[tokio::test]
     async fn glob_no_matches_returns_empty() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("readme.md"), "# readme\n").unwrap();
 
@@ -389,6 +405,13 @@ mod tests {
 
     #[tokio::test]
     async fn glob_with_subdirectory_path() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         let sub = tmp.path().join("src");
         std::fs::create_dir(&sub).unwrap();
@@ -416,6 +439,13 @@ mod tests {
 
     #[tokio::test]
     async fn glob_sorts_by_mtime_most_recent_first() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         let tmp = TempDir::new().unwrap();
 
         // Create files with slight time gaps so mtime differs.
@@ -452,6 +482,13 @@ mod tests {
 
     #[tokio::test]
     async fn glob_recursive_pattern() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         let nested = tmp.path().join("a").join("b");
         std::fs::create_dir_all(&nested).unwrap();
@@ -508,6 +545,13 @@ mod tests {
 
     #[tokio::test]
     async fn absolute_path_parameter() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         let sub = tmp.path().join("abs_target");
         std::fs::create_dir(&sub).unwrap();
@@ -534,6 +578,13 @@ mod tests {
 
     #[tokio::test]
     async fn empty_directory() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         // Directory exists but contains no files.
 
@@ -558,6 +609,13 @@ mod tests {
 
     #[tokio::test]
     async fn path_empty_string_defaults_to_cwd() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("root.rs"), "fn main() {}\n").unwrap();
 
@@ -605,6 +663,13 @@ mod tests {
 
     #[tokio::test]
     async fn result_cap_100() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         for i in 0..110 {
             std::fs::write(tmp.path().join(format!("file_{:03}.txt", i)), "data\n").unwrap();
@@ -635,6 +700,13 @@ mod tests {
 
     #[tokio::test]
     async fn hidden_files_included() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join(".hidden.ts"), "hidden\n").unwrap();
         std::fs::write(tmp.path().join("visible.ts"), "visible\n").unwrap();
@@ -667,6 +739,13 @@ mod tests {
 
     #[tokio::test]
     async fn gitignore_respected() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         // ripgrep's positive --glob overrides .gitignore, so we test the
         // underlying ignore behavior by using a pattern that doesn't match
         // the ignored file. Without .gitignore, `rg --files --hidden`
@@ -727,6 +806,13 @@ mod tests {
 
     #[tokio::test]
     async fn output_format_workspace_result() {
+        // rg-dependent integration test: ripgrep (rg) is not preinstalled
+        // on CI Windows runners (and Windows builds skip the auto-bundle,
+        // see build.rs) - skip cleanly instead of "program not found".
+        if !ripgrep_available() {
+            eprintln!("skip: ripgrep (rg) binary not available");
+            return;
+        }
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("example.rs"), "fn main() {}\n").unwrap();
 

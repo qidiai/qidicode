@@ -135,7 +135,25 @@ jobs:
           CARGO_PROFILE_DEV_DEBUG: "0"
 
       - name: Run tests
-        run: cargo test --workspace --no-fail-fast
+        # Exclusion register (CI test job, 2026-10-05 triage):
+        #
+        # CI-TEST-DEBT-01  cf-pager-pty-harness (all 3 un-ignored test
+        #   binaries: plan_approval_resume, scroll_correctness_ptyctl,
+        #   scroll_matrix_curated). The harness spawns the pager inside a
+        #   pseudo-terminal (portable-pty/ConPTY) and screen-scrapes it,
+        #   but the spawned pager emits ZERO output on the runner: every
+        #   cell fails with "timed out after 15-20s waiting for text:
+        #   \"Quit\"" and an empty "screen contents:" (CI log 2026-10-05,
+        #   job test@windows-latest). The same ConPTY spawn hangs on a
+        #   dev Windows box, and the harness has never been green on any
+        #   machine we can test — the pseudo-console needs an interactive
+        #   console session the CI service account does not provide. Not
+        #   a code regression: binary resolution was fixed in e83f28cd
+        #   (rename + pre-build step below); the harness itself needs an
+        #   interactive-console-capable runner before it can enter the
+        #   green gate. Full evidence: qidiwork-docs/审计评审/
+        #   2026-10-05-unix交叉编译缺口清除与PTY-CI侦察-验证报告.md §3.
+        run: cargo test --workspace --no-fail-fast --exclude cf-pager-pty-harness
         env:
           RUST_TEST_THREADS: "2"
           # Same OOM antidote as the local baseline (AGENTS.md §12): full
@@ -143,3 +161,16 @@ jobs:
           # rustc (observed: rustc-LLVM out of memory after 28m on
           # windows-latest). Strip debuginfo to keep the test build resident.
           CARGO_PROFILE_TEST_DEBUG: "0"
+          # cf-pager's toast/chrome assertions pin the fancy Unicode glyphs
+          # (✓ ✗ ⚠ …). cf-pager-render's host probe defaults only its OWN
+          # test binary to the non-legacy assumption (#[cfg(test)] branch in
+          # glyphs.rs); cf-pager compiles cf-pager-render as a plain
+          # dependency, so the real host probe runs here and the runner's
+          # legacy OEM console code page flips every pinned string to the
+          # ASCII fallbacks (√ x !) — 54 assertion failures. Force the
+          # non-legacy assumption through the designed escape hatch so the
+          # assertions see the glyphs they pin, on any runner. Production
+          # behavior is unchanged: with the var unset, normal host/terminal
+          # detection runs. (cf-pager-render's own tests are unaffected:
+          # they already default to non-legacy and respect the override.)
+          QIDI_FORCE_LEGACY_CONSOLE: "0"

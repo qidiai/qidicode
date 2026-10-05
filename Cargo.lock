@@ -2829,6 +2829,7 @@ dependencies = [
  "cf-config",
  "cf-env",
  "cf-shared",
+ "cf-shell-base",
  "cf-tty-utils",
  "cf-version",
  "chrono",
