@@ -22,6 +22,10 @@ mod git;
 #[cfg(target_os = "linux")]
 pub(crate) mod mount_info;
 #[cfg(unix)]
+// TODO(fork-gap): the real unix `nfs.rs` (FUSE/NFS probes) was never committed
+// to this fork, so unix builds use the same declining stand-in as Windows.
+// Restoring a real implementation is tracked as follow-up work.
+#[path = "nfs_stub.rs"]
 mod nfs;
 #[cfg(not(unix))]
 #[path = "nfs_stub.rs"]

@@ -116,3 +116,8 @@ jobs:
         run: cargo test --workspace --no-fail-fast
         env:
           RUST_TEST_THREADS: "2"
+          # Same OOM antidote as the local baseline (AGENTS.md §12): full
+          # debuginfo in the test profile blows past runner memory during
+          # rustc (observed: rustc-LLVM out of memory after 28m on
+          # windows-latest). Strip debuginfo to keep the test build resident.
+          CARGO_PROFILE_TEST_DEBUG: "0"
