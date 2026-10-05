@@ -66,7 +66,7 @@ fn target_dir() -> PathBuf {
 fn local_grok_binary_path() -> PathBuf {
     target_dir()
         .join("debug")
-        .join(format!("qidi-code{}", std::env::consts::EXE_SUFFIX))
+        .join(format!("qidi{}", std::env::consts::EXE_SUFFIX))
 }
 
 fn ensure_local_grok_binary(binary: &Path) {
@@ -77,25 +77,25 @@ fn ensure_local_grok_binary(binary: &Path) {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let output = Command::new(&cargo)
         .current_dir(workspace_root())
-        .args(["build", "-p", "pager", "--bin", "pager"])
+        .args(["build", "-p", "cf-pager-bin", "--bin", "qidi"])
         .output()
-        .unwrap_or_else(|e| panic!("failed to spawn {cargo} to build qidi-code: {e}"));
+        .unwrap_or_else(|e| panic!("failed to spawn {cargo} to build qidi: {e}"));
 
     assert!(
         output.status.success(),
-        "failed to build qidi-code for lifecycle tests (exit {:?})\nstdout:\n{}\nstderr:\n{}",
+        "failed to build qidi for lifecycle tests (exit {:?})\nstdout:\n{}\nstderr:\n{}",
         output.status.code(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
     assert!(
         binary.exists(),
-        "qidi-code build completed but binary missing at {}",
+        "qidi build completed but binary missing at {}",
         binary.display()
     );
 }
 
-/// Resolve grok binary: `QIDI_BINARY` env (CI) or a locally built `qidi-code` binary.
+/// Resolve grok binary: `QIDI_BINARY` env (CI) or a locally built `qidi` binary.
 pub fn grok_binary() -> PathBuf {
     if let Ok(path) = std::env::var("QIDI_BINARY") {
         let p = PathBuf::from(path);
@@ -103,7 +103,7 @@ pub fn grok_binary() -> PathBuf {
         return p;
     }
 
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_qidi-code") {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_qidi") {
         let p = PathBuf::from(path);
         if p.exists() {
             return p;

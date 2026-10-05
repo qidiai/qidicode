@@ -10,6 +10,10 @@
 //!   portable re-injection exists (TIOCSTI is blocked); accepted loss.
 
 use std::io::Write;
+// The timed-read path below is unix-only (raw-fd poll); keep the
+// import gated so the Windows build never sees it unused.
+#[cfg(unix)]
+use std::time::Duration;
 #[cfg(unix)]
 
 /// Bounds the reply buffer against terminals that stream without a terminator.

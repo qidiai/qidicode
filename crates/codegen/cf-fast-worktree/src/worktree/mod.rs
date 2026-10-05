@@ -280,6 +280,7 @@ mod tests {
     fn test_worktree_with_symlinks() {
         cf_test_utils::require_git!();
         use std::os::unix::fs::symlink;
+        use std::path::PathBuf;
 
         let temp = TempDir::new().unwrap();
         let repo_path = temp.path().join("repo");

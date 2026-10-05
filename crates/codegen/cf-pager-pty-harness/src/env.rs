@@ -26,7 +26,7 @@ fn target_dir() -> Result<PathBuf> {
 fn local_pager_binary_path() -> Result<PathBuf> {
     Ok(target_dir()?
         .join("debug")
-        .join(format!("qidi-code{}", std::env::consts::EXE_SUFFIX)))
+        .join(format!("qidi{}", std::env::consts::EXE_SUFFIX)))
 }
 
 fn ensure_local_pager_binary(binary: &std::path::Path) -> Result<()> {
@@ -40,20 +40,20 @@ fn ensure_local_pager_binary(binary: &std::path::Path) -> Result<()> {
         .args([
             "build",
             "-p",
-            "qidi-code-bin",
+            "cf-pager-bin",
             "--bin",
-            "pager",
+            "qidi",
         ])
         .stdin(Stdio::null())
         .envs(cf_tty_utils::pager_env());
     cf_tty_utils::detach_std_command(&mut cmd);
     let output = cmd
         .output()
-        .with_context(|| format!("failed to spawn {cargo} to build qidi-code"))?;
+        .with_context(|| format!("failed to spawn {cargo} to build qidi"))?;
 
     if !output.status.success() {
         bail!(
-            "failed to build qidi-code (exit {:?})\nstdout:\n{}\nstderr:\n{}",
+            "failed to build qidi (exit {:?})\nstdout:\n{}\nstderr:\n{}",
             output.status.code(),
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
@@ -61,7 +61,7 @@ fn ensure_local_pager_binary(binary: &std::path::Path) -> Result<()> {
     }
     if !binary.exists() {
         bail!(
-            "qidi-code build completed but binary missing at {}",
+            "qidi build completed but binary missing at {}",
             binary.display()
         );
     }
@@ -72,9 +72,10 @@ fn ensure_local_pager_binary(binary: &std::path::Path) -> Result<()> {
 ///
 /// Resolution order:
 /// 1. `PAGER_BINARY` env var (for CI / explicit override)
-/// 2. `CARGO_BIN_EXE_qidi-code` (set by `cargo test`)
-/// 3. Build locally via `cargo build -p qidi-code-bin` (the composition-
-///    root package that owns the `qidi-code` binary)
+/// 2. `CARGO_BIN_EXE_qidi` (set by `cargo test` when the bin's
+///    package is a dependency of the test target)
+/// 3. Build locally via `cargo build -p cf-pager-bin --bin qidi`
+///    (the composition-root package that owns the `qidi` binary)
 pub fn pager_binary() -> Result<PathBuf> {
     if let Ok(path) = std::env::var("PAGER_BINARY") {
         let p = PathBuf::from(path);
@@ -87,7 +88,7 @@ pub fn pager_binary() -> Result<PathBuf> {
             .with_context(|| format!("failed to absolutize PAGER_BINARY: {}", p.display()));
     }
 
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_qidi-code") {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_qidi") {
         let p = PathBuf::from(path);
         if p.exists() {
             return Ok(p);

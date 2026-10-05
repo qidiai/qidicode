@@ -152,7 +152,11 @@ fn write_private(path: &Path, contents: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    // Unix-only fakes below time the timeout path; gated so the
+    // Windows test build never sees an unused import.
+    #[cfg(unix)]
+    use std::time::Instant;
+
 
     /// Write an executable `#!/bin/sh` fake `mmdc` and return (dir-guard, path).
     /// render() invokes `mmdc --input $2 --output $4 --outputFormat svg --theme $8`,
