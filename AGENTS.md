@@ -125,7 +125,7 @@
 
 | 项 | 约定 |
 |---|---|
-| 远程 | `origin`（github）、`gitee`、`upstream`（本地基线 `C:\Users\ASUS\grok-build`） |
+| 远程 | `origin`（github）、`gitee`、`upstream`（**SMB 共享基线** `\\192.168.1.222\程序开发\grok-build-upstream`，2026-10-05 起；原本地路径 `C:\Users\ASUS\grok-build` 已不存在） |
 | 默认推送 | **双推 `origin` + `gitee`**；worktree 分支用 `git push <remote> feat/xxx:main` 直推 main |
 | 提交权 | 编码手/子代理禁止 commit；指挥官质检通过后统一提交 |
 | 提交信息 | `<类型>: <摘要>` + 正文列要点（orchestra 战报格式，见 git log） |
@@ -159,3 +159,5 @@
 | 清理 | `cargo clean` | 先备份 `target/release/qidi.exe` 到 `G:\qidi-exe-backup\`；**注意 §6 target/debug 历史文件雷** |
 
 注意：cf-shell 的 **test profile** 在 G 盘 target 直跑会 OOM——一律走上面的 C 盘热 target 方案。
+
+13. **upstream（SMB 基线）使用注意**（2026-10-05 实测）：① `git fetch upstream` 会报 "shallow roots are not allowed to be updated"（浅历史纠缠），**读上游更新改用直读**：`git --git-dir='\\192.168.1.222\程序开发\grok-build-upstream\.git' log/diff ...`（SMB 上可执行，慢但可用）；② 上游是 monorepo 镜像（提交均称 "Synced from monorepo"，每周 1-3 次）；③ 上游 crate 命名为 `xai-grok-*`，我们 7-25 已 rebrand 为 `cf-*`——**路径全不同，直接 merge 不可行**，同步只能按主题 cherry-pick + 手工改名适配；④ fork（2026-07-19）以来从未同步过上游
