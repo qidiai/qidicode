@@ -231,10 +231,13 @@ mod tests {
         assert_eq!(windows_style.as_str(), "plugins/foo");
     }
 
+    // The symlink setup is unix-only; the temp dirs are unused (hence
+    // allowed-unused) on Windows where the inner block is cfg'd out.
+    #[allow(unused_variables)]
     #[test]
     fn marketplace_relative_path_join_under_rejects_symlink_escape() {
-        let _dir = tempfile::tempdir().unwrap();
-        let _outside = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(outside.path(), dir.path().join("escape")).unwrap();
@@ -246,10 +249,13 @@ mod tests {
         }
     }
 
+    // The symlink setup is unix-only; the temp dirs are unused (hence
+    // allowed-unused) on Windows where the inner block is cfg'd out.
+    #[allow(unused_variables)]
     #[test]
     fn marketplace_relative_path_join_under_rejects_symlink_ancestor_escape() {
-        let _dir = tempfile::tempdir().unwrap();
-        let _outside = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(outside.path(), dir.path().join("plugins")).unwrap();

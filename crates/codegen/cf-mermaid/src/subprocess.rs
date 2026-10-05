@@ -184,7 +184,11 @@ fn reap_process_group(_child: &Child) {
 mod tests {
     use super::*;
     use std::process::Stdio;
-    
+    // Unix-only timeout tests time the deadline path; gated so the
+    // Windows test build never sees an unused import.
+    #[cfg(unix)]
+    use std::time::Instant;
+
 
     #[allow(dead_code)]
     fn detached(mut cmd: Command) -> Command {

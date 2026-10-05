@@ -1275,7 +1275,7 @@ fn persist_chat_history_jsonl_sync(session_info: &SessionInfo, conversation: &[C
     // world-readable conversation data (may contain sensitive tool outputs).
     #[cfg(unix)]
     {
-        use std::os::unix::fs::DirBuilderExt;
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
         let mut builder = std::fs::DirBuilder::new();
         builder.recursive(true).mode(0o700);
         if let Err(e) = builder.create(&dir) {

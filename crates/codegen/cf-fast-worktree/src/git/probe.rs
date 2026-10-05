@@ -263,7 +263,7 @@ mod tests {
         let scratch = tempfile::tempdir().unwrap();
         let marker = scratch.path().join("outlived-the-probe");
         let mut command = Command::new("sh");
-        xai_tty_utils::detach_std_command(&mut command);
+        cf_tty_utils::detach_std_command(&mut command);
         command.arg("-c").arg(format!(
             "(sleep 1 && touch '{}') & sleep 30",
             marker.display()
@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn output_stands_when_only_stderr_is_still_held() {
         let mut command = Command::new("sh");
-        xai_tty_utils::detach_std_command(&mut command);
+        cf_tty_utils::detach_std_command(&mut command);
         command
             .arg("-c")
             .arg("echo hello; { sleep 30; } >/dev/null & exit 0");
@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn output_a_lingering_child_still_holds_does_not_wait_forever() {
         let mut command = Command::new("sh");
-        xai_tty_utils::detach_std_command(&mut command);
+        cf_tty_utils::detach_std_command(&mut command);
         command.arg("-c").arg("sleep 30 & exit 0");
 
         let start = Instant::now();

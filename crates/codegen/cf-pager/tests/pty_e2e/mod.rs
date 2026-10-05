@@ -1,12 +1,11 @@
-//! End-to-end tests for the built `qidi-code` binary, driven through a PTY.
+//! End-to-end tests for the built `qidi` binary, driven through a PTY.
 //!
-//! Mirrors `qidi-code/tests/test_built_binary_e2e.rs`: every test is
-//! `#[ignore]` so `cargo test` doesn't run them by default, and CI opts in
-//! via `-- --ignored`. The pager binary path is resolved from:
+//! Every test is `#[ignore]` so `cargo test` doesn't run them by default, and
+//! CI opts in via `-- --ignored`. The pager binary path is resolved from:
 //!
 //! 1. `PAGER_BINARY` env var (set by CI after downloading the release artifact)
 //! 2. `QIDI_BINARY` env var (shared convention with the shell crate)
-//! 3. `CARGO_BIN_EXE_qidi-code` (set by `cargo test` for in-tree runs)
+//! 3. `CARGO_BIN_EXE_qidi` (set by `cargo test` for in-tree runs)
 //! 4. A locally-built debug binary — built on first run if missing
 //!
 //! The harness (spawn / screen state / frame timing / mock inference server)
@@ -15,13 +14,13 @@
 //!
 //! Run locally:
 //! ```bash
-//! cargo test -p qidi-code --test pty_e2e -- --ignored --nocapture
+//! cargo test -p cf-pager --test pty_e2e -- --ignored --nocapture
 //! ```
 //!
 //! Run against a pre-built CI artifact:
 //! ```bash
 //! PAGER_BINARY=./artifacts/grok-${VERSION}-linux-x86_64 \
-//!   cargo test -p qidi-code --test pty_e2e -- --ignored --nocapture
+//!   cargo test -p cf-pager --test pty_e2e -- --ignored --nocapture
 //! ```
 
 mod common;

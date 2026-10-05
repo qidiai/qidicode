@@ -16,6 +16,10 @@
 
 #[cfg(unix)]
 use std::path::Path;
+// The unix main() below drives the real sandbox API; gated so the
+// Windows stub main never sees these imports unused.
+#[cfg(unix)]
+use cf_sandbox::{ProfileName, SandboxManager};
 
 // Kernel-enforcement smoke test is unix-only (Landlock/Seatbelt via nono).
 // Windows sandboxing uses Job Objects and is exercised by the unit tests.

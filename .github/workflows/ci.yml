@@ -119,6 +119,21 @@ jobs:
 
       # rsproxy mirror comes from the committed .cargo/config.toml; no extra setup step
 
+      - name: Build pager binary for PTY tests
+        # The PTY harnesses (cf-pager-pty-harness tests, cf-pager pty_e2e,
+        # cf-test-support lifecycle tests) resolve the pager binary from
+        # target/debug/qidi{EXE_SUFFIX} when PAGER_BINARY / CARGO_BIN_EXE_qidi
+        # are unset. Their test targets do not declare the bin package as a
+        # dependency, so `cargo test --workspace` never builds the binary —
+        # pre-build it here (the target cache above makes repeat runs cheap).
+        run: cargo build -p cf-pager-bin --bin qidi
+        env:
+          # Same OOM antidote as the test step: full debuginfo while compiling
+          # the composition root (cf-pager-bin) risks rustc OOM on 16GB
+          # runners. PTY tests only spawn the binary, so stripped debuginfo
+          # is fine.
+          CARGO_PROFILE_DEV_DEBUG: "0"
+
       - name: Run tests
         run: cargo test --workspace --no-fail-fast
         env:

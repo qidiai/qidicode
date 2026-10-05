@@ -2309,6 +2309,7 @@ dependencies = [
  "cf-shell",
  "cf-system-power",
  "cf-telemetry",
+ "cf-test-support",
  "cf-token-estimation",
  "cf-tools",
  "cf-tty-utils",
