@@ -160,4 +160,4 @@
 
 注意：cf-shell 的 **test profile** 在 G 盘 target 直跑会 OOM——一律走上面的 C 盘热 target 方案。
 
-13. **upstream（SMB 基线）使用注意**（2026-10-05 实测）：① `git fetch upstream` 会报 "shallow roots are not allowed to be updated"（浅历史纠缠），**读上游更新改用直读**：`git --git-dir='\\192.168.1.222\程序开发\grok-build-upstream\.git' log/diff ...`（SMB 上可执行，慢但可用）；② 上游是 monorepo 镜像（提交均称 "Synced from monorepo"，每周 1-3 次）；③ 上游 crate 命名为 `xai-grok-*`，我们 7-25 已 rebrand 为 `cf-*`——**路径全不同，直接 merge 不可行**，同步只能按主题 cherry-pick + 手工改名适配；④ fork（2026-07-19）以来从未同步过上游
+13. **upstream（SMB 基线）使用注意**（2026-10-05 实测）：① `git fetch upstream` 会报 "shallow roots are not allowed to be updated"（浅历史纠缠），**读上游更新改用直读**：`git --git-dir='\\192.168.1.222\程序开发\grok-build-upstream\.git' log/diff ...`（SMB 上可执行，慢但可用）；② 上游是 monorepo 镜像（提交均称 "Synced from monorepo"，每周 1-3 次）；③ 上游 crate 命名为 `xai-grok-*`，我们 7-25 已 rebrand 为 `cf-*`——**路径全不同，直接 merge 不可行**，同步只能按主题 cherry-pick + 手工改名适配；④ fork（2026-07-19）以来从未同步过上游；⑤ **定位声明（2026-10-05 用户确认）：上游为低频情报参考源、非合并目标**——分叉已深且双向加速演进，仅安全类修复（RUSTSEC/依赖漏洞）值得定期扫一眼，功能类改进一律以我们自己的设计与实现为准
