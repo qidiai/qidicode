@@ -1483,10 +1483,26 @@ mod tests {
 
     #[test]
     fn background_block_gutter_uses_block_background_fill() {
-        // Background blocks own the gutter via the existing full-area fill, so
-        // the no-bg clear must not run for them. Concrete theme so bg_light !=
-        // bg_base (Theme::current() quantizes both to Reset in the test env).
-        let theme = Theme::groknight();
+        // Requires color support: under `NO_COLOR` the global
+        // `Theme::current()` quantizes every RGB to `Reset`, so the
+        // block bg and the base bg collapse onto the same value and
+        // the "block bg must differ from base bg" premise cannot be
+        // observed. (Same guard as the code-block gutter test below.)
+        if !crate::theme::color_support::detect().has_color() {
+            return;
+        }
+        // Pin the process-global theme (kind + color level) so the
+        // render is hermetic. The prompt band is painted from
+        // `Theme::current()` (wrap_prompt_lines), so the injected
+        // theme must be that same `Theme::current()` — in production
+        // both come from one source and always agree. A hardcoded
+        // `groknight()` diverges from the band wherever the detected
+        // color level or the Windows contrast boost rewrites the
+        // global theme's RGB (e.g. CI runners without `NO_COLOR`),
+        // which is an environment artifact, not the contract under
+        // test.
+        let _theme = pin_theme();
+        let theme = Theme::current();
         assert_ne!(
             theme.bg_light, theme.bg_base,
             "test premise: block bg must differ from base bg"
