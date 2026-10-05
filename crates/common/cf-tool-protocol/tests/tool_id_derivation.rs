@@ -26,10 +26,13 @@ fn bare_name_derives_to_tool_id_without_namespace() {
 
 #[test]
 fn namespaced_name_derives_to_namespaced_tool_id() {
+    // Contract (see `derive_tool_id` docs): namespaced descriptions
+    // render as `{namespace}:{name}` — the namespace is carried
+    // through verbatim, not rewritten to a canonical product slug.
     let derived = entry("read_file", Some("QidiBuild"))
         .derive_tool_id()
         .unwrap();
-    assert_eq!(derived, ToolId::new("cf_tools::read_file").unwrap());
+    assert_eq!(derived, ToolId::new("QidiBuild:read_file").unwrap());
 }
 
 #[test]
@@ -76,7 +79,7 @@ fn duplicate_derivations_in_a_batch_are_detectable() {
     }
     assert_eq!(duplicates.len(), 1, "exactly one duplicate id expected");
     let (id, indices) = &duplicates[0];
-    assert_eq!(id, &ToolId::new("cf_tools::read_file").unwrap());
+    assert_eq!(id, &ToolId::new("QidiBuild:read_file").unwrap());
     assert_eq!(indices, &vec![0, 2]);
 }
 

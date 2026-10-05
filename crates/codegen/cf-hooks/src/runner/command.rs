@@ -786,11 +786,16 @@ mod tests {
 
     fn make_envelope() -> HookEventEnvelope {
         use crate::event::HookPayload;
+        // Hooks spawn with `workspace_root` as their working
+        // directory, so it must be a real, platform-valid path:
+        // a Unix-style `/tmp` fails CreateProcess on Windows
+        // (os error 267) because `C:\tmp` does not exist.
+        let temp = std::env::temp_dir().to_string_lossy().into_owned();
         HookEventEnvelope {
             hook_event_name: crate::event::HookEventName::Stop,
             session_id: "test-session".into(),
-            cwd: "/tmp".into(),
-            workspace_root: "/tmp".into(),
+            cwd: temp.clone(),
+            workspace_root: temp,
             timestamp: "2026-01-01T00:00:00Z".into(),
             transcript_path: None,
             client_identifier: None,
@@ -802,9 +807,18 @@ mod tests {
     }
 
     fn make_ctx() -> RunContext<'static> {
+        // Leaked so the `&'static str` outlives the call; each
+        // test leaks one small string. The workspace root must be
+        // a real directory — see `make_envelope`.
+        let workspace_root: &'static str = Box::leak(
+            std::env::temp_dir()
+                .to_string_lossy()
+                .into_owned()
+                .into_boxed_str(),
+        );
         RunContext {
             session_id: "test-session",
-            workspace_root: "/tmp",
+            workspace_root,
         }
     }
 
@@ -910,6 +924,11 @@ mod tests {
     /// Now the env-var pre-spawn check refuses with a clear reason when
     /// the var is unset (and the dispatcher fail-opens, so the tool call
     /// itself is not blocked).
+    ///
+    /// Unix-only: the fixture is a `#!/bin/sh` script invoked through
+    /// the `${VAR}` → `sh -c` branch; the detected Windows shell
+    /// (PowerShell) cannot execute `.sh` files.
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_env_var_interpolation_runs_via_shell() {
         let tmp = tempfile::tempdir().unwrap();
@@ -963,6 +982,11 @@ mod tests {
     /// it on the spawned child so shell expansion via the `sh -c` branch
     /// resolves correctly; otherwise such hooks fail to find the
     /// command.
+    ///
+    /// Unix-only: the fixture is a `#!/bin/sh` script invoked through
+    /// the `${VAR}` → `sh -c` branch; the detected Windows shell
+    /// (PowerShell) cannot execute `.sh` files.
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_claude_project_dir_is_exported() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1270,6 +1294,11 @@ mod tests {
     /// Hooks that explicitly handle the unset case via parameter expansion
     /// (e.g. `${VAR:-/some/default}`) must NOT be refused -- the user has
     /// expressed intent for what should happen when the var is unset.
+    ///
+    /// Unix-only: `${VAR:-default}` is bash parameter expansion; the
+    /// detected Windows shell (PowerShell) parses `${...:-...}` as an
+    /// (unset) variable name, so the command degenerates to empty.
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_parameter_expansion_default_is_not_refused() {
         let tmp = tempfile::tempdir().unwrap();

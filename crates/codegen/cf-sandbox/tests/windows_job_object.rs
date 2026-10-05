@@ -8,10 +8,17 @@ use cf_sandbox::{ProfileName, SandboxManager};
 use std::path::Path;
 
 #[test]
-fn job_object_created_and_applied() {
+fn job_object_created_and_capability_verified() {
     let mut mgr = SandboxManager::new(ProfileName::ReadOnly, Path::new("."));
     mgr.apply(Path::new(".")).expect("Job Object sandbox apply");
-    assert!(mgr.is_applied());
+    // Windows contract (by design, see `apply`'s SECURITY note): the Job
+    // Object is a startup capability probe only — no process is ever
+    // attached to it, so `applied` stays false. Marking it applied would
+    // make `is_active()` / `should_auto_allow_bash()` report a sandbox
+    // that provides no filesystem/network isolation, falsely enabling YOLO
+    // bash auto-approve. Unix/Landlock semantics (applied=true) do NOT
+    // apply here.
+    assert!(!mgr.is_applied());
 }
 
 #[test]
@@ -25,6 +32,12 @@ fn off_profile_is_not_applied() {
 fn readonly_profile_restricts_child_network() {
     let mut mgr = SandboxManager::new(ProfileName::ReadOnly, Path::new("."));
     mgr.apply(Path::new(".")).expect("Job Object sandbox apply");
-    assert!(mgr.is_applied());
-    assert!(mgr.restrict_child_network());
+    // Same Windows contract as above: the Job Object probe does not mark
+    // the sandbox applied, so the manager-level network gate stays off —
+    // but the process-global child-network restriction IS armed for the
+    // ReadOnly profile (enforced by the surrounding nono/Job-Object
+    // layer at process-group spawn time).
+    assert!(!mgr.is_applied());
+    assert!(!mgr.restrict_child_network());
+    assert!(cf_sandbox::should_restrict_child_network());
 }

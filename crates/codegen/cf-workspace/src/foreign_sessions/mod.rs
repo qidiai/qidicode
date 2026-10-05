@@ -745,6 +745,16 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let cwd = root.path().join("repo");
         std::fs::create_dir_all(&cwd).unwrap();
+        // `scan_with` scans BOTH spellings by design: the canonical form
+        // plus the raw input when they differ (an 8.3 short-form TEMP,
+        // like the CI runner's `RUNNER~1`, makes them differ). The
+        // scanner closures therefore legitimately receive either.
+        let expected = dunce::canonicalize(&cwd).unwrap();
+        let spellings: Vec<std::path::PathBuf> = if expected.as_path() == cwd {
+            vec![expected]
+        } else {
+            vec![expected, cwd.clone()]
+        };
         scan_with(
             &cwd,
             EnabledForeignSessionSources {
@@ -753,7 +763,10 @@ mod tests {
             },
             |_, _| panic!("claude scanner called"),
             |received, _| {
-                assert_eq!(received, dunce::canonicalize(&cwd).unwrap());
+                assert!(
+                    spellings.iter().any(|s| s == received),
+                    "unexpected cwd spelling: {received:?} (expected one of {spellings:?})"
+                );
                 assert!(!received.to_string_lossy().starts_with(r"\\?\"));
                 Vec::new()
             },

@@ -338,6 +338,33 @@ mod tests {
             meta
         );
     }
+    /// JSON object key order is not semantically significant, but
+    /// `serde_json::Map`'s iteration order depends on the
+    /// `preserve_order` feature (IndexMap insertion order vs BTreeMap
+    /// sorted order). Workspace builds unify features across members
+    /// (cf-shell and friends enable `preserve_order`), so a
+    /// `--workspace` test run serializes the generated schema with
+    /// insertion-ordered keys while the checked-in file was written by
+    /// a single-package build (sorted keys). Normalize both sides to a
+    /// canonical key-sorted form so the staleness check compares
+    /// schema *content*, not map iteration order.
+    fn sorted_json_value(value: serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut entries: Vec<(String, serde_json::Value)> = map.into_iter().collect();
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                let mut out = serde_json::Map::new();
+                for (key, val) in entries {
+                    out.insert(key, sorted_json_value(val));
+                }
+                serde_json::Value::Object(out)
+            }
+            serde_json::Value::Array(items) => {
+                serde_json::Value::Array(items.into_iter().map(sorted_json_value).collect())
+            }
+            other => other,
+        }
+    }
     /// The checked-in schema (the artifact non-Rust consumers codegen from) must
     /// track the type. Regenerate with `UPDATE_TOOL_META_SCHEMA=1`.
     #[test]
@@ -345,7 +372,13 @@ mod tests {
         let generator = schemars::generate::SchemaSettings::draft07().into_generator();
         let schema = serde_json::to_value(generator.into_root_schema_for::<CanonicalToolMeta>())
             .expect("schema serializes");
-        let generated = format!("{}\n", serde_json::to_string_pretty(&schema).unwrap());
+        // Compare (and write) the canonical key-sorted form so the
+        // file is byte-identical regardless of which build mode
+        // regenerates it.
+        let generated = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&sorted_json_value(schema)).unwrap()
+        );
         if std::env::var("UPDATE_TOOL_META_SCHEMA").is_ok() {
             std::fs::write(
                 concat!(env!("CARGO_MANIFEST_DIR"), "/schema/tool_meta.schema.json"),
@@ -359,7 +392,10 @@ mod tests {
         if let Some(values) = expected["definitions"]["ToolNamespace"]["enum"].as_array_mut() {
             values.retain(|v| v != "cursor");
         }
-        let expected = format!("{}\n", serde_json::to_string_pretty(&expected).unwrap());
+        let expected = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&sorted_json_value(expected)).unwrap()
+        );
         assert_eq!(
             generated, expected,
             "tool_meta.schema.json is stale; regenerate with UPDATE_TOOL_META_SCHEMA=1"

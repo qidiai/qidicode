@@ -44,6 +44,11 @@ windows = { workspace = true }
 tempfile = { workspace = true }
 # `cfg(test)` in this crate does not enable features on dependencies, so the
 # tests' `EnvVarGuard` re-export needs the feature turned on explicitly.
+# Self dev-dependency is the cargo idiom for that: it makes
+# `cargo test -p cf-shell-base` compile standalone (in a full
+# `--workspace` build, cf-shell's dev-dep already unifies the
+# feature on).
+cf-shell-base = { path = ".", features = ["test-helpers"] }
 
 [lints]
 workspace = true

@@ -711,13 +711,22 @@ mod tests {
     #[serial(bwrap_env)]
     fn bwrap_reexec_mounts_existing_paths_read_only() {
         let _g = EnvGuard::remove(BWRAP_ENV_VAR);
-        let result = bwrap_reexec_command(&["/tmp"], &[]);
+        // `std::env::temp_dir()` exists on every platform — the hardcoded
+        // Unix `/tmp` fixture made this test premise false on Windows,
+        // where `Path::new("/tmp").exists()` resolves against the current
+        // drive (`C:\tmp`, absent on clean runners) and the path is
+        // correctly skipped by the non-Linux legacy branch.
+        let existing = std::env::temp_dir();
+        let existing_str = existing.to_string_lossy().into_owned();
+        let result = bwrap_reexec_command(&[&existing_str], &[]);
         let cmd = result.unwrap();
         let args: Vec<String> = cmd
             .get_args()
             .map(|a| a.to_string_lossy().to_string())
             .collect();
-        let has_ro_bind = args.windows(3).any(|w| w == ["--ro-bind", "/tmp", "/tmp"]);
+        let has_ro_bind = args
+            .windows(3)
+            .any(|w| w == ["--ro-bind", existing_str.as_str(), existing_str.as_str()]);
         assert!(
             has_ro_bind,
             "should mount existing paths as --ro-bind, got args: {args:?}"

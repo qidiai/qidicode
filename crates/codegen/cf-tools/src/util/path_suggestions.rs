@@ -84,7 +84,7 @@ pub async fn path_not_found_hint(path: &Path, cwd: &Path, display_cwd: &Path) ->
     let suggestion = suggestion.map(|corrected| {
         corrected
             .strip_prefix(cwd)
-            .map(|rel| display_cwd.join(rel))
+            .map(|rel| join_display_path(display_cwd, rel))
             .unwrap_or_else(|_| {
                 tracing::warn!(
                     corrected = %corrected.display(),
@@ -100,6 +100,33 @@ pub async fn path_not_found_hint(path: &Path, cwd: &Path, display_cwd: &Path) ->
         similar,
         cwd_note,
     }
+}
+
+/// Join a display-space base path with a relative suffix.
+///
+/// Display paths are model-facing strings that may use Unix
+/// spelling (e.g. `/home/user/project`) even on Windows — the
+/// worktree remap in [`path_not_found_hint`] passes such a
+/// `display_cwd`. `Path::join` would splice in the platform
+/// separator (`\`), yielding mixed-separator paths like
+/// `/home/user/project\src`. Match the base's own separator
+/// convention instead: forward slashes when the base contains
+/// one, backslashes otherwise (native Windows display paths).
+fn join_display_path(base: &Path, rel: &Path) -> PathBuf {
+    let base_str = base.to_string_lossy().into_owned();
+    let sep = if base_str.contains('/') { '/' } else { '\\' };
+    let mut joined = base_str;
+    for comp in rel.components() {
+        let c = comp.as_os_str().to_string_lossy();
+        if c.is_empty() {
+            continue;
+        }
+        if !joined.ends_with(sep) {
+            joined.push(sep);
+        }
+        joined.push_str(&c);
+    }
+    PathBuf::from(joined)
 }
 
 /// Format a path-not-found error message.
@@ -233,6 +260,21 @@ mod tests {
         assert!(hint.cwd_note.contains(&cwd.display().to_string()));
         assert!(hint.suggestion.is_none());
         assert!(hint.similar.is_empty());
+    }
+
+    // ── display-space remap ───────────────────────────────────
+
+    #[test]
+    fn join_display_path_keeps_unix_spelling_on_windows() {
+        // A Unix-spelling display base (the worktree-remap case)
+        // must stay forward-slashed even on Windows, where
+        // `Path::join` would splice in a backslash.
+        let joined = join_display_path(Path::new("/home/user/project"), Path::new("src"));
+        assert_eq!(joined.to_string_lossy(), "/home/user/project/src");
+
+        // A native Windows display base keeps backslashes.
+        let joined = join_display_path(Path::new(r"C:\repo"), Path::new("src"));
+        assert_eq!(joined.to_string_lossy(), r"C:\repo\src");
     }
 
     // ── "dropped repo folder" detection ───────────────────────────────

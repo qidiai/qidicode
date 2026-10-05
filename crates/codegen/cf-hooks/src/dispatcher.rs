@@ -333,12 +333,16 @@ mod tests {
     use std::path::PathBuf;
 
     /// Helper: build a pre_tool_use envelope for the given tool name.
+    /// `workspace_root` must be a real, platform-valid directory:
+    /// hooks spawn with it as their working directory (a Unix-style
+    /// `/tmp` fails CreateProcess on Windows, os error 267).
     fn pre_tool_use_envelope(tool_name: &str) -> HookEventEnvelope {
+        let temp = std::env::temp_dir().to_string_lossy().into_owned();
         HookEventEnvelope {
             hook_event_name: HookEventName::PreToolUse,
             session_id: "test-session".into(),
-            cwd: "/tmp".into(),
-            workspace_root: "/tmp".into(),
+            cwd: temp.clone(),
+            workspace_root: temp,
             timestamp: "2025-01-01T00:00:00Z".into(),
             transcript_path: None,
             client_identifier: None,
@@ -354,13 +358,15 @@ mod tests {
         }
     }
 
-    /// Helper: build a session_start envelope.
+    /// Helper: build a session_start envelope (real temp dir as
+    /// workspace root — see `pre_tool_use_envelope`).
     fn session_start_envelope() -> HookEventEnvelope {
+        let temp = std::env::temp_dir().to_string_lossy().into_owned();
         HookEventEnvelope {
             hook_event_name: HookEventName::SessionStart,
             session_id: "test-session".into(),
-            cwd: "/tmp".into(),
-            workspace_root: "/tmp".into(),
+            cwd: temp.clone(),
+            workspace_root: temp,
             timestamp: "2025-01-01T00:00:00Z".into(),
             transcript_path: None,
             client_identifier: None,
@@ -374,9 +380,18 @@ mod tests {
     }
 
     fn run_ctx() -> RunContext<'static> {
+        // Leaked so the `&'static str` outlives the call; the
+        // workspace root must be a real directory (see
+        // `pre_tool_use_envelope`).
+        let workspace_root: &'static str = Box::leak(
+            std::env::temp_dir()
+                .to_string_lossy()
+                .into_owned()
+                .into_boxed_str(),
+        );
         RunContext {
             session_id: "test-session",
-            workspace_root: "/tmp",
+            workspace_root,
         }
     }
 

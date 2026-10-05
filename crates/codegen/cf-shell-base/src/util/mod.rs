@@ -289,8 +289,28 @@ mod tests {
         );
     }
     #[test]
-    fn is_grok_process_self_true_impossible_pid_false() {
-        assert!(is_grok_process(std::process::id()));
+    fn is_grok_process_grok_named_process_true_impossible_pid_false() {
+        // The rebrand (xai-grok-* → cf-*) renamed the test
+        // binaries, so the test process itself no longer carries
+        // "grok" in its image name / cmdline. Exercise the positive
+        // case portably instead: run a copy of this test binary
+        // from a "grok"-named path (`--list` makes the child list
+        // its tests and exit immediately).
+        let temp = tempfile::TempDir::new().unwrap();
+        let exe = std::env::current_exe().unwrap();
+        let grok_probe = temp.path().join("grok_probe");
+        #[cfg(windows)]
+        let grok_probe = grok_probe.with_extension("exe");
+        std::fs::copy(&exe, &grok_probe).unwrap();
+        let mut child = std::process::Command::new(&grok_probe)
+            .arg("--list")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn grok_probe");
+        assert!(is_grok_process(child.id()));
+        let _ = child.wait().expect("wait grok_probe");
         assert!(!is_grok_process(u32::MAX));
     }
 }

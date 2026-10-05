@@ -322,6 +322,10 @@ async fn first_deny_stops_chain() {
     }
 }
 
+/// Unix-only: the fixture uses bash command substitution and
+/// `grep -q`, which the detected Windows shell (PowerShell)
+/// does not provide.
+#[cfg(unix)]
 #[tokio::test]
 async fn hook_receives_stdin_envelope() {
     let dir = tempfile::tempdir().unwrap();
@@ -347,6 +351,10 @@ async fn hook_receives_stdin_envelope() {
     assert_eq!(pre_result.decision, HookDecision::Allow);
 }
 
+/// Unix-only: the fixture reads `$QIDI_HOOK_EVENT` etc. — bash
+/// env-var expansion. PowerShell treats `$NAME` as an (empty)
+/// PowerShell variable, not an env var (`$env:NAME`).
+#[cfg(unix)]
 #[tokio::test]
 async fn hook_receives_env_vars() {
     let dir = tempfile::tempdir().unwrap();
@@ -427,6 +435,11 @@ fn make_envelope(event: HookEventName, payload: HookPayload) -> HookEventEnvelop
 
 /// Each new event type: write hook file → load → dispatch → verify the
 /// command fires and receives the correct JSON envelope on stdin.
+///
+/// Unix-only: the fixture command is `cat > <file>`, which the
+/// detected Windows shell (PowerShell) does not provide
+/// (`cat` there is Get-Content, not a stdin tee).
+#[cfg(unix)]
 #[tokio::test]
 async fn new_event_types_fire_and_receive_correct_envelope() {
     struct Case {
@@ -574,6 +587,12 @@ async fn new_event_types_fire_and_receive_correct_envelope() {
 /// constructs the spoof JSON, dispatches a hook that writes `printenv`
 /// for each key, and asserts the captured values are the runner's
 /// authentic ones.
+///
+/// Unix-only: the capture fixture expands `$QIDI_HOOK_EVENT` etc.
+/// through bash. A PowerShell-portable capture (`$env:NAME`)
+/// cannot be expressed in one shell-agnostic command string;
+/// the Windows-equivalent coverage is a known gap.
+#[cfg(unix)]
 #[tokio::test]
 async fn runner_injected_vars_override_extra_env_at_spawn() {
     let dir = tempfile::tempdir().unwrap();

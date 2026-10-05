@@ -45,7 +45,7 @@ impl HookMatcher {
             MatcherKind::Exact(names) => names.iter().any(|n| n == tool_name),
             MatcherKind::Regex(regex) => {
                 regex.is_match(tool_name)
-                    || claude_names_for(tool_name).iter().any(|alias| regex.is_match(alias))
+                    || claude_names_for(tool_name).any(|alias| regex.is_match(alias))
             }
         }
     }

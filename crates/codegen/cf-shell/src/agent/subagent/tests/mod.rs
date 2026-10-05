@@ -2168,7 +2168,9 @@ async fn handle_subagent_request_valid_cwd_passes_validation() {
     let coordinator = std::cell::RefCell::new(SubagentCoordinator::new());
     let gateway = test_gateway();
     let (mut request, result_rx) = make_request("explore");
-    request.cwd = Some("/tmp".into());
+    // A real, platform-valid directory: `/tmp` does not
+    // exist on Windows and fails cwd validation.
+    request.cwd = Some(std::env::temp_dir().to_string_lossy().into_owned());
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -2191,7 +2193,13 @@ async fn handle_subagent_request_quoted_cwd_passes_validation() {
     let coordinator = std::cell::RefCell::new(SubagentCoordinator::new());
     let gateway = test_gateway();
     let (mut request, result_rx) = make_request("explore");
-    request.cwd = Some("\"/tmp".into());
+    // Leading quote must be sanitized before validation;
+    // the underlying path is a real, platform-valid
+    // directory (`/tmp` does not exist on Windows).
+    request.cwd = Some(format!(
+        "\"{}",
+        std::env::temp_dir().to_string_lossy()
+    ));
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
