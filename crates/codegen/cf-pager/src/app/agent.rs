@@ -288,7 +288,7 @@ pub struct ScheduledTaskInfo {
 }
 /// Parsed goal status from `GoalUpdated` session notifications.
 ///
-/// The six paused variants encode the *cause* of the pause directly (no
+/// The five paused variants encode the *cause* of the pause directly (no
 /// separate `pause_reason` field) so renderers can fan-out on a single
 /// `match`. See [`Self::pause_label`] for the user-facing labels and
 /// [`Self::is_paused`] for a cause-agnostic check.
@@ -314,7 +314,7 @@ pub enum GoalDisplayStatus {
 impl GoalDisplayStatus {
     /// Parse a status string from the `GoalUpdated` notification.
     ///
-    /// Accepts the six paused variants; legacy `"paused"` is treated as
+    /// Accepts the five paused variants; legacy `"paused"` is treated as
     /// [`Self::UserPaused`] so a new pager keeps working against an old
     /// shell.
     ///

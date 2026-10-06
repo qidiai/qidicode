@@ -50,7 +50,7 @@ pub enum GoalPhase {
 /// `InfraPaused` when a turn finishes with an infrastructure error,
 /// and `Blocked` when the model determined the goal is not achievable
 /// in the current environment. Use [`GoalStatus::is_paused`] to test
-/// paused-ness uniformly across all six variants.
+/// paused-ness uniformly across all five paused variants.
 ///
 /// **Backwards-compat serde aliases:** older shells serialized this
 /// enum with the default PascalCase form (`"Active"`, `"Paused"`,
@@ -1538,7 +1538,7 @@ mod tests {
 
     #[test]
     fn pause_records_cause_specific_history_detail() {
-        // All six pause reasons record a distinct history `detail` (the
+        // All five pause reasons record a distinct history `detail` (the
         // `history_detail` mapping, exercised via the real pause path).
         for (reason, expected) in [
             (GoalPauseReason::User, "user"),
