@@ -8,6 +8,7 @@ description = "Actor-based sampling/inference layer for xAI grok (HTTP streaming
 [dependencies]
 cf-version= { workspace = true }
 # Internal
+cf-auth = { workspace = true }
 cf-sampling-types = { path = "../cf-sampling-types" }
 
 # External

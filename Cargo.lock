@@ -2583,6 +2583,7 @@ dependencies = [
  "async-openai",
  "async-stream",
  "axum",
+ "cf-auth",
  "cf-sampling-types",
  "cf-test-support",
  "cf-version",

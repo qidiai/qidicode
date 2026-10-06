@@ -20,6 +20,13 @@
 
 use std::sync::Arc;
 
+/// Length of the bearer fragment this crate passes across the
+/// attribution-callback boundary. Single source of truth: the
+/// constant lives in `cf-auth` so every crate that joins the
+/// sent fragment with a live credential slices bearers the
+/// same way (tail-12, character-aware).
+pub use cf_auth::bearer_fragment::BEARER_SUFFIX_LEN;
+
 /// A logical 401-emitting site inside the sampling client. The string
 /// identifier ends up in the consumer field of the attribution event
 /// so downstream queries can break down 401s by API path.
@@ -68,18 +75,6 @@ impl SamplingConsumer {
     }
 }
 
-/// Maximum prefix length the sampler shares with attribution
-/// callbacks across the crate boundary. Mirrors
-/// `cf_shell::auth::token_suffix` (which truncates to 12 chars
-/// before any sink) so the two crates stay in lock-step on the
-/// "bearers leaving the sampler are 12-char prefixes only" invariant.
-///
-/// The cross-crate boundary is the only place this constant is
-/// load-bearing -- changing it requires updating `token_suffix` in
-/// `qidi-code/src/auth/manager.rs` to match, otherwise the
-/// shell's local-log payload and the sampler's callback argument
-/// will disagree on prefix length.
-pub const SENT_BEARER_PREFIX_LEN: usize = 12;
 /// Hook invoked by [`crate::SamplingClient`] at every 401 response site.
 ///
 /// Implementations are responsible for joining `sent_bearer_prefix`
@@ -100,20 +95,21 @@ pub const SENT_BEARER_PREFIX_LEN: usize = 12;
 pub trait Auth401AttributionCallback: Send + Sync + std::fmt::Debug {
     /// Record a 401 attribution event for one logical 401 response.
     ///
-    /// `sent_bearer_prefix` is the **first
-    /// [`SENT_BEARER_PREFIX_LEN`] characters** of the bearer that
-    /// was actually sent on the wire. The sampler extracts the
-    /// bearer from the `Authorization` header (or `x-api-key` for
-    /// Anthropic Messages API backends) and truncates it to the prefix
-    /// length **before crossing this trait boundary** -- the full
-    /// bearer never leaves [`crate::SamplingClient`]. This is the
-    /// scrub-at-the-boundary invariant: even a misbehaving callback
-    /// implementation that logs `sent_bearer_prefix` directly leaks
-    /// only the prefix, never the full credential.
+    /// `sent_bearer_suffix` is the [`BEARER_SUFFIX_LEN`]-char **tail**
+    /// of the bearer that was actually sent on the wire, captured by
+    /// [`crate::SamplingClient`] at send time. The sampler truncates
+    /// the bearer to the fragment length **before crossing this trait
+    /// boundary** -- the full bearer never leaves
+    /// [`crate::SamplingClient`]. This is the scrub-at-the-boundary
+    /// invariant: even a misbehaving callback implementation that logs
+    /// `sent_bearer_suffix` directly leaks only the fragment, never
+    /// the full credential. The fragment is the tail (not the head)
+    /// because JWT access tokens share a constant base64 header, so
+    /// the head distinguishes nothing and the tail does.
     ///
     /// `None` indicates the request had no bearer header at all
     /// (distinct from "had a bearer that turned out to be stale").
-    fn record_401(&self, consumer: SamplingConsumer, sent_bearer_prefix: Option<&str>);
+    fn record_401(&self, consumer: SamplingConsumer, sent_bearer_suffix: Option<&str>);
 }
 
 /// Shared, cheap-to-clone alias for the attribution callback.

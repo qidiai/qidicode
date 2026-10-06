@@ -292,9 +292,16 @@ pub(crate) struct UserInfo {
 /// header prefix (`eyJ0eXAiOiJh…`); the tail (signature bytes) is
 /// unique per token and makes `key_changed` / `is_stale_snapshot`
 /// diagnostics meaningful.
+///
+/// The length constant and the (char-boundary-safe) extraction live
+/// in exactly one place: [`cf_auth::bearer_fragment::bearer_suffix`].
+/// The sampler's send-time 401-attribution capture uses the same
+/// function, so "tail" means the same 12 chars on both sides of the
+/// crate boundary (the old in-file copy diverged in *direction* from
+/// the sampler's head-truncate, which made every >12-char token look
+/// like a stale snapshot).
 pub(crate) fn token_suffix(t: &str) -> &str {
-    let len = t.len();
-    if len > 12 { &t[len - 12..] } else { t }
+    cf_auth::bearer_fragment::bearer_suffix(t)
 }
 
 /// Look up auth from the store by scope key.

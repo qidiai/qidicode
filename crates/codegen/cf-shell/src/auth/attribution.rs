@@ -4,8 +4,9 @@
 //! actually sent on the wire (the `Authorization` value for OAI-compat
 //! backends, `x-api-key` for Anthropic Messages, the API proxy
 //! `Authorization` header for storage / feedback / registry /
-//! idle-resume) with the live
-//! [`AuthManager::current_api_key`] value. The two sinks are:
+//! idle-resume) with the manager's in-memory token
+//! ([`AuthManager::current_or_expired`] -- hard-expired tokens stay
+//! visible, since most 401s arrive exactly then). The two sinks are:
 //!
 //! 1. [`cf_telemetry::unified_log::warn`] for the local
 //!    `~/.qidi/logs/unified.jsonl` file (best-effort; ships to GCS
@@ -20,14 +21,18 @@
 //! ```text
 //! {
 //!   "sent_key_prefix": "<last 12 chars of bearer the client sent, or """>,
-//!   "current_key_prefix": "<last 12 chars of AuthManager::current_api_key()>",
+//!   "current_key_prefix": "<last 12 chars of the held token (current or
+//!                         expired), or null when the manager is empty>",
 //!   "mint_age_seconds": <i64; current time minus auth.create_time, or -1>,
-//!   "expires_at_seconds_from_now": <i64; auth.expires_at minus now,
-//!                                 or 0 when no current token>,
+//!   "expires_at_seconds_from_now": <i64; auth.expires_at minus now
+//!                                 (negative once expired), or 0 when the
+//!                                 manager is empty>,
 //!   "consumer": "OaiCompatClient.<endpoint>" | "StorageClient.<op>"
 //!             | "FeedbackClient.<op>" | "SessionRegistryClient.<op>"
 //!             | "IdleResumeModelRefresh",
-//!   "is_stale_snapshot": <bool; true iff sent_prefix differs from a *known* current_prefix>
+//!   "is_stale_snapshot": <bool; true iff a bearer was actually sent AND it
+//!                        differs from the held token -- "sent nothing"
+//!                        (fail-closed) and "held nothing" are both false>
 //! }
 //! ```
 //!
@@ -48,7 +53,9 @@ use serde_json::Value as JsonValue;
 use cf_sampler::{Auth401AttributionCallback, SamplingConsumer};
 use cf_tools::{Auth401AttributionCallback as ToolAuth401AttributionCallback, ToolConsumer};
 
-use crate::auth::{AuthManager, TOKEN_TTL, token_suffix};
+use cf_auth::bearer_fragment::bearer_suffix;
+
+use crate::auth::{AuthManager, TOKEN_TTL};
 
 /// `cfg(test)`-only process-global counter that bumps on every
 /// successful `record_auth_401` invocation.
@@ -139,24 +146,27 @@ impl ShellAttribution {
 }
 
 impl Auth401AttributionCallback for ShellAttribution {
-    fn record_401(&self, consumer: SamplingConsumer, sent_bearer_prefix: Option<&str>) {
-        // The sampler crate has already truncated `sent_bearer_prefix`
-        // to `cf_sampler::SENT_BEARER_PREFIX_LEN` characters
-        // before this trait method fires (see
-        // `SamplingClient::extract_sent_bearer`); the truncation
-        // inside `compute_attribution_payload` (via `token_suffix`)
-        // is therefore idempotent for this code path. The doubled
-        // truncation is intentional belt-and-suspenders -- the
+    fn record_401(&self, consumer: SamplingConsumer, sent_bearer_suffix: Option<&str>) {
+        // The sampler crate has already scrubbed `sent_bearer_suffix`
+        // down to `cf_sampler::BEARER_SUFFIX_LEN` characters
+        // before this trait method fires (captured at send time in
+        // `SamplingClient::post` via `bearer_suffix`); the tail
+        // extraction inside `compute_attribution_payload` is
+        // therefore an idempotent no-op for this code path. The
+        // doubled scrub is intentional belt-and-suspenders -- the
         // sampler-side scrub keeps the full bearer from ever leaving
         // that crate, and the shell-side scrub keeps the local-log
         // and OTel-span sinks aligned with the existing 12-char
-        // convention used by every other auth log line.
+        // convention used by every other auth log line. Both sides
+        // now derive the constant from the single source,
+        // `cf_auth::bearer_fragment`, so "tail" is the same 12
+        // chars everywhere.
         record_consumer_401(
             self.auth_manager.as_ref(),
             self.session_id.as_deref(),
             ConsumerKind::OaiCompatClient,
             consumer.as_endpoint(),
-            sent_bearer_prefix,
+            sent_bearer_suffix,
         );
     }
 }
@@ -377,13 +387,17 @@ pub(crate) fn record_auth_401(
 ///
 /// This function performs **exactly one** read-side acquisition of
 /// [`AuthManager`]'s internal `RwLock` -- it calls
-/// [`AuthManager::current`] once and derives both `current_key_prefix`
-/// and the mint/expiry fields from the resulting `GrokAuth`.
+/// [`AuthManager::current_or_expired`] once and derives both
+/// `current_key_prefix` and the mint/expiry fields from the
+/// resulting `GrokAuth`. It reads `current_or_expired`, NOT
+/// `current`: `current()` is `None` by construction in the
+/// hard-expired window most 401s land in, and would blank every
+/// field this event exists to fill.
 ///
-/// `is_stale_snapshot` is `true` only when the live `current()` token
-/// differs from the bearer the client sent. When `current()` returns
-/// `None` (the manager has no active token), the result is `false`:
-/// absence of a live token is "no evidence of staleness," not stale.
+/// `is_stale_snapshot` is `true` only when a bearer was actually
+/// sent and it differs from the held token. "Sent nothing" (the
+/// fail-closed path: in sync, credential dead) and "held nothing"
+/// (empty manager: no evidence) are both `false`.
 fn compute_attribution_payload(
     auth_manager: &AuthManager,
     consumer: &str,
@@ -392,30 +406,34 @@ fn compute_attribution_payload(
     let now = chrono::Utc::now();
 
     // Last-12-char suffix of the bearer the wire actually carried
-    // (see [`token_suffix`]: JWT headers share a common base64 prefix).
-    // `""` when the request had no bearer at all (distinct case from
-    // "had a bearer that turned out to be stale" -- the gate-criteria
-    // query can break down on this).
-    let sent_prefix = sent_bearer.map(token_suffix).unwrap_or("");
+    // (see [`bearer_suffix`]: JWT headers share a common base64
+    // prefix). `""` when the request had no bearer at all -- a
+    // distinct case from "had a bearer that turned out to be
+    // stale"; the gate-criteria query can break down on this.
+    let sent_suffix = sent_bearer.map(bearer_suffix).unwrap_or("");
 
-    // Single read-lock acquisition: pull the live `GrokAuth` (or
-    // `None`) once and derive every other field from it.
-    let current_auth = auth_manager.current();
-    let current_prefix_owned: Option<String> = current_auth
+    // One read; `current_or_expired` keeps the hard-expired token
+    // visible (see the fn doc).
+    let current_auth = auth_manager.current_or_expired();
+    let current_suffix_owned: Option<String> = current_auth
         .as_ref()
-        .map(|a| token_suffix(&a.key).to_string());
+        .map(|a| bearer_suffix(&a.key).to_string());
 
-    // None current means "no evidence of staleness," not stale --
-    // the downstream stale-vs-live split should only count
-    // true-positive staleness (sent bearer differs from a known live
-    // bearer).
-    let is_stale_snapshot = match current_prefix_owned.as_deref() {
-        Some(c) => sent_prefix != c,
-        None => false,
+    // True-positive staleness only: a bearer was sent AND differs
+    // from the held token. "Sent nothing" is the fail-closed path
+    // (in sync, credential dead); "held nothing" is no evidence;
+    // neither is stale.
+    let is_stale_snapshot = match (sent_suffix, current_suffix_owned.as_deref()) {
+        ("", _) => false,
+        (_, None) => false,
+        (sent, Some(held)) => sent != held,
     };
 
-    // Mint-age + expiry come from the same `current_auth` we already
-    // read; sentinels `-1 / 0` when the manager has no current token.
+    // Mint-age and expiry come from the same `current_auth` we
+    // already read; sentinels `-1 / 0` when the manager holds
+    // nothing. For a hard-expired token these report true age and
+    // (negative) time-past-expiry: how long the bearer was dead at
+    // the 401.
     //
     // TODO: mirror the full External-with-ttl branch from
     // `AuthManager::is_token_expired` (uses
@@ -434,8 +452,8 @@ fn compute_attribution_payload(
     };
 
     serde_json::json!({
-        "sent_key_prefix": sent_prefix,
-        "current_key_prefix": current_prefix_owned,
+        "sent_key_prefix": sent_suffix,
+        "current_key_prefix": current_suffix_owned,
         "mint_age_seconds": mint_age_seconds,
         "expires_at_seconds_from_now": expires_at_seconds_from_now,
         "consumer": consumer,
@@ -553,6 +571,94 @@ mod tests {
         assert!(payload_field(&payload, "current_key_prefix").is_null());
         assert_eq!(payload_field(&payload, "mint_age_seconds"), -1);
         assert_eq!(payload_field(&payload, "expires_at_seconds_from_now"), 0);
+    }
+
+    /// Test helper: a token minted 2h ago that hard-expired 1h ago.
+    /// That is the in-memory state during the exact window most 401s
+    /// occur in (`current()` is `None`, `current_or_expired()` is
+    /// `Some`).
+    fn hard_expired_auth(key: &str) -> GrokAuth {
+        GrokAuth {
+            key: key.to_string(),
+            create_time: Utc::now() - Duration::hours(2),
+            expires_at: Some(Utc::now() - Duration::hours(1)),
+            ..GrokAuth::test_default()
+        }
+    }
+
+    /// A consumer sends the very token the manager holds,
+    /// hard-expired: NOT stale (in sync; the token itself is
+    /// dead). The held token and real age fields must stay
+    /// visible; `current()` used to blank them.
+    #[test]
+    fn hard_expired_held_token_sent_is_not_stale() {
+        let (_dir, am) = empty_auth_manager();
+        let sent = "expired-token-1234567890abcdef";
+        am.hot_swap(hard_expired_auth(sent));
+        assert!(am.current().is_none(), "hard-expired precondition");
+
+        let payload = compute_attribution_payload(&am, "Test.expired", Some(sent));
+
+        assert_eq!(payload_field(&payload, "is_stale_snapshot"), false);
+        assert_eq!(
+            payload_field(&payload, "current_key_prefix"),
+            "567890abcdef",
+            "the held token must stay visible even when hard-expired"
+        );
+        let mint = payload_field(&payload, "mint_age_seconds")
+            .as_i64()
+            .unwrap();
+        assert!(
+            (7195..=7210).contains(&mint),
+            "mint_age_seconds should be ~7200 for a 2h-old token, got {mint}"
+        );
+        let expires = payload_field(&payload, "expires_at_seconds_from_now")
+            .as_i64()
+            .unwrap();
+        assert!(
+            (-3610..=-3590).contains(&expires),
+            "expires_at_seconds_from_now should be ~-3600 for a token dead 1h, got {expires}"
+        );
+    }
+
+    /// The fail-closed path: a hard-expired token is held, and the
+    /// wire-valid-only resolver correctly put NO bearer on the wire.
+    /// Not a stale snapshot: the consumer did the right thing; the
+    /// credential is dead. Absorbing this into the stale bucket
+    /// would bury the true-positive split the field exists for.
+    #[test]
+    fn nothing_sent_with_hard_expired_held_token_is_not_stale() {
+        let (_dir, am) = empty_auth_manager();
+        am.hot_swap(hard_expired_auth("held-but-not-sent"));
+
+        let payload = compute_attribution_payload(&am, "Test.fail_closed", None);
+
+        assert_eq!(payload_field(&payload, "is_stale_snapshot"), false);
+        assert_eq!(payload_field(&payload, "sent_key_prefix"), "");
+        assert_eq!(
+            payload_field(&payload, "current_key_prefix"),
+            "but-not-sent",
+            "the held token must stay visible for diagnosis"
+        );
+    }
+
+    /// A consumer sends an OLDER bearer than the (hard-expired) one
+    /// the manager holds: a true stale snapshot. It must be flagged
+    /// even though `current()` is `None` in this window.
+    #[test]
+    fn stale_snapshot_detected_against_hard_expired_held_token() {
+        let (_dir, am) = empty_auth_manager();
+        am.hot_swap(hard_expired_auth("held-token-different"));
+        assert!(am.current().is_none(), "hard-expired precondition");
+
+        let payload =
+            compute_attribution_payload(&am, "Test.expired_stale", Some("frozen-at-spawn-copy"));
+
+        assert_eq!(payload_field(&payload, "is_stale_snapshot"), true);
+        assert_eq!(
+            payload_field(&payload, "current_key_prefix"),
+            "en-different"
+        );
     }
 
     /// Two-branch fallback: legacy token (no `expires_at`) uses
@@ -949,6 +1055,138 @@ mod tests {
         assert_eq!(
             payload_field(&payload, "consumer"),
             "OaiCompatClient.messages_stream"
+        );
+    }
+
+    /// Cross-crate red→green acceptance test for the A-1 401-attribution
+    /// resilience fix (the send-time re-resolve race + the prefix/suffix
+    /// direction bug).
+    ///
+    /// Drives the real `cf_sampler::SamplingClient::chat_completion` 401
+    /// path (axum mock backend + bearer resolver) through the real
+    /// `ShellAttribution` callback, then asserts the emitted
+    /// `auth_401_attribution` span classifies a >12-char live token as
+    /// NOT a stale snapshot.
+    ///
+    /// RED pre-fix: the sampler re-resolved the bearer at 401 time and
+    /// truncated to the **first** 12 chars (`"live-token-1"`), while the
+    /// shell compared against the **last** 12 (`"567890abcdef"`) -- so
+    /// every bearer longer than 12 chars was misreported as a stale
+    /// snapshot (`is_stale_snapshot == true`), defeating the telemetry
+    /// split the field exists for.
+    ///
+    /// GREEN post-fix: the sampler captures the send-time tail fragment
+    /// (`bearer_suffix`) and threads it to the 401 arm; the shell sees
+    /// sent == current == `"567890abcdef"` → `false`.
+    ///
+    /// Integration-gap note: the production wiring site (session code
+    /// constructing `SamplerConfig` with this callback) is config plumbing
+    /// and is not exercised here; the HTTP send → 401 arm → callback →
+    /// payload → span path is fully real.
+    #[tokio::test]
+    #[serial_test::serial(attribution_emit_count)]
+    async fn sampler_401_live_token_is_not_stale_cross_crate() {
+        use cf_sampler::{ApiBackend, SamplerConfig, SamplingClient};
+        use cf_sampling_types::types::ChatRequestMessage;
+        use cf_sampling_types::{ChatCompletionRequest, SamplingError};
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        #[derive(Debug)]
+        struct StaticBearerResolver(&'static str);
+        impl cf_sampler::BearerResolver for StaticBearerResolver {
+            fn current_bearer(&self) -> Option<String> {
+                Some(self.0.to_string())
+            }
+        }
+
+        let (collector, captured) = span_capture::SpanCollector::new();
+        let subscriber = tracing_subscriber::registry().with(collector);
+        let _guard = subscriber.set_default();
+
+        reset_test_emit_count();
+
+        // 401-only mock backend: every chat completion is rejected.
+        let app = axum::Router::new().route(
+            "/chat/completions",
+            axum::routing::post(|| async { axum::http::StatusCode::UNAUTHORIZED }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock backend");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve mock backend");
+        });
+        let base_url = format!("http://{addr}");
+
+        // The same >12-char live token is held by the manager AND
+        // returned by the resolver -- so the 401 must classify as
+        // "sent the live token and was still rejected", not stale.
+        let live = "live-token-1234567890abcdef";
+        let (_dir, am) = empty_auth_manager();
+        am.hot_swap(fresh_auth(live));
+        let am_arc = Arc::new(am);
+        let callback = ShellAttribution::new(am_arc.clone(), None);
+
+        let cfg = SamplerConfig {
+            base_url,
+            model: "test-model".into(),
+            api_backend: ApiBackend::ChatCompletions,
+            attribution_callback: Some(callback),
+            bearer_resolver: Some(Arc::new(StaticBearerResolver(live))),
+            ..SamplerConfig::default()
+        };
+        let client = SamplingClient::new(cfg).expect("client should build");
+
+        let request = ChatCompletionRequest {
+            model: Some("test-model".into()),
+            messages: vec![ChatRequestMessage::user("hello")],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            user: None,
+            tools: None,
+            tool_choice: None,
+            search_parameters: None,
+            response_format: None,
+            reasoning_effort: None,
+            x_grok_conv_id: None,
+            x_grok_req_id: None,
+            x_grok_session_id: None,
+            x_grok_turn_idx: None,
+            x_grok_agent_id: None,
+            x_grok_deployment_id: None,
+            x_grok_user_id: None,
+            trace: None,
+        };
+        let result = client.chat_completion(request).await;
+        assert!(
+            matches!(result, Err(SamplingError::Auth(_))),
+            "mock backend 401 must surface as SamplingError::Auth, got: {result:?}"
+        );
+
+        let spans = captured.lock().unwrap();
+        let attribution = spans
+            .iter()
+            .find(|s| s.name == "auth_401_attribution")
+            .unwrap_or_else(|| panic!("expected one auth_401_attribution span; got: {spans:?}"));
+        assert_eq!(
+            attribution.fields_str.get("sent_key_prefix").map(String::as_str),
+            Some("567890abcdef"),
+            "sent fragment must be the 12-char tail of the token actually sent"
+        );
+        assert_eq!(
+            attribution.fields_str.get("current_key_prefix").map(String::as_str),
+            Some("567890abcdef"),
+            "held live token's tail"
+        );
+        assert_eq!(
+            attribution.fields_bool.get("is_stale_snapshot"),
+            Some(&false),
+            "a live-token 401 must not be classified as a stale snapshot"
         );
     }
 }
