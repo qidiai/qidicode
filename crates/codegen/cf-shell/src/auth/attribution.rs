@@ -172,7 +172,7 @@ impl Auth401AttributionCallback for ShellAttribution {
 }
 
 /// Tool-side hook: each tool client (image_gen, video_gen, web_search)
-/// in `qidi-code` emits a 401 attribution event through this
+/// in `cf-tools` emits a 401 attribution event through this
 /// trait when its HTTP request returns UNAUTHORIZED. Same shape as
 /// the sampler-side impl above; routes to the same pair of sinks.
 ///
@@ -180,7 +180,7 @@ impl Auth401AttributionCallback for ShellAttribution {
 /// same [`ConsumerKind::VideoGen`] with different op strings so the
 /// gate query can break down video-gen 401s by phase.
 impl ToolAuth401AttributionCallback for ShellAttribution {
-    fn record_401(&self, consumer: ToolConsumer, sent_bearer_prefix: Option<&str>) {
+    fn record_401(&self, consumer: ToolConsumer, sent_bearer_suffix: Option<&str>) {
         let (kind, op) = match consumer {
             ToolConsumer::ImageGen => (ConsumerKind::ImageGen, ""),
             ToolConsumer::VideoGenStart => (ConsumerKind::VideoGen, "start"),
@@ -192,7 +192,7 @@ impl ToolAuth401AttributionCallback for ShellAttribution {
             self.session_id.as_deref(),
             kind,
             op,
-            sent_bearer_prefix,
+            sent_bearer_suffix,
         );
     }
 }
@@ -275,7 +275,7 @@ fn format_consumer(kind: ConsumerKind, op: &str) -> String {
 ///
 /// Wraps [`record_auth_401`] with the design-doc `consumer` formatting
 /// (e.g., `"StorageClient.upload"`, `"FeedbackClient.submit"`).
-/// All 401 emit sites in `qidi-code` go through this helper -- the
+/// All 401 emit sites in this crate go through this helper -- the
 /// per-client `record_401_attribution` wrappers in
 /// `agent/feedback_client.rs`, `agent/session_registry_client.rs`,
 /// and `upload/storage_client.rs` each
@@ -284,11 +284,12 @@ fn format_consumer(kind: ConsumerKind, op: &str) -> String {
 /// `sent_bearer` may be either a full bearer (passed by the
 /// non-sampler call sites listed above, which read directly from the
 /// client's `user_token` / `deployment_key` snapshot) or a 12-char
-/// prefix (passed by the sampler-side
-/// [`Auth401AttributionCallback`] boundary; the sampler scrubs to a
-/// prefix before crossing the crate boundary). The truncation inside
+/// tail fragment (passed by the sampler-side and tools-side
+/// attribution-callback boundaries; both crates capture the bearer
+/// at send time and scrub to the tail before crossing the crate
+/// boundary). The truncation inside
 /// [`record_auth_401`] / `compute_attribution_payload` is idempotent
-/// for the prefix case.
+/// for the fragment case.
 pub(crate) fn record_consumer_401(
     auth_manager: &AuthManager,
     session_id: Option<&str>,
@@ -310,10 +311,11 @@ pub(crate) fn record_consumer_401(
 /// `sent_bearer` is the bearer that was sent on the wire (the
 /// `Authorization` value with `"Bearer "` already stripped, or the
 /// `x-api-key` value for Anthropic Messages backends), OR a 12-char
-/// prefix of same -- the sampler boundary always passes a prefix
-/// here, the non-sampler shell sites pass full bearers and rely on
-/// the [`compute_attribution_payload`] truncation. `None` is fine;
-/// the prefix becomes the empty string.
+/// tail fragment of same -- the sampler and tools boundaries always
+/// pass a tail fragment here, the non-sampler shell sites pass full
+/// bearers and rely on the [`compute_attribution_payload`]
+/// truncation. `None` is fine; the fragment becomes the empty
+/// string.
 ///
 /// `consumer` should be one of the canonical strings used by the
 /// per-client wrappers, e.g. `"OaiCompatClient.chat_completions_stream"`,
@@ -495,9 +497,9 @@ mod tests {
             .unwrap_or_else(|| panic!("payload missing field {key:?}: {payload:?}"))
     }
 
-    /// Live token sent + 401 with matching `current()` ->
+    /// Live token sent + 401 with matching `current_or_expired()` ->
     /// `is_stale_snapshot` must be `false`. Also assert the auxiliary
-    /// fields are set sensibly (prefix, mint age, expiry).
+    /// fields are set sensibly (fragment, mint age, expiry).
     #[test]
     fn live_token_sent_is_not_stale() {
         let (_dir, am) = empty_auth_manager();
@@ -534,8 +536,8 @@ mod tests {
         );
     }
 
-    /// Stale snapshot sent + 401 with a different (newer) `current()`
-    /// -> `is_stale_snapshot` must be `true`.
+    /// Stale snapshot sent + 401 with a different (newer)
+    /// `current_or_expired()` -> `is_stale_snapshot` must be `true`.
     #[test]
     fn stale_snapshot_is_detected() {
         let (_dir, am) = empty_auth_manager();
@@ -554,7 +556,7 @@ mod tests {
         assert_eq!(payload_field(&payload, "consumer"), "Test.stale");
     }
 
-    /// Live token sent + 401 with `current() == None` ->
+    /// Live token sent + 401 with `current_or_expired() == None` ->
     /// `is_stale_snapshot` must be `false` (no evidence of staleness).
     /// Sentinel `mint_age_seconds = -1`,
     /// `expires_at_seconds_from_now = 0`. `current_key_prefix` is JSON
@@ -1173,6 +1175,133 @@ mod tests {
             .iter()
             .find(|s| s.name == "auth_401_attribution")
             .unwrap_or_else(|| panic!("expected one auth_401_attribution span; got: {spans:?}"));
+        assert_eq!(
+            attribution.fields_str.get("sent_key_prefix").map(String::as_str),
+            Some("567890abcdef"),
+            "sent fragment must be the 12-char tail of the token actually sent"
+        );
+        assert_eq!(
+            attribution.fields_str.get("current_key_prefix").map(String::as_str),
+            Some("567890abcdef"),
+            "held live token's tail"
+        );
+        assert_eq!(
+            attribution.fields_bool.get("is_stale_snapshot"),
+            Some(&false),
+            "a live-token 401 must not be classified as a stale snapshot"
+        );
+    }
+
+    /// Cross-crate red→green acceptance test for the P1 cf-tools
+    /// chain fix (the prefix/suffix direction bug on the tools
+    /// boundary).
+    ///
+    /// Drives the real `cf_tools::WebSearchClient::search` 401
+    /// path (axum mock backend + `ApiKeyProvider`) through the
+    /// real `ShellAttribution::new_tool_callback`, then asserts
+    /// the emitted `auth_401_attribution` span classifies a
+    /// >12-char live token as NOT a stale snapshot.
+    ///
+    /// RED pre-fix: the tools boundary scrubbed the sent bearer
+    /// to its **first** 12 chars (`"live-token-1"`), while the
+    /// shell compared against the **last** 12 (`"567890abcdef"`)
+    /// -- so every bearer longer than 12 chars was misreported
+    /// as a stale snapshot (`is_stale_snapshot == true`),
+    /// defeating the telemetry split the field exists for.
+    ///
+    /// GREEN post-fix: the tools boundary scrubs to the send-time
+    /// tail fragment (`bearer_suffix`) and the shell sees
+    /// sent == current == `"567890abcdef"` -> `false`.
+    ///
+    /// Integration-gap note: as with the sampler test above, the
+    /// production wiring site (tool code constructing the client
+    /// with this callback) is config plumbing and is not exercised
+    /// here; the HTTP send -> 401 arm -> callback -> payload ->
+    /// span path is fully real.
+    #[tokio::test]
+    #[serial_test::serial(attribution_emit_count)]
+    async fn web_search_401_live_token_is_not_stale_cross_crate() {
+        use cf_tools::implementations::web_search::{
+            client::WebSearchClient, WebSearchConfig,
+        };
+        use cf_tools::types::{ApiKeyProvider, SharedApiKeyProvider};
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        #[derive(Debug)]
+        struct StaticApiKeyProvider(String);
+        impl ApiKeyProvider for StaticApiKeyProvider {
+            fn current_api_key(&self) -> Option<String> {
+                Some(self.0.clone())
+            }
+        }
+
+        let (collector, captured) = span_capture::SpanCollector::new();
+        let subscriber = tracing_subscriber::registry().with(collector);
+        let _guard = subscriber.set_default();
+
+        reset_test_emit_count();
+
+        // 401-only mock backend: every Responses API call is
+        // rejected.
+        let app = axum::Router::new().route(
+            "/responses",
+            axum::routing::post(|| async {
+                axum::http::StatusCode::UNAUTHORIZED
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock backend");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve mock backend");
+        });
+        let base_url = format!("http://{addr}");
+
+        // The same >12-char live token is held by the manager
+        // AND returned by the API key provider -- so the 401 must
+        // classify as "sent the live token and was still
+        // rejected", not stale.
+        let live = "live-token-1234567890abcdef";
+        let (_dir, am) = empty_auth_manager();
+        am.hot_swap(fresh_auth(live));
+        let am_arc = Arc::new(am);
+        let provider: SharedApiKeyProvider =
+            Arc::new(StaticApiKeyProvider(live.to_string()));
+
+        let config = WebSearchConfig::Enabled {
+            api_key: live.to_string(),
+            base_url,
+            model: "test-model".to_string(),
+            extra_headers: indexmap::IndexMap::new(),
+            alpha_test_key: None,
+        };
+        let client = WebSearchClient::new(&config, Some(provider))
+            .expect("client should build")
+            .with_attribution_callback(Some(
+                ShellAttribution::new_tool_callback(am_arc.clone(), None),
+            ));
+
+        let result = client.search("hello", None).await;
+        match &result {
+            Err(e) => assert_eq!(
+                e.kind,
+                cf_tool_runtime::ToolErrorKind::Unauthorized,
+                "mock backend 401 must surface as ToolErrorKind::Unauthorized, got: {result:?}"
+            ),
+            Ok(_) => panic!(
+                "mock backend 401 must not succeed, got: {result:?}"
+            ),
+        }
+
+        let spans = captured.lock().unwrap();
+        let attribution = spans
+            .iter()
+            .find(|s| s.name == "auth_401_attribution")
+            .unwrap_or_else(|| {
+                panic!("expected one auth_401_attribution span; got: {spans:?}")
+            });
         assert_eq!(
             attribution.fields_str.get("sent_key_prefix").map(String::as_str),
             Some("567890abcdef"),

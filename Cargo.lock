@@ -3038,6 +3038,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "base64",
+ "cf-auth",
  "cf-computer-hub-core",
  "cf-computer-hub-sdk",
  "cf-config",

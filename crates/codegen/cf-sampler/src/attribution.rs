@@ -6,7 +6,7 @@
 //! the live token from its auth source and the server still rejected
 //! it" buckets.
 //!
-//! `xai-grok-sampler` is intentionally decoupled from `qidi-code`
+//! `cf-sampler` is intentionally decoupled from `cf-shell`
 //! (no shell types, no logging crate, no auth-manager dependency). The
 //! caller wires an implementation of [`Auth401AttributionCallback`]
 //! into [`crate::SamplerConfig::attribution_callback`]; the sampler
@@ -37,8 +37,8 @@ pub use cf_auth::bearer_fragment::BEARER_SUFFIX_LEN;
 /// `SamplingClient` (chat completions, responses, messages -- each in
 /// streaming and non-streaming form). It does *not* cover image
 /// generation, video generation, web search, or embedding -- those
-/// tools live in `qidi-code`
-/// (`crates/codegen/qidi-code/src/implementations/`), have their
+/// tools live in `cf-tools`
+/// (`crates/codegen/cf-tools/src/implementations/`), have their
 /// own HTTP clients that do not flow through `SamplingClient`, and
 /// hook into the `cf_tools::ApiKeyProvider` trait rather than
 /// this enum.
@@ -77,7 +77,7 @@ impl SamplingConsumer {
 
 /// Hook invoked by [`crate::SamplingClient`] at every 401 response site.
 ///
-/// Implementations are responsible for joining `sent_bearer_prefix`
+/// Implementations are responsible for joining `sent_bearer_suffix`
 /// with whatever live credential source they own (e.g. an auth
 /// manager holding the most-recently-refreshed token) and emitting
 /// whatever attribution event makes sense for their observability

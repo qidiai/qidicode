@@ -134,12 +134,27 @@ jobs:
           # is fine.
           CARGO_PROFILE_DEV_DEBUG: "0"
 
+      # ripgrep: the cf-tools grep/glob integration tests
+      # (codex/grep_files, qidi_build grep) shell out to the
+      # real `rg` binary and silently return early when it is
+      # absent -- on this fork that meant dozens of tests
+      # "passed" without executing a single assertion. GH
+      # Windows runners do not preinstall rg; chocolatey is
+      # preinstalled on the runner image and is the fastest
+      # stable channel (the local equivalent is winget / the
+      # ToDesk-bundled rg.exe on this dev box).
+      - name: Install ripgrep (activates the rg-gated cf-tools tests)
+        run: choco install ripgrep --yes --no-progress
+
       - name: Run tests
-        # Exclusion register (CI test job, 2026-10-05 triage):
+        # Exclusion register (CI test job, 2026-10-05 triage,
+        # granularity fix 2026-10-06):
         #
-        # CI-TEST-DEBT-01  cf-pager-pty-harness (all 3 un-ignored test
-        #   binaries: plan_approval_resume, scroll_correctness_ptyctl,
-        #   scroll_matrix_curated). The harness spawns the pager inside a
+        # CI-TEST-DEBT-01  cf-pager-pty-harness's 5 PTY-bound
+        #   integration test binaries (empty_enter_send_now,
+        #   plan_approval_resume, prompt_history_durable_quit,
+        #   scroll_correctness_ptyctl, scroll_matrix_curated).
+        #   The harness spawns the pager inside a
         #   pseudo-terminal (portable-pty/ConPTY) and screen-scrapes it,
         #   but the spawned pager emits ZERO output on the runner: every
         #   cell fails with "timed out after 15-20s waiting for text:
@@ -153,6 +168,14 @@ jobs:
         #   interactive-console-capable runner before it can enter the
         #   green gate. Full evidence: qidiwork-docs/审计评审/
         #   2026-10-05-unix交叉编译缺口清除与PTY-CI侦察-验证报告.md §3.
+        #
+        #   GRANULARITY (2026-10-06): the crate-level --exclude also
+        #   killed the harness's 81 PTY-free lib unit tests (fixture
+        #   parsing, scroll-matrix math, invariant checking, env
+        #   shaping -- none spawn a PTY; verified locally: 81 passed
+        #   in 0.09s). They are restored by the dedicated --lib step
+        #   below, so this exclude now covers only the PTY-bound
+        #   integration binaries + the spawn_with_content doctest.
         run: cargo test --workspace --no-fail-fast --exclude cf-pager-pty-harness
         env:
           RUST_TEST_THREADS: "2"
@@ -174,3 +197,53 @@ jobs:
           # detection runs. (cf-pager-render's own tests are unaffected:
           # they already default to non-legacy and respect the override.)
           QIDI_FORCE_LEGACY_CONSOLE: "0"
+
+      # Restores the PTY-free half of CI-TEST-DEBT-01: the
+      # pty-harness crate's 81 lib unit tests (see the
+      # granularity note in the Run tests step). `--lib`
+      # runs exactly the unit tests and skips the 5
+      # PTY-bound integration binaries and the
+      # spawn_with_content doctest, which still need an
+      # interactive-console-capable runner.
+      - name: Run pty-harness unit tests
+        run: cargo test -p cf-pager-pty-harness --lib
+        env:
+          CARGO_PROFILE_TEST_DEBUG: "0"
+
+  test-install-sh:
+    # The bash-installer blitz (cf-update/tests/test_install_sh.rs)
+    # shells out to /bin/bash, so on the windows-latest test job
+    # above it is #[ignore]d with an explicit reason (Windows has
+    # no bash). This ubuntu job is where the blitz really runs --
+    # before the 2026-10-06 fix the suite silently skipped
+    # everywhere (its script path still pointed at the
+    # pre-rebrand qidi-code crate), so the installer had zero
+    # automated coverage.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache target
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-test-install-sh-${{ hashFiles('**/Cargo.lock') }}
+
+      # rsproxy mirror comes from the committed .cargo/config.toml.
+      - name: Run install.sh blitz
+        run: cargo test -p cf-update --test test_install_sh
