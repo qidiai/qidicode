@@ -80,6 +80,14 @@ impl Middleware for AuthRetryMiddleware {
             return Ok(resp);
         };
 
+        // Observability point for the 401-recovery path.
+        // The span is created as a creation-time signal only
+        // (matching upstream, which also never enters it): an
+        // `entered()` guard is `!Send` and cannot be held
+        // across the `.await`s of this async handler (the
+        // middleware trait requires `Send` futures), so the
+        // span does not carry the refresh+retry loop context.
+        let _retry_span = tracing::info_span!("auth.retry_401");
         let mut last_resp = resp;
         for _ in 0..self.max_retries {
             if !self.credentials.refresh_after_unauthorized().await {

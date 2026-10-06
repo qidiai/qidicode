@@ -3,10 +3,14 @@ license = "Apache-2.0"
 edition.workspace = true
 name = "cf-tools"
 version = "0.1.220-alpha.4"
-description = "Grok tools library"
+description = "cf-tools: tool implementations and shared tool plumbing for the Grok CLI"
 
 [dependencies]
 cf-version= { workspace = true }
+# 401 attribution: bearer tail fragment (BEARER_SUFFIX_LEN /
+# bearer_suffix) is defined in cf-auth and shared across the
+# cf-tools <-> cf-shell boundary.
+cf-auth = { workspace = true }
 cf-computer-hub-sdk = { workspace = true }
 cf-computer-hub-core = { workspace = true }
 cf-interjection-core = { workspace = true }

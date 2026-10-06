@@ -402,18 +402,18 @@ mod tests {
         invocations: std::sync::Mutex<Vec<(ToolConsumer, Option<String>)>>,
     }
     impl crate::attribution::Auth401AttributionCallback for CountingCallback {
-        fn record_401(&self, consumer: ToolConsumer, sent_bearer_prefix: Option<&str>) {
+        fn record_401(&self, consumer: ToolConsumer, sent_bearer_suffix: Option<&str>) {
             self.invocations
                 .lock()
                 .unwrap()
-                .push((consumer, sent_bearer_prefix.map(|s| s.to_string())));
+                .push((consumer, sent_bearer_suffix.map(|s| s.to_string())));
         }
     }
     /// `record_401_attribution` invokes the wired callback with
-    /// `ToolConsumer::WebSearch` and the truncated bearer prefix.
-    /// The full bearer never crosses the trait boundary.
+    /// `ToolConsumer::WebSearch` and the bearer's 12-char tail
+    /// fragment. The full bearer never crosses the trait boundary.
     #[test]
-    fn record_401_attribution_passes_truncated_prefix_to_callback() {
+    fn record_401_attribution_passes_bearer_tail_to_callback() {
         let cb = std::sync::Arc::new(CountingCallback::default());
         let cb_dyn: crate::attribution::SharedAttributionCallback = cb.clone();
         let config = WebSearchConfig::Enabled {
@@ -430,10 +430,10 @@ mod tests {
         let calls = cb.invocations.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, ToolConsumer::WebSearch);
-        assert_eq!(calls[0].1.as_deref(), Some("bearer-with-"));
+        assert_eq!(calls[0].1.as_deref(), Some("l-aaaaaaaaaa"));
         assert_eq!(
             calls[0].1.as_deref().map(str::len),
-            Some(crate::attribution::SENT_BEARER_PREFIX_LEN),
+            Some(crate::attribution::BEARER_SUFFIX_LEN),
         );
     }
     /// `record_401_attribution` is a no-op when no callback is wired

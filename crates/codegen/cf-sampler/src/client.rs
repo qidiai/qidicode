@@ -614,6 +614,14 @@ impl SamplingClient {
                 x_api_key_prefix = x_api_key_prefix.as_deref().unwrap_or("none"),
             );
         }
+        // Capture the credential tail BEFORE the header injector
+        // runs: the attribution fragment must describe the
+        // credential the client itself put on the wire.
+        // Injectors must not mutate credential headers
+        // (Authorization / x-api-key) -- an injector that
+        // rewrites them after this point would leave the
+        // captured fragment describing a bearer that was never
+        // sent.
         let sent_bearer = Self::sent_fragment_from_headers(&headers, &self.defaults.auth_scheme);
         if let Some(injector) = &self.header_injector {
             injector.inject(&mut headers);
@@ -2735,8 +2743,18 @@ mod tests {
         let result_a = in_flight_a.await.expect("task a not panicked");
         let result_b = in_flight_b.await.expect("task b not panicked");
         // Both requests must have failed with 401 Auth errors.
-        assert!(matches!(result_a, Err(SamplingError::Auth(_))));
-        assert!(matches!(result_b, Err(SamplingError::Auth(_))));
+        // Only the error side is interpolated: the Ok side is a
+        // `dyn Stream`, which does not implement `Debug`.
+        assert!(
+            matches!(result_a, Err(SamplingError::Auth(_))),
+            "request a must fail with 401 Auth, got: {:?}",
+            result_a.as_ref().err()
+        );
+        assert!(
+            matches!(result_b, Err(SamplingError::Auth(_))),
+            "request b must fail with 401 Auth, got: {:?}",
+            result_b.as_ref().err()
+        );
 
         let calls = cb.invocations.lock().unwrap();
         assert_eq!(calls.len(), 2, "both 401 arms must emit");
@@ -2847,6 +2865,67 @@ mod tests {
             nth(&calls, 0).1.as_deref().map(str::len),
             Some(crate::attribution::BEARER_SUFFIX_LEN),
         );
+    }
+
+    /// Parameterized value assertions for all six
+    /// `SamplingConsumer` variants: every variant must reach
+    /// the wired callback paired with the send-time captured
+    /// tail fragment -- the exact `(consumer, fragment)` value
+    /// contract each of the six UNAUTHORIZED arms threads
+    /// from `post()`. The two variants already exercised
+    /// end-to-end elsewhere (`ChatCompletionsStream` via the
+    /// acceptance + mid-flight-rotation tests, `ChatCompletions`
+    /// via the no-callback test) are included so this loop is
+    /// the single source of truth for the six-way contract.
+    #[test]
+    fn record_401_attribution_all_six_consumers_pass_captured_tail() {
+        let cb = std::sync::Arc::new(CountingCallback::default());
+        let cb_dyn: crate::attribution::SharedAttributionCallback = cb.clone();
+        let cfg = SamplerConfig {
+            api_key: Some("the-bearer-1234567890-extra-tail".to_string()),
+            api_backend: ApiBackend::ChatCompletions,
+            attribution_callback: Some(cb_dyn),
+            bearer_resolver: None,
+            ..minimal_config()
+        };
+        let client = SamplingClient::new(cfg).expect("client should build");
+        let SentRequest { sent_bearer, .. } =
+            client.post("https://example.test/v1/chat/completions");
+        let expected_tail = bearer_suffix("the-bearer-1234567890-extra-tail");
+        let variants = [
+            crate::attribution::SamplingConsumer::ChatCompletions,
+            crate::attribution::SamplingConsumer::ChatCompletionsStream,
+            crate::attribution::SamplingConsumer::Responses,
+            crate::attribution::SamplingConsumer::ResponsesStream,
+            crate::attribution::SamplingConsumer::Messages,
+            crate::attribution::SamplingConsumer::MessagesStream,
+        ];
+        for consumer in variants {
+            client.record_401_attribution(consumer, sent_bearer.as_deref());
+        }
+        let calls = cb.invocations.lock().unwrap();
+        assert_eq!(
+            calls.len(),
+            variants.len(),
+            "each of the six variants must emit exactly once"
+        );
+        for (idx, consumer) in variants.iter().enumerate() {
+            assert_eq!(
+                nth(&calls, idx).0,
+                *consumer,
+                "variant {idx} must reach the callback as its own consumer"
+            );
+            assert_eq!(
+                nth(&calls, idx).1.as_deref(),
+                Some(expected_tail),
+                "variant {idx} must thread the send-time captured tail"
+            );
+            assert_eq!(
+                nth(&calls, idx).1.as_deref().map(str::len),
+                Some(crate::attribution::BEARER_SUFFIX_LEN),
+                "variant {idx} fragment must be exactly BEARER_SUFFIX_LEN chars"
+            );
+        }
     }
 
     /// Regression test: when a bearer_resolver is wired, `post()` must

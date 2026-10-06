@@ -9354,8 +9354,22 @@ pub(crate) mod tests {
     /// item the unreachable test queue can never upload, so `unfinished == 1`
     /// is only observable if the enqueue landed before phase 2 concluded.
     /// start_paused: the 100ms producer sleep must deterministically
-    /// finish within the 1.5s drain budget (auto-advance keeps the
+    /// finish within the drain budget (auto-advance keeps the
     /// wall clock from flaking the `produced` assert under load).
+    ///
+    /// Budget rationale (3s, widened from 1.5s): only the
+    /// `tokio::time::timeout` deadlines are mocked under
+    /// `start_paused` -- `two_phase_drain` computes its phase
+    /// budgets from a real `std::time::Instant`, and the
+    /// producer's enqueue plus the queue worker's polls are
+    /// real I/O. Under CI concurrency (many test binaries in
+    /// parallel) that real-I/O portion can consume the whole
+    /// 1.5s budget, zeroing the phase-2 remainder and leaving
+    /// no yield point for the enqueue to land before the
+    /// `produced` assert. 3s gives the real-I/O portion 2x
+    /// headroom; the asserts are unchanged (the producer still
+    /// must land its artifact, and the unreachable queue still
+    /// cannot upload it, so `unfinished == 1`).
     #[tokio::test(start_paused = true)]
     async fn two_phase_drain_waits_for_producer_then_drains_queue() {
         use std::sync::atomic::Ordering;
@@ -9382,7 +9396,7 @@ pub(crate) mod tests {
         });
         let unfinished = handle
             .two_phase_drain(
-                std::time::Duration::from_millis(1_500),
+                std::time::Duration::from_millis(3_000),
                 DrainReason::Sigterm,
             )
             .await;

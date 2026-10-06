@@ -1,4 +1,5 @@
-//! Grok tools library.
+//! `cf-tools`: tool implementations and shared tool plumbing
+//! (HTTP clients, attribution hooks, registry) for the Grok CLI.
 
 pub use cf_version::VERSION;
 
@@ -41,5 +42,5 @@ pub mod util;
 pub mod versions;
 
 pub use attribution::{
-    Auth401AttributionCallback, SENT_BEARER_PREFIX_LEN, SharedAttributionCallback, ToolConsumer,
+    Auth401AttributionCallback, BEARER_SUFFIX_LEN, SharedAttributionCallback, ToolConsumer,
 };

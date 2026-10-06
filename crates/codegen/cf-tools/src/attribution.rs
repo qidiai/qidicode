@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
-/// Bearer prefix length shared across crate boundaries.
-pub const SENT_BEARER_PREFIX_LEN: usize = 12;
+/// Bearer tail length shared across crate boundaries.
+/// Single source of truth: [`cf_auth::bearer_fragment`].
+pub use cf_auth::bearer_fragment::BEARER_SUFFIX_LEN;
 
 /// Which tool endpoint produced the 401.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,70 +28,152 @@ impl ToolConsumer {
 
 /// 401 attribution callback. Shell wires this to emit telemetry.
 pub trait Auth401AttributionCallback: Send + Sync + std::fmt::Debug {
-    /// `sent_bearer_prefix` is truncated to [`SENT_BEARER_PREFIX_LEN`]
-    /// before crossing this boundary. `None` = no bearer was sent.
-    fn record_401(&self, consumer: ToolConsumer, sent_bearer_prefix: Option<&str>);
+    /// `sent_bearer_suffix` is the bearer's [`BEARER_SUFFIX_LEN`]-char
+    /// tail, scrubbed by [`emit_401`] (via
+    /// [`cf_auth::bearer_fragment::bearer_suffix`]) before crossing
+    /// this boundary. `None` = no bearer was sent.
+    fn record_401(&self, consumer: ToolConsumer, sent_bearer_suffix: Option<&str>);
 }
 
 /// Shared, cheap-to-clone alias for the attribution callback.
 pub type SharedAttributionCallback = Arc<dyn Auth401AttributionCallback>;
 
-/// Record a 401 attribution event if a callback is wired. Truncates
-/// the bearer to [`SENT_BEARER_PREFIX_LEN`] before crossing the
-/// trait boundary.
+/// Record a 401 attribution event if a callback is wired. Scrubs
+/// the bearer to its [`BEARER_SUFFIX_LEN`]-char tail before crossing
+/// the trait boundary. The shell side compares this fragment against
+/// `bearer_suffix` of the held token, so the fragment must be the
+/// tail, never the head: JWT access tokens share the same base64
+/// header prefix, so a head fragment misclassifies every >12-char
+/// bearer as a stale snapshot. The scrub is char-safe (multi-byte
+/// bearers slice on a char boundary, no panic).
 pub(crate) fn emit_401(
     callback: Option<&SharedAttributionCallback>,
     consumer: ToolConsumer,
     sent_bearer: Option<&str>,
 ) {
     if let Some(cb) = callback {
-        let prefix = sent_bearer.map(|s| truncate_to_prefix(s.to_string()));
-        cb.record_401(consumer, prefix.as_deref());
+        let suffix = sent_bearer.map(cf_auth::bearer_fragment::bearer_suffix);
+        cb.record_401(consumer, suffix);
     }
-}
-
-/// Truncate a bearer string to the first [`SENT_BEARER_PREFIX_LEN`]
-/// characters. Used by tool clients before passing the bearer across
-/// the [`Auth401AttributionCallback`] boundary.
-///
-/// Bearer tokens are ASCII (per the `Authorization` header grammar)
-/// so the byte index is always a char boundary; this function uses
-/// `String::truncate` which would otherwise panic on a non-boundary
-/// cut.
-pub(crate) fn truncate_to_prefix(mut bearer: String) -> String {
-    bearer.truncate(SENT_BEARER_PREFIX_LEN.min(bearer.len()));
-    bearer
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Records every `record_401` invocation for assertion.
+    #[derive(Debug, Default)]
+    struct RecordingCallback {
+        calls: std::sync::Mutex<Vec<(ToolConsumer, Option<String>)>>,
+    }
+
+    impl Auth401AttributionCallback for RecordingCallback {
+        fn record_401(
+            &self,
+            consumer: ToolConsumer,
+            sent_bearer_suffix: Option<&str>,
+        ) {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((consumer, sent_bearer_suffix.map(|s| s.to_string())));
+        }
+    }
+
+    /// Cross-boundary direction check: `emit_401` must hand the
+    /// callback the bearer's **tail** (last
+    /// [`BEARER_SUFFIX_LEN`] chars), not its head. The shell
+    /// side compares the fragment against `bearer_suffix` of the
+    /// held token, so a head fragment misclassifies every
+    /// >12-char bearer as a stale snapshot (JWT access tokens
+    /// share the same base64 header prefix, so the head
+    /// distinguishes nothing).
+    ///
+    /// RED pre-fix: `truncate_to_prefix` cut the first 12 chars
+    /// (`"live-token-1"`), which never equals the held token's
+    /// tail (`"567890abcdef"`).
     #[test]
-    fn truncate_to_prefix_long_string_cuts_at_12() {
+    fn emit_401_passes_bearer_tail_not_head() {
+        let cb = std::sync::Arc::new(RecordingCallback::default());
+        let cb_dyn: SharedAttributionCallback = cb.clone();
+        emit_401(
+            Some(&cb_dyn),
+            ToolConsumer::WebSearch,
+            Some("live-token-1234567890abcdef"),
+        );
+        let calls = cb.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, ToolConsumer::WebSearch);
         assert_eq!(
-            truncate_to_prefix("xai-key-aaaaaaaaaaaaaaaaaaa".to_string()),
-            "xai-key-aaaa"
+            calls[0].1.as_deref(),
+            Some("567890abcdef"),
+            "the fragment crossing the trait boundary must be the bearer's 12-char tail, not its head"
         );
     }
 
+    /// `None` bearer (fail-closed: no credential on the wire)
+    /// must cross the boundary as `None`, not as a fragment of
+    /// something else.
     #[test]
-    fn truncate_to_prefix_short_string_unchanged() {
-        assert_eq!(truncate_to_prefix("abc".to_string()), "abc");
+    fn emit_401_passes_none_when_no_bearer() {
+        let cb = std::sync::Arc::new(RecordingCallback::default());
+        let cb_dyn: SharedAttributionCallback = cb.clone();
+        emit_401(Some(&cb_dyn), ToolConsumer::ImageGen, None);
+        let calls = cb.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, None);
     }
 
+    /// A bearer no longer than the fragment length is its own
+    /// tail and must pass through unchanged.
     #[test]
-    fn truncate_to_prefix_exact_12_unchanged() {
-        assert_eq!(
-            truncate_to_prefix("123456789012".to_string()),
-            "123456789012"
+    fn emit_401_short_bearer_is_its_own_tail() {
+        let cb = std::sync::Arc::new(RecordingCallback::default());
+        let cb_dyn: SharedAttributionCallback = cb.clone();
+        emit_401(Some(&cb_dyn), ToolConsumer::VideoGenStart, Some("abc"));
+        let calls = cb.calls.lock().unwrap();
+        assert_eq!(calls[0].1.as_deref(), Some("abc"));
+    }
+
+    /// Char safety: multi-byte bearers must yield their last 12
+    /// chars sliced on char boundaries. Two probes:
+    /// (1) 13 fullwidth chars (3 bytes each) -- a byte-truncate
+    ///     at 12 lands on a boundary here but yields a garbage
+    ///     4-char fragment (RED pre-fix observed `Some("ａａａａ")`);
+    /// (2) a mixed-width sequence where byte 12 lands strictly
+    ///     inside a 4-byte emoji -- `String::truncate(12)`
+    ///     PANICS outright on such input.
+    #[test]
+    fn emit_401_non_ascii_bearer_does_not_panic() {
+        let cb = std::sync::Arc::new(RecordingCallback::default());
+        let cb_dyn: SharedAttributionCallback = cb.clone();
+        emit_401(
+            Some(&cb_dyn),
+            ToolConsumer::VideoGenPoll,
+            Some("ａａａａａａａａａａａａａ"),
         );
-        assert_eq!(truncate_to_prefix("123456789012".to_string()).len(), 12);
-    }
+        let calls = cb.calls.lock().unwrap();
+        assert_eq!(
+            calls[0].1.as_deref(),
+            Some("ａａａａａａａａａａａａ"),
+            "multi-byte bearers must be sliced on a char boundary"
+        );
+        drop(calls);
 
-    #[test]
-    fn truncate_to_prefix_empty_unchanged() {
-        assert_eq!(truncate_to_prefix(String::new()), "");
+        // 13 chars: 2 fullwidth + 2 emoji (4 bytes each) + 9
+        // fullwidth. Byte offset 12 falls inside the second
+        // emoji (bytes 10-13), so a byte-truncate panics.
+        let mixed = "ａａ😃😃ａａａａａａａａａ";
+        let cb2 = std::sync::Arc::new(RecordingCallback::default());
+        let cb2_dyn: SharedAttributionCallback = cb2.clone();
+        emit_401(Some(&cb2_dyn), ToolConsumer::VideoGenPoll, Some(mixed));
+        let calls2 = cb2.calls.lock().unwrap();
+        assert_eq!(
+            calls2[0].1.as_deref(),
+            // last 12 chars: drop the leading fullwidth char
+            Some("ａ😃😃ａａａａａａａａａ"),
+            "mixed-width bearers must be sliced on a char boundary, not a byte offset"
+        );
     }
 
     #[test]

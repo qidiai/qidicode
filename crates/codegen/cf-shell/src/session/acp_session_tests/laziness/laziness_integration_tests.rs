@@ -613,8 +613,9 @@ async fn debug_mode_fires_classifier_even_with_per_model_enable_false() {
 
 /// Dev-flag contract gate 2: the long-idle-threshold must be
 /// bypassed when `laziness_debug_log = Some(_)`. Configures a
-/// 60-second threshold and asserts the call returns within 200ms
-/// — proving the `idle_threshold = ZERO` branch was taken.
+/// 60-second threshold and asserts the call returns within the
+/// 10s ceiling at the assert below — proving the
+/// `idle_threshold = ZERO` branch was taken.
 /// Prevents a future change that drops the `if debug_mode` guard
 /// around `Duration::ZERO`.
 #[tokio::test(flavor = "current_thread")]
@@ -634,16 +635,20 @@ async fn debug_mode_bypasses_idle_wait() {
             SessionActor::maybe_fire_laziness_check(actor.clone()).await;
             let elapsed = started.elapsed();
             drop(Arc::try_unwrap(actor).ok().unwrap());
-            // 2s ceiling: the bypass path still does a chat-state
-            // MPSC roundtrip, two tool-bridge reads,
-            // `prepare_chat_completion` + JWT refresh, a TCP
-            // connect attempt against localhost, and a JSONL
-            // append — all of which can run slowly on shared CI.
-            // 2s is still 30_000× faster than the configured
-            // 60_000ms idle threshold, so the bypass signal is
-            // unambiguous.
+            // 10s ceiling (widened from 2s): the bypass path
+            // still does a chat-state MPSC roundtrip, two
+            // tool-bridge reads, `prepare_chat_completion` +
+            // JWT refresh, a TCP connect attempt against
+            // localhost, and a JSONL append — all of which can
+            // run slowly on shared CI (observed: >2s when a
+            // local service answered on port 80). 10s is 5x
+            // headroom over the failed 2s ceiling and still
+            // 6x faster than the configured 60_000ms idle
+            // threshold, so the bypass signal stays
+            // unambiguous: a non-bypassed path would await the
+            // full 60s and fail this assert either way.
             assert!(
-                elapsed < std::time::Duration::from_millis(2000),
+                elapsed < std::time::Duration::from_millis(10_000),
                 "idle threshold must be bypassed in debug mode (took {elapsed:?})",
             );
             // Sanity: the classifier did reach the sampler and
