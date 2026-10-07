@@ -18,7 +18,10 @@
 //! if let Some(report) = cf_crash_handler::check_previous_crash(&crash_dir) {
 //!     eprintln!("Application crashed during your last session.");
 //!     eprintln!("  Signal: {}", report.signal_name);
-//!     eprintln!("  Report: {}", report.report_path.display());
+//!     match &report.report_path {
+//!         Some(p) => eprintln!("  Report: {}", p.display()),
+//!         None => eprintln!("  Report: <unavailable>"),
+//!     }
 //! }
 //!
 //! cf_crash_handler::install(cf_crash_handler::CrashHandlerConfig {
