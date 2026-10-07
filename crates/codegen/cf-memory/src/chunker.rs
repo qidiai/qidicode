@@ -349,6 +349,30 @@ mod tests {
         MemoryIndexConfig::default()
     }
 
+    /// Regression for the dead-loop guard added after the 2026-10-06 audit
+    /// (F-A1/O-1): with `limit < lead-char UTF-8 width` the boundary walk
+    /// must terminate by advancing one full character, never spin forever,
+    /// and the pieces must reconstruct the input losslessly. Exercises the
+    /// guard branch directly — pre-fix this input hung until timeout.
+    #[test]
+    fn split_oversized_line_multibyte_lead_never_spins() {
+        for limit in [0usize, 1, 2, 3, 4] {
+            for line in ["你好世界", "ééé", "😀😀😀", "aé你😀b"] {
+                let pieces = split_oversized_line(line, limit);
+                let joined: String = pieces.concat();
+                assert_eq!(
+                    joined, line,
+                    "limit={limit} line={line:?}: pieces must reconstruct the input"
+                );
+                assert!(
+                    pieces.iter().all(|p| !p.is_empty()),
+                    "limit={limit} line={line:?}: no empty pieces allowed"
+                );
+            }
+        }
+    }
+
+
     #[test]
     fn test_chunk_hash_deterministic() {
         let h1 = chunk_hash("hello world");
