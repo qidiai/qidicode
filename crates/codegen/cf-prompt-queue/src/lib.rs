@@ -1,4 +1,4 @@
-//! Shared prompt-queue wire types for qidi-code and qidi-code.
+//! Shared prompt-queue wire types for cf-shell and cf-pager.
 
 mod types;
 
