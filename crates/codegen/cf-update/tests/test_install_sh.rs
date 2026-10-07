@@ -141,14 +141,15 @@ fn assert_active_grok_runs(home: &Path) {
     assert!(ok, "active grok must run: {}", resolved.display());
 }
 
-/// Run the real installer in an isolated home. `GROK_BIN_DIR` points
+/// Run the real installer in an isolated home. `QIDI_BIN_DIR` points
 /// the installer at `$HOME/.qidi/bin` (exercising the env override and
 /// the absolute-symlink branch, since the hardcoded `DOWNLOAD_DIR`
-/// `$HOME/.grok/downloads` then has a different dirname); `GROK_CHANNEL`
+/// `$HOME/.grok/downloads` then has a different dirname); `QIDI_CHANNEL`
 /// pins the channel. These are the two knobs the blitz pins —
-/// `install.sh` also reads `GROK_PROXY_URL` (:300), which the
-/// blitz leaves unset. The old `QIDI_*` names were silently ignored
-/// (install.sh reads only `GROK_*`, :157/:161), another
+/// `install.sh` also reads `QIDI_PROXY_URL` (:300), which the
+/// blitz leaves unset. The knobs were renamed `GROK_*` → `QIDI_*` in
+/// the cf rebrand; the pre-rebrand `QIDI_*` names were once silently
+/// ignored (install.sh then read only `GROK_*`, :157/:161), another
 /// defect the silent skip hid.
 #[cfg(unix)]
 fn run_installer(install_sh: &Path, home: &Path, fakebin: &Path, mode: &str, shell: &str) -> bool {
@@ -160,8 +161,8 @@ fn run_installer(install_sh: &Path, home: &Path, fakebin: &Path, mode: &str, she
         .env("HOME", home)
         .env("PATH", path_env)
         .env("SHELL", shell)
-        .env("GROK_BIN_DIR", home.join(".qidi").join("bin"))
-        .env("GROK_CHANNEL", "stable")
+        .env("QIDI_BIN_DIR", home.join(".qidi").join("bin"))
+        .env("QIDI_CHANNEL", "stable")
         .env("FAKE_MODE", mode)
         .status()
         .expect("spawn bash install.sh");

@@ -335,6 +335,115 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
         })
         .await;
 }
+/// A 401 from the idle-resume model-metadata fetch must be
+/// attributed to the send-time bearer — the credential the auth
+/// middleware stamped when the request went out — not to the
+/// pre-auth `get_credentials` snapshot the chat state holds (the
+/// pre-fix attribution source). The two differ on purpose here:
+/// the snapshot carries `pre-auth-snapshot-key` while the
+/// `AuthManager` the middleware stamps from (post-`am.auth()`)
+/// carries `idle-resume-live-token`. The mock captures the wire
+/// `Authorization` header, which is the generation the
+/// attribution must pin.
+#[tokio::test(flavor = "current_thread")]
+async fn test_idle_resume_401_attribution_pins_send_time_bearer() {
+    use axum::routing::get;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let captured = Arc::new(parking_lot::Mutex::new(None::<String>));
+            let captured_for_handler = captured.clone();
+            let app = axum::Router::new().route(
+                "/v1/models-v2",
+                get(move |headers: axum::http::HeaderMap| {
+                    let captured = captured_for_handler.clone();
+                    async move {
+                        if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
+                            *captured.lock() = Some(auth.to_str().unwrap_or("").to_owned());
+                        }
+                        axum::http::StatusCode::UNAUTHORIZED
+                    }
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let mock_url = format!("http://{}/v1", addr);
+            tokio::task::spawn_local(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let (gateway_tx, _) = mpsc::unbounded_channel::<cf_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
+            let mut actor =
+                create_test_actor(50_000, 200_000, 85, gateway_tx, persistence_tx).await;
+            // Session-based method so the refresh path runs at all.
+            actor.auth_method_id = test_auth_method_id("cached_token");
+            // Replace the harness chat state with one pointed at the
+            // mock, carrying a pre-auth credential snapshot that
+            // deliberately differs from the AuthManager token below.
+            let (chat_event_tx, _) = tokio::sync::mpsc::unbounded_channel();
+            let chat_state_handle = cf_chat_state::ChatStateActor::spawn(
+                vec![],
+                cf_sampling_types::SamplingConfig {
+                    base_url: mock_url,
+                    model: "test-model".to_string(),
+                    max_completion_tokens: Some(8192),
+                    temperature: None,
+                    top_p: None,
+                    api_backend: Default::default(),
+                    extra_headers: Default::default(),
+                    context_window: std::num::NonZeroU64::new(200_000).unwrap(),
+                    reasoning_effort: None,
+                    stream_tool_calls: None,
+                },
+                Box::new(cf_chat_state::NullChatPersistence),
+                chat_event_tx,
+                tokio_util::sync::CancellationToken::new(),
+            );
+            chat_state_handle.update_credentials(cf_chat_state::types::Credentials {
+                api_key: Some("pre-auth-snapshot-key".to_string()),
+                auth_type: Default::default(),
+                alpha_test_key: None,
+                client_version: None,
+            });
+            actor.chat_state_handle = chat_state_handle;
+            let dir = tempfile::tempdir().unwrap();
+            let am = std::sync::Arc::new(crate::auth::AuthManager::new(
+                dir.path(),
+                crate::auth::GrokComConfig::default(),
+            ));
+            am.hot_swap(crate::auth::GrokAuth {
+                key: "idle-resume-live-token".into(),
+                auth_mode: crate::auth::AuthMode::ApiKey,
+                create_time: chrono::Utc::now(),
+                user_id: "user-42".into(),
+                expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+                ..crate::auth::GrokAuth::test_default()
+            });
+            std::mem::forget(dir);
+            actor.auth_manager = Some(am);
+            let eleven_minutes_ago_ms =
+                chrono::Utc::now().timestamp_millis() - (11 * 60 * 1000);
+            actor
+                .last_api_request_at
+                .store(eleven_minutes_ago_ms, std::sync::atomic::Ordering::Relaxed);
+            actor.maybe_refresh_model_metadata_on_resume().await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let sent = captured.lock().clone().expect("server saw the request");
+            assert_eq!(
+                sent, "Bearer idle-resume-live-token",
+                "wire bearer must be the AuthManager token the middleware stamped (the 401 attribution source), not the pre-auth chat-state snapshot"
+            );
+            // The 401 leaves the sampling config untouched.
+            let cfg_after = actor.chat_state_handle.get_sampling_config().await.unwrap();
+            assert_eq!(
+                cfg_after.context_window,
+                std::num::NonZeroU64::new(200_000).unwrap()
+            );
+            assert_eq!(cfg_after.max_completion_tokens, Some(8192));
+        })
+        .await;
+}
 /// Verify `maybe_refresh_model_metadata_on_resume` is a no-op when idle < 10 min.
 #[tokio::test(flavor = "current_thread")]
 async fn test_idle_resume_noop_when_not_idle_enough() {

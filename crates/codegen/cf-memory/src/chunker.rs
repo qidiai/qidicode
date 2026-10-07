@@ -152,7 +152,7 @@ fn flush_accumulated(
         start_line: *current_start,
         end_line: flush_end_line,
     });
-    *current_text = if overlap_chars > 0 {
+    let overlap_tail = if overlap_chars > 0 {
         let tail: String = flushed
             .chars()
             .rev()
@@ -161,11 +161,31 @@ fn flush_accumulated(
             .into_iter()
             .rev()
             .collect();
-        tail
+        Some(tail)
     } else {
-        String::new()
+        None
     };
-    *current_start = flush_end_line + 1;
+    // The overlap tail physically belongs to the just-flushed lines (its
+    // last char is on line `flush_end_line - 1` at the latest), so the
+    // next chunk's first character is NOT on the first new line
+    // (`flush_end_line + 1`) as a naive `current_start` advance would
+    // claim. Back-annotate: with k newlines inside the tail it spans
+    // k+1 source lines, so it starts on line `flush_end_line - 1 - k`.
+    // The next chunk's `start_line` becomes that line — truthful for its
+    // first character (the overlap lead-in), and that chunk's `end_line`
+    // then correctly brackets the full overlapped span. (Approximation:
+    // trailing blank lines trimmed off `flushed` can only make the true
+    // start earlier; every flush site fires on a blank line directly
+    // after content, so the flushed text ends on a content line and the
+    // computation is exact in practice.)
+    *current_start = match &overlap_tail {
+        Some(tail) => {
+            let tail_newlines = tail.chars().filter(|&c| c == '\n').count();
+            flush_end_line.saturating_sub(tail_newlines + 1)
+        }
+        None => flush_end_line + 1,
+    };
+    *current_text = overlap_tail.unwrap_or_default();
     *line_offset = flush_end_line - section_start_line + 1;
 }
 

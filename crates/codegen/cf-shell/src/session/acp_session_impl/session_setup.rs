@@ -361,7 +361,6 @@ impl SessionActor {
             threshold_secs = Self::IDLE_REFRESH_THRESHOLD_SECS,
             "Session resumed after idle — refreshing model metadata from cli-chat-proxy"
         );
-        let creds = self.chat_state_handle.get_credentials().await;
         let Some(ref am) = self.auth_manager else {
             tracing::debug!("No auth manager available for model metadata refresh");
             return;
@@ -398,20 +397,35 @@ impl SessionActor {
                 crate::http::process_client_mode(),
             )
             .timeout(std::time::Duration::from_secs(5));
-        let response = match request.send().await {
-            Ok(r) => r,
+        let req = match request.build() {
+            Ok(req) => req,
             Err(e) => {
-                tracing::warn!(error = % e, "Failed to fetch models for idle refresh");
+                tracing::warn!(error = % e, "Failed to build models request for idle refresh");
                 return;
             }
         };
+        let (response, sent_bearer) =
+            match cf_auth::execute_with_stamp(&middleware_client, req).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(error = % e, "Failed to fetch models for idle refresh");
+                    return;
+                }
+            };
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            // Attribute the send-time stamped bearer (the credential
+            // that actually went on the wire), not a pre-auth
+            // `get_credentials` snapshot: `am.auth()` above may have
+            // refreshed the token after any such snapshot was taken,
+            // and the middleware stamps the live one. Re-reading a
+            // snapshot here would attribute a stale credential on
+            // every post-refresh 401.
             crate::auth::attribution::record_consumer_401(
                 am,
                 None,
                 crate::auth::attribution::ConsumerKind::IdleResumeModelRefresh,
                 "",
-                creds.api_key.as_deref(),
+                sent_bearer.as_ref().map(|s| s.0.as_str()),
             );
         }
         let result = if !response.status().is_success() {

@@ -236,7 +236,10 @@ fn sigbus_produces_valid_crash_blob() {
         cf_crash_handler::check_previous_crash(tmp.path()).expect("should produce a crash report");
     assert!(report.signal_name.contains("SIGBUS"));
     assert_eq!(report.app_version, "0.0.0-test");
-    assert!(report.report_path.exists(), "report file should be written");
+    assert!(
+        report.report_path.as_ref().is_some_and(|p| p.exists()),
+        "report file should be written"
+    );
 
     // Crash blob should be consumed (deleted).
     assert!(

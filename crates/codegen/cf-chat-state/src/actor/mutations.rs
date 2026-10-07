@@ -6,7 +6,6 @@ use cf_sampling_types::{
 };
 
 use super::ChatStateActor;
-use super::request_builder::is_hard_cleared;
 use crate::events::ChatStateEvent;
 use crate::types::ChatStateSnapshot;
 

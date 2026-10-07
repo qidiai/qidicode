@@ -167,6 +167,15 @@ pub(crate) fn max_watch_budget() -> usize {
         .unwrap_or(DEFAULT_MAX_WATCHES)
 }
 
+/// Bounded `.gitignore` cache (keyed by gitignore path, valued by
+/// the mtime it was loaded at — a mismatched mtime is a miss and
+/// reloads). The cap bounds memory on very deep trees: at capacity
+/// the entry with the oldest cached mtime is dropped. Stale entries
+/// are useless anyway (their mtime no longer matches, so they
+/// reload on the next hit), which makes oldest-mtime eviction a
+/// cheap stand-in for true LRU without access-order bookkeeping.
+const MAX_GITIGNORE_CACHE_ENTRIES: usize = 1024;
+
 #[derive(Default)]
 struct GitignoreCache {
     cache: HashMap<PathBuf, (SystemTime, Gitignore)>,
@@ -227,6 +236,18 @@ impl GitignoreCache {
         let mut builder = GitignoreBuilder::new(root);
         let _ = builder.add(gitignore_path);
         let gitignore = builder.build().unwrap_or_else(|_| Gitignore::empty());
+        if self.cache.len() >= MAX_GITIGNORE_CACHE_ENTRIES {
+            // See `MAX_GITIGNORE_CACHE_ENTRIES`: evict the
+            // oldest-mtime entry to make room.
+            if let Some(oldest) = self
+                .cache
+                .iter()
+                .min_by_key(|(_, (cached_mtime, _))| *cached_mtime)
+                .map(|(k, _)| k.clone())
+            {
+                self.cache.remove(&oldest);
+            }
+        }
         self.cache.insert(key.clone(), (mtime, gitignore));
         &self.cache[&key].1
     }
@@ -259,6 +280,17 @@ fn merge_events(events: impl IntoIterator<Item = DebouncedEvent>) -> Vec<RawFsEv
                     (_, FsEventKind::Removed) => *existing = FsEventKind::Removed,
                     (FsEventKind::Created, FsEventKind::Modified) => {}
                     (FsEventKind::Modified, FsEventKind::Created) => {
+                        *existing = FsEventKind::Created
+                    }
+                    // A recreate after a remove ends the window
+                    // with the path present on disk: the newer
+                    // structural event wins, same rule as
+                    // Modified+Created above. Without this arm
+                    // the fold kept `Removed` and consumers
+                    // dropped a file that actually exists
+                    // (create→remove→create inside one debounce
+                    // window).
+                    (FsEventKind::Removed, FsEventKind::Created) => {
                         *existing = FsEventKind::Created
                     }
                     _ => {}
@@ -437,11 +469,13 @@ fn event_triggers_reconcile(kind: FsEventKind, paths: &[PathBuf], root: &Path) -
 ///
 /// Classified primarily by **on-disk state**, because backends report
 /// structure ambiguously: FSEvents can coalesce a subtree removal into
-/// `Modified` on the (now-vanished) parent, [`merge_events`] folds a
-/// remove+recreate into `Removed`, and renames arrive as `From`/`To`/`Both`
-/// shapes under `NoCache`. A path that is a directory right now (lstat;
-/// symlinks excluded) is an add candidate; anything else (missing, file,
-/// symlink) is a prune candidate.
+/// `Modified` on the (now-vanished) parent, and renames arrive as
+/// `From`/`To`/`Both` shapes under `NoCache`. (A remove+recreate
+/// inside one window folds to `Created` — the recreate wins — so the
+/// state check exists for the remaining ambiguities, not that one.)
+/// A path that is a directory right now (lstat; symlinks excluded) is
+/// an add candidate; anything else (missing, file, symlink) is a
+/// prune candidate.
 ///
 /// The event *kind* contributes one thing state can't: a **structural** event
 /// (create/remove/rename) on a still-existing dir may be a delete+recreate
@@ -2657,6 +2691,70 @@ mod tests {
                 path_kinds.get(&PathBuf::from("/test/file.txt")),
                 Some(&FsEventKind::Created),
                 "Modify+Create should become Create"
+            );
+        }
+
+        #[test]
+        fn test_merge_create_remove_create_keeps_recreate() {
+            // create→remove→create inside one debounce window: the
+            // file exists on disk when the window closes, so the
+            // fold must surface Created — not the intermediate
+            // Removed, which would make consumers drop a live file.
+            let events = vec![
+                make_debounced_event(
+                    EventKind::Create(CreateKind::File),
+                    vec![PathBuf::from("/test/file.txt")],
+                ),
+                make_debounced_event(
+                    EventKind::Remove(RemoveKind::File),
+                    vec![PathBuf::from("/test/file.txt")],
+                ),
+                make_debounced_event(
+                    EventKind::Create(CreateKind::File),
+                    vec![PathBuf::from("/test/file.txt")],
+                ),
+            ];
+
+            let merged = merge_events(events);
+
+            let path_kinds: std::collections::HashMap<_, _> = merged
+                .iter()
+                .flat_map(|e| e.paths.iter().map(move |p| (p.clone(), e.kind)))
+                .collect();
+
+            assert_eq!(
+                path_kinds.get(&PathBuf::from("/test/file.txt")),
+                Some(&FsEventKind::Created),
+                "create→remove→create must keep the final Created"
+            );
+        }
+
+        #[test]
+        fn test_merge_remove_then_create_becomes_create() {
+            // Bare remove+recreate: the newer structural event
+            // wins, same as Modified+Create.
+            let events = vec![
+                make_debounced_event(
+                    EventKind::Remove(RemoveKind::File),
+                    vec![PathBuf::from("/test/file.txt")],
+                ),
+                make_debounced_event(
+                    EventKind::Create(CreateKind::File),
+                    vec![PathBuf::from("/test/file.txt")],
+                ),
+            ];
+
+            let merged = merge_events(events);
+
+            let path_kinds: std::collections::HashMap<_, _> = merged
+                .iter()
+                .flat_map(|e| e.paths.iter().map(move |p| (p.clone(), e.kind)))
+                .collect();
+
+            assert_eq!(
+                path_kinds.get(&PathBuf::from("/test/file.txt")),
+                Some(&FsEventKind::Created),
+                "Remove+Create should become Create"
             );
         }
 

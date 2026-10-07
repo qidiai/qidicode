@@ -369,6 +369,10 @@ async fn run_browser_auth_flow(
     //    If the user then completes the browser flow before another process
     //    writes new tokens, `exchange_code_for_token` would use the clobbered
     //    config and the server would reject with `invalid_grant: Invalid redirect_uri`.
+    //    This prohibition applies only *while waiting*: once the poll hits, the
+    //    wait is over (the callback server is aborted, no exchange will run), so
+    //    the hit branch performs exactly that reload — see the `poll_store` arm
+    //    of the `select!` below.
     let parsed_server_url = match url::Url::parse(server_url) {
         Ok(u) => Some(u),
         Err(e) => {
@@ -426,6 +430,27 @@ async fn run_browser_auth_flow(
         }
         _ = poll_store => {
             callback_server.abort();
+            // Another flow wrote fresh tokens. Adopt the stored
+            // client config now: the wait is over (callback server
+            // aborted, no exchange will run), so the client-config
+            // clobber `initialize_from_store` performs (see the
+            // poll comment above) can no longer break our own
+            // `exchange_code_for_token` — and the stored client_id
+            // is the one the fresh tokens were actually issued to,
+            // which keeps later `refresh_token` grants paired with
+            // the right client. The tokens themselves need no
+            // separate reload: rmcp's `get_credentials` reads the
+            // credential store live, so every subsequent request
+            // already sees the fresh token.
+            {
+                let mut mgr = auth_manager.lock().await;
+                if let Ok(true) = mgr.initialize_from_store().await {
+                    tracing::info!(
+                        server = server_name,
+                        "Loaded stored client config for fresh tokens from another auth flow"
+                    );
+                }
+            }
             tracing::info!(
                 server = server_name,
                 "Fresh tokens detected on disk from another auth flow; skipping callback wait"

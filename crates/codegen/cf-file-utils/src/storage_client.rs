@@ -428,9 +428,6 @@ pub struct StorageClient {
     /// can record auth-attribution telemetry. Shell installs a bridge here;
     /// bins/tests typically leave it `None`.
     attribution: Option<Arc<dyn Auth401AttributionCallback>>,
-    /// Credential provider used to snapshot the bearer prefix at 401 sites
-    /// for attribution telemetry.
-    credentials: Arc<dyn AuthCredentialProvider>,
 
     /// Client identity forwarded to cli-chat-proxy (for logging + metrics).
     /// Set via `with_client_identity` / `with_client_mode`.
@@ -482,7 +479,6 @@ impl StorageClient {
             base_url: proxy_base_url.to_owned(),
             retry_config: RetryConfig::default(),
             attribution: None,
-            credentials,
             client_version: None,
             client_identifier: None,
             client_mode: None,
@@ -619,6 +615,22 @@ impl StorageClient {
             .context("Failed to parse upload limits response")
     }
 
+    /// Send `request` through the auth-retry middleware, returning the
+    /// response plus the bearer tail the middleware stamped at send
+    /// time (see [`cf_auth::execute_with_stamp`]).
+    async fn send_stamped(
+        &self,
+        request: reqwest_middleware::RequestBuilder,
+    ) -> reqwest_middleware::Result<(
+        reqwest::Response,
+        Option<cf_auth::StampedBearerSuffix>,
+    )> {
+        let req = request
+            .build()
+            .map_err(reqwest_middleware::Error::Reqwest)?;
+        cf_auth::execute_with_stamp(&self.http_client, req).await
+    }
+
     /// Fire the attribution callback if installed.
     ///
     /// `operation` is the consumer-side op *suffix* (e.g. `"check_exists"`,
@@ -627,13 +639,16 @@ impl StorageClient {
     /// `"StorageClient."` to produce the final consumer string in analytics
     /// events (e.g. `"StorageClient.check_exists"`).
     ///
-    /// Reads the bearer from the credential provider's current snapshot
-    /// (not the exact wire bearer — a refresh may have occurred between
-    /// send and 401 response, though in practice this is rare).
-    fn fire_401_attribution(&self, operation: &str) {
+    /// `sent_bearer` is the bearer tail captured at send time by the
+    /// auth middleware ([`cf_auth::StampedBearerSuffix`]) — the
+    /// credential that actually went on the wire. It is deliberately
+    /// NOT re-snapshotted from the credential provider here: a
+    /// re-snapshot at 401 time could read a post-refresh token (the
+    /// 401 itself may have triggered the refresh), which would report
+    /// a fresh credential and defeat the stale-snapshot diagnostic.
+    fn fire_401_attribution(&self, operation: &str, sent_bearer: Option<&str>) {
         if let Some(ref cb) = self.attribution {
-            let bearer_prefix = self.credentials.snapshot().token.as_deref().map(|s| s.to_string());
-            cb.record_401(operation, bearer_prefix.as_deref());
+            cb.record_401(operation, sent_bearer);
         }
     }
 
@@ -648,8 +663,8 @@ impl StorageClient {
             .add_common_headers(self.http_client.get(&url))
             .header("X-Storage-Path", path);
 
-        match request.send().await {
-            Ok(resp) if resp.status().is_success() => {
+        match self.send_stamped(request).await {
+            Ok((resp, _)) if resp.status().is_success() => {
                 // Defer the Success record until after the body
                 // parses — a 2xx with an unparseable body returns
                 // `ProbeFailed` to the caller, so counting it as
@@ -666,19 +681,21 @@ impl StorageClient {
                     }
                 }
             }
-            Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
-                self.fire_401_attribution("check_exists");
+            Ok((resp, sent_bearer)) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                self.fire_401_attribution("check_exists", sent_bearer.as_ref().map(|s| s.0.as_str()));
                 self.breaker.record(Outcome::Failure);
                 ExistsResult::Unauthorized
             }
-            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => ExistsResult::NotFound,
+            Ok((resp, _)) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
+                ExistsResult::NotFound
+            }
             // 403 fires attribution but, per the breaker contract, does
             // NOT count toward the 401 counter.
-            Ok(resp) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
-                self.fire_401_attribution("check_exists");
+            Ok((resp, sent_bearer)) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
+                self.fire_401_attribution("check_exists", sent_bearer.as_ref().map(|s| s.0.as_str()));
                 ExistsResult::Unauthorized
             }
-            Ok(resp) => {
+            Ok((resp, _)) => {
                 tracing::warn!("check_exists returned {}", resp.status());
                 ExistsResult::ProbeFailed
             }
@@ -719,19 +736,21 @@ impl StorageClient {
             .add_common_headers(self.http_client.post(&url))
             .json(&Request { paths: paths_ref });
 
-        match request.send().await {
-            Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
-                self.fire_401_attribution("batch_check_exists");
+        match self.send_stamped(request).await {
+            Ok((resp, sent_bearer)) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                self.fire_401_attribution("batch_check_exists", sent_bearer.as_ref().map(|s| s.0.as_str()));
                 self.breaker.record(Outcome::Failure);
                 ExistsResult::Unauthorized
             }
-            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => ExistsResult::NotFound,
+            Ok((resp, _)) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
+                ExistsResult::NotFound
+            }
             // 403 fires attribution; does NOT count toward the breaker.
-            Ok(resp) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
-                self.fire_401_attribution("batch_check_exists");
+            Ok((resp, sent_bearer)) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
+                self.fire_401_attribution("batch_check_exists", sent_bearer.as_ref().map(|s| s.0.as_str()));
                 ExistsResult::Unauthorized
             }
-            Ok(resp) if resp.status().is_success() => {
+            Ok((resp, _)) if resp.status().is_success() => {
                 // Defer the Success record until after parse — see
                 // the matching comment in `check_exists`. A 2xx
                 // with an unparseable body returns `ProbeFailed`,
@@ -749,7 +768,7 @@ impl StorageClient {
                     }
                 }
             }
-            Ok(resp) => {
+            Ok((resp, _)) => {
                 tracing::warn!("batch_exists returned {}", resp.status());
                 ExistsResult::ProbeFailed
             }
@@ -801,20 +820,20 @@ impl StorageClient {
                 .add_common_headers(self.http_client.post(&url))
                 .multipart(form);
 
-            match request.send().await {
-                Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
-                    self.fire_401_attribution("batch_upload");
+            match self.send_stamped(request).await {
+                Ok((resp, sent_bearer)) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                    self.fire_401_attribution("batch_upload", sent_bearer.as_ref().map(|s| s.0.as_str()));
                     self.breaker.record(Outcome::Failure);
                     return None;
                 }
-                Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => return None,
-                Ok(resp) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
+                Ok((resp, _)) if resp.status() == reqwest::StatusCode::NOT_FOUND => return None,
+                Ok((resp, _)) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
                     tracing::debug!("batch_upload rejected (403), skipping");
                     return None;
                 }
                 // 422: server detected the body was stripped in transit
                 // (Content-Length: 0). Retry with exponential backoff.
-                Ok(resp) if resp.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
+                Ok((resp, _)) if resp.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
                     if attempt < self.retry_config.max_retries {
                         wait_for_network_retry(
                             &self.retry_config,
@@ -831,7 +850,7 @@ impl StorageClient {
                     );
                     return None;
                 }
-                Ok(resp) if resp.status().is_success() => {
+                Ok((resp, _)) if resp.status().is_success() => {
                     self.breaker.record(Outcome::Success);
                     return match resp
                         .json::<prod_mc_cli_chat_proxy_types::BatchUploadResponse>()
@@ -844,7 +863,7 @@ impl StorageClient {
                         }
                     };
                 }
-                Ok(resp) => {
+                Ok((resp, _)) => {
                     let check = ResponseCheck::from_response(resp, operation).await;
                     if check.is_retryable && attempt < self.retry_config.max_retries {
                         check.wait_for_retry(&self.retry_config, attempt).await;
@@ -947,18 +966,18 @@ impl StorageClient {
                 // need it intact for retries.
                 .body(compressed.clone());
 
-            match request.send().await {
-                Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
-                    self.fire_401_attribution("batch_upload_json");
+            match self.send_stamped(request).await {
+                Ok((resp, sent_bearer)) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                    self.fire_401_attribution("batch_upload_json", sent_bearer.as_ref().map(|s| s.0.as_str()));
                     self.breaker.record(Outcome::Failure);
                     return None;
                 }
-                Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => return None,
-                Ok(resp) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
+                Ok((resp, _)) if resp.status() == reqwest::StatusCode::NOT_FOUND => return None,
+                Ok((resp, _)) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
                     tracing::debug!("batch_upload_json rejected (403), skipping");
                     return None;
                 }
-                Ok(resp) if resp.status().is_success() => {
+                Ok((resp, _)) if resp.status().is_success() => {
                     self.breaker.record(Outcome::Success);
                     return match resp
                         .json::<prod_mc_cli_chat_proxy_types::BatchUploadResponse>()
@@ -971,7 +990,7 @@ impl StorageClient {
                         }
                     };
                 }
-                Ok(resp) => {
+                Ok((resp, _)) => {
                     let check = ResponseCheck::from_response(resp, operation).await;
                     if check.is_retryable && attempt < self.retry_config.max_retries {
                         check.wait_for_retry(&self.retry_config, attempt).await;
@@ -1182,16 +1201,16 @@ impl StorageClient {
                     .header("X-Storage-Path", path),
             );
 
-            match request.body(content.clone()).send().await {
-                Ok(response) if response.status().is_success() => {
+            match self.send_stamped(request.body(content.clone())).await {
+                Ok((response, _)) if response.status().is_success() => {
                     self.breaker.record(Outcome::Success);
                     return response
                         .json()
                         .await
                         .map_err(|e| anyhow::anyhow!("Failed to parse upload response: {}", e));
                 }
-                Ok(response) if response.status() == reqwest::StatusCode::UNAUTHORIZED => {
-                    self.fire_401_attribution("upload");
+                Ok((response, sent_bearer)) if response.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                    self.fire_401_attribution("upload", sent_bearer.as_ref().map(|s| s.0.as_str()));
                     self.breaker.record(Outcome::Failure);
                     return Err(HttpUploadError {
                         status_code: 401,
@@ -1199,7 +1218,7 @@ impl StorageClient {
                     }
                     .into());
                 }
-                Ok(response) if response.status() == reqwest::StatusCode::FORBIDDEN => {
+                Ok((response, _)) if response.status() == reqwest::StatusCode::FORBIDDEN => {
                     let body = response.text().await.unwrap_or_default();
                     tracing::warn!("storage upload rejected (403): {body}");
                     return Err(HttpUploadError {
@@ -1208,7 +1227,7 @@ impl StorageClient {
                     }
                     .into());
                 }
-                Ok(response) => {
+                Ok((response, _)) => {
                     let check = ResponseCheck::from_response(response, &operation).await;
                     if check.is_retryable && attempt < self.retry_config.max_retries {
                         check.wait_for_retry(&self.retry_config, attempt).await;
@@ -1306,16 +1325,16 @@ impl StorageClient {
                     .header("X-Storage-Path", dest_path),
             );
 
-            match request.body(body).send().await {
-                Ok(response) if response.status().is_success() => {
+            match self.send_stamped(request.body(body)).await {
+                Ok((response, _)) if response.status().is_success() => {
                     self.breaker.record(Outcome::Success);
                     return response
                         .json()
                         .await
                         .map_err(|e| anyhow::anyhow!("Failed to parse upload response: {}", e));
                 }
-                Ok(response) if response.status() == reqwest::StatusCode::UNAUTHORIZED => {
-                    self.fire_401_attribution("upload_file");
+                Ok((response, sent_bearer)) if response.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                    self.fire_401_attribution("upload_file", sent_bearer.as_ref().map(|s| s.0.as_str()));
                     self.breaker.record(Outcome::Failure);
                     return Err(HttpUploadError {
                         status_code: 401,
@@ -1323,7 +1342,7 @@ impl StorageClient {
                     }
                     .into());
                 }
-                Ok(response) if response.status() == reqwest::StatusCode::FORBIDDEN => {
+                Ok((response, _)) if response.status() == reqwest::StatusCode::FORBIDDEN => {
                     let body = response.text().await.unwrap_or_default();
                     tracing::warn!("storage upload_file rejected (403): {body}");
                     return Err(HttpUploadError {
@@ -1332,7 +1351,7 @@ impl StorageClient {
                     }
                     .into());
                 }
-                Ok(response) => {
+                Ok((response, _)) => {
                     let check = ResponseCheck::from_response(response, &operation).await;
                     if check.is_retryable && attempt < self.retry_config.max_retries {
                         check.wait_for_retry(&self.retry_config, attempt).await;
@@ -1403,15 +1422,14 @@ impl StorageClient {
             .header("Content-Type", content_type)
             .header("X-Storage-Path", path);
         let request = self.add_common_headers(request);
-        let response = request
-            .body(body)
-            .send()
+        let (response, sent_bearer) = self
+            .send_stamped(request.body(body))
             .await
             .context("Failed to send streaming upload request")?;
 
         let status = response.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
-            self.fire_401_attribution("upload_stream");
+            self.fire_401_attribution("upload_stream", sent_bearer.as_ref().map(|s| s.0.as_str()));
             self.breaker.record(Outcome::Failure);
             anyhow::bail!("Failed to upload to '{}': HTTP 401 Unauthorized", path);
         }
@@ -3460,3 +3478,151 @@ mod forbidden_tests {
 #[cfg(test)]
 #[path = "storage_client_breaker_tests.rs"]
 mod breaker_tests;
+
+/// 401-attribution tests: the bearer the callback receives must be
+/// the send-time generation (the tail the auth middleware stamped
+/// when the request went out), not a post-401 re-snapshot of the
+/// credential provider.
+#[cfg(test)]
+mod attribution_tests {
+    use super::{Auth401AttributionCallback, ExistsResult, StorageClient};
+    use axum::{Router, routing::get};
+    use std::net::SocketAddr;
+    use std::sync::Mutex;
+    use tokio::net::TcpListener;
+
+    async fn start_server(router: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        (addr, handle)
+    }
+
+    /// Captures the `(operation, sent_bearer_prefix)` pairs the
+    /// attribution callback receives.
+    #[derive(Debug, Default)]
+    struct CapturingAttribution {
+        calls: Mutex<Vec<(String, Option<String>)>>,
+    }
+
+    impl Auth401AttributionCallback for CapturingAttribution {
+        fn record_401(&self, operation: &str, sent_bearer_prefix: Option<&str>) {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((operation.to_string(), sent_bearer_prefix.map(str::to_string)));
+        }
+    }
+
+    /// Returns the send-time token on the first snapshot (the one
+    /// the middleware stamps onto the wire) and a rotated token on
+    /// every later snapshot — simulating the refresh a 401 triggers
+    /// landing between send and the attribution arm.
+    struct RotatingProvider {
+        send_time_token: String,
+        rotated_token: String,
+        snapshots: Mutex<u32>,
+    }
+
+    impl RotatingProvider {
+        fn new(send_time_token: &str, rotated_token: &str) -> Self {
+            Self {
+                send_time_token: send_time_token.to_string(),
+                rotated_token: rotated_token.to_string(),
+                snapshots: Mutex::new(0),
+            }
+        }
+    }
+
+    impl cf_auth::HttpAuth for RotatingProvider {
+        fn apply(
+            &self,
+            builder: reqwest::RequestBuilder,
+            _base_url: &str,
+        ) -> reqwest::RequestBuilder {
+            builder
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl cf_auth::AuthCredentialProvider for RotatingProvider {
+        fn snapshot(&self) -> cf_auth::CredentialSnapshot {
+            let mut snapshots = self.snapshots.lock().unwrap();
+            *snapshots += 1;
+            // First snapshot is the send-time stamp; any later one
+            // (e.g. a 401-time re-snapshot) sees the rotated token.
+            let token = if *snapshots == 1 {
+                self.send_time_token.clone()
+            } else {
+                self.rotated_token.clone()
+            };
+            cf_auth::CredentialSnapshot {
+                token: Some(token.into()),
+                ..Default::default()
+            }
+        }
+
+        async fn refresh_after_unauthorized(&self) -> bool {
+            false
+        }
+    }
+
+    /// A 401 must attribute the send-time bearer: the middleware
+    /// stamps the provider's token when the request goes out, and
+    /// `fire_401_attribution` records exactly that tail. The old
+    /// implementation re-snapshotted the provider at 401 time; with
+    /// the rotating provider here, that would have recorded the
+    /// rotated token instead of the one that actually went on the
+    /// wire.
+    #[tokio::test]
+    async fn check_exists_401_attributes_send_time_bearer() {
+        let captured = std::sync::Arc::new(CapturingAttribution::default());
+        let wire_auth = std::sync::Arc::new(Mutex::new(None::<String>));
+        let wire_auth_for_handler = wire_auth.clone();
+        let router = Router::new().route(
+            "/v1/storage/exists",
+            get(move |headers: axum::http::HeaderMap| {
+                let wire_auth = wire_auth_for_handler.clone();
+                async move {
+                    *wire_auth.lock().unwrap() = headers
+                        .get(axum::http::header::AUTHORIZATION)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string);
+                    axum::http::StatusCode::UNAUTHORIZED
+                }
+            }),
+        );
+        let (addr, _server) = start_server(router).await;
+
+        let provider =
+            std::sync::Arc::new(RotatingProvider::new("send-time-token", "rotated-token"));
+        let client = StorageClient::with_provider(
+            &format!("http://{addr}/v1"),
+            reqwest::Client::new(),
+            provider,
+        )
+        .with_attribution(captured.clone());
+
+        let result = client.check_exists("data/hello.txt").await;
+        assert!(
+            matches!(result, ExistsResult::Unauthorized),
+            "401 must return Unauthorized"
+        );
+
+        // The wire bearer is the send-time token...
+        let wire = wire_auth.lock().unwrap().clone().expect("server saw the request");
+        assert_eq!(wire, "Bearer send-time-token");
+        // ...and the attribution records its tail — not the
+        // post-401 rotated token the old re-snapshot would have read.
+        let calls = captured.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "exactly one attribution call");
+        assert_eq!(calls[0].0, "check_exists");
+        assert_eq!(
+            calls[0].1.as_deref(),
+            Some(cf_auth::bearer_suffix("send-time-token")),
+            "attribution must record the send-time bearer tail, not the post-401 rotated token"
+        );
+    }
+}

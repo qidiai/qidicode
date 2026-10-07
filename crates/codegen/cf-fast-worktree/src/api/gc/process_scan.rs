@@ -26,7 +26,7 @@ pub(super) fn is_pid_alive(pid: u32) -> bool {
         // Open the process with query-only rights: a successful open (any
         // error other than "no such process") proves it exists, mirroring
         // kill(pid, 0) semantics including "exists but not ours" => alive.
-        use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, HANDLE};
+        use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER};
         use windows_sys::Win32::System::Threading::OpenProcess;
         use windows_sys::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION;
         // SAFETY: plain Win32 handle API usage; pid comes from our own records.
@@ -52,6 +52,11 @@ pub(crate) enum LiveCwdScan {
     // Never constructed on the scanning platforms, but a distinct state from Failed.
     #[cfg_attr(any(target_os = "linux", target_os = "macos"), allow(dead_code))]
     Unsupported,
+    // Constructed only by the linux/macos scanners (live_process_cwds and
+    // validate_cwd_scan are cfg-gated to those platforms); other platforms
+    // report `Unsupported` instead. Kept cross-platform so the fail-closed
+    // contract in `usable_cwds` and the unit tests read the same on every OS.
+    #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
     Failed,
 }
 
@@ -63,6 +68,11 @@ pub(crate) fn usable_cwds(scan: &LiveCwdScan, force: bool) -> Option<&[PathBuf]>
     }
 }
 
+// Validation layer for the linux/macos scanners; those callers are
+// cfg-gated, so on other platforms nothing constructs a scan to validate.
+// Retained cross-platform (and unit-tested on every OS) to keep the
+// fail-closed contract identical across targets.
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
 fn scan_contains_cwd(cwds: &[PathBuf], path: &Path) -> bool {
     let path_canon = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     cwds.iter().any(|c| {
@@ -72,6 +82,9 @@ fn scan_contains_cwd(cwds: &[PathBuf], path: &Path) -> bool {
     })
 }
 
+// See `scan_contains_cwd`: wired in on linux/macos only; other platforms
+// have no live-process-CWD enumerator whose output needs validating.
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
 fn validate_cwd_scan(cwds: Vec<PathBuf>) -> LiveCwdScan {
     match std::env::current_dir() {
         Ok(cwd) if scan_contains_cwd(&cwds, &cwd) => LiveCwdScan::Ok(cwds),

@@ -84,7 +84,7 @@ pub async fn discover_agents_md(root_cwd: &Path) -> Vec<Value> {
             // and frontmatter would leak into the prompt.
             let is_rules_file = {
                 let path = std::path::Path::new(&file.file_path);
-                let comps: Vec<std::borrow::Cow<str>> = path
+                let comps: Vec<std::borrow::Cow<'_, str>> = path
                     .components()
                     .map(|c| c.as_os_str().to_string_lossy())
                     .collect();
