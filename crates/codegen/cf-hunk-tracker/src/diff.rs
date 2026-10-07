@@ -110,9 +110,20 @@ pub fn generate_hunk_patch(baseline: &str, current: &str, hunk: &Hunk) -> String
         + hunk.line_info.new_count
         + (context_after_end - context_after_start);
 
-    // Hunk header (1-indexed)
+    // Hunk header (1-indexed). The before-context is sourced from the
+    // baseline (old coordinates), but `new_start` must be reported in
+    // new-file coordinates: when an earlier hunk changes the line
+    // count, `new_start != old_start`, and reusing the old-coordinate
+    // position makes a single-hunk fragment unappliable on its own —
+    // the `+start` would point at a different line than the one the
+    // after-context (sourced from the current file) actually sits at.
+    // (`saturating_sub`: if an earlier hunk's deletion reaches into
+    // the before-context window, the reconstructed context is already
+    // stale — a pre-existing limitation — and the header degrades to
+    // the file start instead of panicking.)
+    let context_before_len = context_before_end - context_before_start;
     let header_old_start = context_before_start + 1;
-    let header_new_start = context_before_start + 1; // Context is same in both
+    let header_new_start = new_start_idx.saturating_sub(context_before_len) + 1;
 
     let _ = writeln!(
         output,
@@ -830,6 +841,81 @@ mod tests {
         let delete_patch = generate_hunk_patch(baseline, current, delete_hunk);
         assert!(delete_patch.contains("-line 4"));
         assert!(!delete_patch.contains("+line 4"));
+    }
+
+    #[test]
+    fn test_generate_hunk_patch_header_new_start_accounts_for_prior_line_count_change() {
+        // Regression: the hunk header reported `new_start` in OLD-file
+        // coordinates. When an earlier hunk changes the line count, a
+        // single-hunk patch fragment is not independently applicable:
+        // the `+start` claims a line the after-context does not sit at.
+        //
+        // Baseline has 14 lines. Hunk 1 replaces line 5 with two lines
+        // (net +1). Hunk 2 replaces line 12 (old coords) — which is
+        // line 13 in the patched file.
+        let baseline = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\n";
+        let current = "line 1\nline 2\nline 3\nline 4\nline 5a\nline 5b\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nchanged line 12\nline 13\nline 14\n";
+
+        let hunks = compute_hunks(Path::new("test.rs"), baseline, current, agent_source());
+        assert_eq!(hunks.len(), 2, "should have one replace and one replace hunk");
+
+        // Second hunk: old line 12 -> new line 13 (shifted by the +1
+        // from hunk 1).
+        let second = &hunks[1];
+        assert_eq!(
+            second.line_info.old_start, 12,
+            "second hunk old_start (regression check): {second:?}"
+        );
+        assert_eq!(
+            second.line_info.new_start, 13,
+            "second hunk new_start (regression check): {second:?}"
+        );
+
+        let patch = generate_hunk_patch(baseline, current, second);
+        // Before-context = old lines 9-11 (3 lines, ending at old line
+        // 11 / new line 12); the hunk therefore starts at old line 9
+        // and NEW line 10. Span = 3 context + 1 deleted + 2
+        // after-context (lines 13-14) = 6 lines on both sides.
+        assert!(
+            patch.starts_with("@@ -9,6 +10,6 @@"),
+            "header must report new_start in new-file coordinates, got: {}",
+            patch.lines().next().unwrap_or("")
+        );
+        assert!(patch.contains(" line 11"), "before-context from baseline");
+        assert!(patch.contains("-line 12"));
+        assert!(patch.contains("+changed line 12"));
+        assert!(patch.contains(" line 13"), "after-context from current");
+        assert!(patch.contains(" line 14"), "after-context from current");
+    }
+
+    #[test]
+    fn test_generate_hunk_patch_header_new_start_at_new_file_start() {
+        // Hunk at the very start of the file: header_new_start must be
+        // 1 even though new_start_idx (0) < CONTEXT_LINES.
+        let baseline = "a\nb\nc\nd\n";
+        let current = "A\nB\nc\nd\n";
+        let hunk = Hunk {
+            id: HunkId::new(),
+            path: "test.rs".into(),
+            line_info: HunkLineInfo {
+                old_start: 1,
+                old_count: 2,
+                new_start: 1,
+                new_count: 2,
+            },
+            source: agent_source(),
+            old_text: Some("a\nb\n".to_string()),
+            new_text: "A\nB\n".to_string(),
+            patch: None,
+            created_at: chrono::Utc::now(),
+            selected: false,
+        };
+        let patch = generate_hunk_patch(baseline, current, &hunk);
+        assert!(
+            patch.starts_with("@@ -1,4 +1,4 @@"),
+            "hunk at file start: {}",
+            patch.lines().next().unwrap_or("")
+        );
     }
 
     #[test]

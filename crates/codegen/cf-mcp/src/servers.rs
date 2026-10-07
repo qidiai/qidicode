@@ -1258,7 +1258,9 @@ impl McpTool {
     /// positions) would produce a qualified name that downstream
     /// `split_once("__")` consumers would split at the wrong boundary.
     /// The "exactly one delimiter" check covers all three cases with a
-    /// single rule.
+    /// single rule — counting *overlapping* occurrences, because
+    /// `str::matches` counts non-overlapping matches and would report
+    /// `"foo___bar"` as having just one `__`.
     pub fn into_registration(self) -> Option<McpToolRegistration> {
         // Qualify MCP tool name with server name: "server__tool"
         let qualified_name = format!(
@@ -1267,7 +1269,19 @@ impl McpTool {
         );
 
         // Reject ambiguous qualified names — see doc-comment above.
-        if qualified_name.matches(MCP_TOOL_NAME_DELIMITER).count() != 1 {
+        // Overlapping-aware count: a run of ≥3 underscores contains two
+        // overlapping `__` windows (e.g. `"foo___bar"`), which the
+        // non-overlapping `str::matches` count misses — both
+        // `(server="foo_", tool="bar")` and `(server="foo", tool="_bar")`
+        // qualify as `"foo___bar"` and would silently overwrite each
+        // other's registry key.
+        let delimiter = MCP_TOOL_NAME_DELIMITER.as_bytes();
+        let delimiter_occurrences = qualified_name
+            .as_bytes()
+            .windows(delimiter.len())
+            .filter(|window| *window == delimiter)
+            .count();
+        if delimiter_occurrences != 1 {
             tracing::error!(
                 server = %self.server_name,
                 tool = %self.name,
@@ -5908,6 +5922,44 @@ mod tests {
         // which are covered by the same `count() != 1` line of code.
         let tool = make_mcp_tool("foo_", "_bar");
         assert!(tool.into_registration().is_none());
+    }
+
+    #[test]
+    fn into_registration_rejects_three_underscore_collision() {
+        // Regression: `str::matches` counts *non-overlapping* matches,
+        // so `"foo___bar".matches("__").count() == 1` — the old check
+        // let BOTH of these through, and both produce the qualified
+        // name `foo___bar`. The registry key is then silently
+        // overwritten by whichever registers last, and downstream
+        // `splitn(2, "__")` parses the two origins at different
+        // boundaries (`("foo_", "bar")` vs `("foo", "_bar")`).
+        let from_server_tail = make_mcp_tool("foo_", "bar");
+        assert!(
+            from_server_tail.into_registration().is_none(),
+            "server 'foo_' + tool 'bar' (qualified 'foo___bar') must be rejected"
+        );
+        let from_tool_head = make_mcp_tool("foo", "_bar");
+        assert!(
+            from_tool_head.into_registration().is_none(),
+            "server 'foo' + tool '_bar' (qualified 'foo___bar') must be rejected"
+        );
+    }
+
+    #[test]
+    fn into_registration_rejects_delimiter_inside_segments() {
+        // A `__` inside either segment is a second (overlapping-aware)
+        // delimiter occurrence: `splitn(2, "__")` cannot recover the
+        // original server/tool pair, so registration must refuse.
+        let server_segment = make_mcp_tool("weird__server", "list");
+        assert!(
+            server_segment.into_registration().is_none(),
+            "'__' inside the server segment must be rejected"
+        );
+        let tool_segment = make_mcp_tool("linear", "my__weird__tool");
+        assert!(
+            tool_segment.into_registration().is_none(),
+            "'__' inside the tool segment must be rejected"
+        );
     }
 
     // ── is_retriable_transport_error tests ───────────────────────────

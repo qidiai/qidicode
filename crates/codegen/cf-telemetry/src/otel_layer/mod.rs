@@ -124,6 +124,17 @@ struct RefreshableSpanExporter {
     /// panic that occurs when `hyper-util` tries DNS resolution on a non-Tokio
     /// thread.
     http_client: crate::otlp_http::BlockingOtlpClient,
+    /// Tokio runtime handle captured when the layer was built (the
+    /// binaries construct it inside their runtime). The
+    /// `BatchSpanProcessor` drives `export()` from a plain
+    /// `std::thread` where `Handle::try_current()` fails, so this
+    /// handle is the only way the token-refresh retry can reach a
+    /// runtime there — the production `AuthCredentialProvider`
+    /// refresh path uses `tokio::task::spawn_blocking` and
+    /// panics without one. `None` when the layer itself was built
+    /// outside any runtime (retry then degrades to the original
+    /// error).
+    runtime: Option<tokio::runtime::Handle>,
     /// Resource set by the `BatchSpanProcessor` via `set_resource()`.
     /// Forwarded to each one-shot exporter so OTLP payloads include
     /// `service.name`, `service.version`, `user.id`, etc.
@@ -206,6 +217,7 @@ async fn export_batch(
     exporter.set_resource(resource);
     exporter.export(batch).await
 }
+
 impl RefreshableSpanExporter {
     #[cfg(test)]
     fn current_token(&self) -> String {
@@ -261,6 +273,9 @@ struct ExportInputs {
     token_header_value: Arc<str>,
     http_client: crate::otlp_http::BlockingOtlpClient,
     extra_headers: Arc<Vec<(String, String)>>,
+    /// Runtime handle captured at layer construction (see
+    /// [`RefreshableSpanExporter::runtime`]).
+    runtime: Option<tokio::runtime::Handle>,
 }
 impl opentelemetry_sdk::trace::SpanExporter for RefreshableSpanExporter {
     fn export(
@@ -299,6 +314,7 @@ impl opentelemetry_sdk::trace::SpanExporter for RefreshableSpanExporter {
                 token_header_value: Arc::clone(&self.token_header_value),
                 http_client: self.http_client.clone(),
                 extra_headers: Arc::clone(&self.extra_headers),
+                runtime: self.runtime.clone(),
             }
         });
         async move {
@@ -311,6 +327,7 @@ impl opentelemetry_sdk::trace::SpanExporter for RefreshableSpanExporter {
                 token_header_value,
                 http_client,
                 extra_headers,
+                runtime,
             }) = prepared
             else {
                 return Ok(());
@@ -325,22 +342,49 @@ impl opentelemetry_sdk::trace::SpanExporter for RefreshableSpanExporter {
             };
             let mut batch = batch;
             redact::redact_batch(&mut batch);
-            let batch_for_retry = tokio::runtime::Handle::try_current()
-                .is_ok()
-                .then(|| batch.clone());
+            // Token refresh needs a Tokio runtime: the production
+            // `AuthCredentialProvider` refresh path uses
+            // `tokio::task::spawn_blocking`, which panics without
+            // one. It is reachable either directly (export driven
+            // on a runtime thread) or via the handle captured when
+            // the layer was built (the `BatchSpanProcessor` drives
+            // `export()` from a plain `std::thread`, where
+            // `Handle::try_current()` fails).
+            let retry_reachable =
+                tokio::runtime::Handle::try_current().is_ok() || runtime.is_some();
+            let batch_for_retry = retry_reachable.then(|| batch.clone());
             let result = export_batch(&mut exporter, &resource, batch).await;
             if result.is_ok() {
                 return result;
             }
             let Some(batch_for_retry) = batch_for_retry else {
+                tracing::debug!(
+                    "otel export failed and no Tokio runtime is reachable; skipping token-refresh retry"
+                );
                 return result;
             };
-            tracing::debug!("otel export failed, attempting token refresh");
-            if !credentials.refresh_after_unauthorized().await {
+            // Phase 1 — token refresh. The refresh future performs
+            // no blocking HTTP, so briefly entering the runtime
+            // context with `Handle::block_on` (from the
+            // `BatchSpanProcessor`'s plain `std::thread`) is safe.
+            let refreshed = if tokio::runtime::Handle::try_current().is_ok() {
+                credentials.refresh_after_unauthorized().await
+            } else if let Some(handle) = &runtime {
+                handle.block_on(credentials.refresh_after_unauthorized())
+            } else {
+                // Unreachable: `retry_reachable` was true only when a
+                // runtime was reachable or captured.
+                return result;
+            };
+            if !refreshed {
                 return result;
             }
             let retry_snapshot = credentials.snapshot();
-            let new_token = retry_snapshot.token.as_deref().map(|s| s.to_string()).unwrap_or_default();
+            let new_token = retry_snapshot
+                .token
+                .as_deref()
+                .map(|s| s.to_string())
+                .unwrap_or_default();
             if new_token.is_empty() {
                 tracing::warn!("token refresh reported success but snapshot returned no token");
                 return result;
@@ -348,7 +392,7 @@ impl opentelemetry_sdk::trace::SpanExporter for RefreshableSpanExporter {
             let retry_token_auth = credentials
                 .needs_token_auth_header()
                 .then(|| token_header_value.as_ref());
-            match build_otlp_exporter(
+            let mut retry_exporter = match build_otlp_exporter(
                 &endpoint,
                 &static_headers,
                 &new_token,
@@ -357,16 +401,31 @@ impl opentelemetry_sdk::trace::SpanExporter for RefreshableSpanExporter {
                 http_client,
                 &retry_snapshot,
             ) {
-                Ok(mut retry_exporter) => {
-                    let retry_resource = resource_with_tenant_id(resource, &retry_snapshot);
-                    export_batch(&mut retry_exporter, &retry_resource, batch_for_retry)
-                        .await
-                        .or(result)
-                }
+                Ok(e) => e,
                 Err(e) => {
                     tracing::debug!("failed to build retry exporter: {e}");
-                    result
+                    return result;
                 }
+            };
+            let retry_resource = resource_with_tenant_id(resource.clone(), &retry_snapshot);
+            // Phase 2 — retry export. `BlockingOtlpClient` wraps the
+            // reqwest *blocking* client, which must run on a thread
+            // with no entered Tokio runtime context: reqwest's
+            // debug-build runtime check panics inside one (it builds
+            // and drops a shell runtime on the calling thread), and
+            // parking a runtime worker thread would stall the
+            // runtime in any build. The first export above already
+            // runs on this calling thread under whatever executor
+            // drives this future (`futures_executor` in tests, the
+            // `BatchSpanProcessor` thread in production), so the
+            // retry takes the same path instead of re-entering a
+            // runtime context here.
+            // A completed retry returns its own outcome; a retry that
+            // also failed keeps the original error (matches the
+            // previous `Result::or` semantics).
+            match export_batch(&mut retry_exporter, &retry_resource, batch_for_retry).await {
+                Ok(ok) => Ok(ok),
+                Err(_) => result,
             }
         }
     }
@@ -437,6 +496,11 @@ fn build_server_provider(client: OtelClientInfo, config: OtelLayerConfig) -> Sdk
             credentials: config.credentials,
             last_token: parking_lot::Mutex::new(initial_token),
             http_client,
+            // `build_otel_layer` runs inside the binary's Tokio
+            // runtime (all call sites are async contexts), so this
+            // captures the handle the BatchSpanProcessor's
+            // std::thread falls back to for the refresh retry.
+            runtime: tokio::runtime::Handle::try_current().ok(),
             resource: parking_lot::Mutex::new(opentelemetry_sdk::Resource::builder_empty().build()),
             token_header_value: Arc::from(config.token_header_value.as_str()),
             extra_headers: Arc::new(config.exporter.extra_headers),
@@ -561,6 +625,7 @@ mod tests {
                 30,
             ))
             .expect("test OTLP HTTP client must build"),
+            runtime: None,
             resource: parking_lot::Mutex::new(opentelemetry_sdk::Resource::builder().build()),
             token_header_value: Arc::from("cli"),
             extra_headers: Arc::new(Vec::new()),
@@ -719,9 +784,12 @@ mod tests {
             true
         }
     }
-    /// Regression test: export() must not call
-    /// refresh_after_unauthorized() when driven by futures_executor on a
-    /// plain std::thread (like the BatchSpanProcessor does).
+    /// Gating logic in isolation: with NO runtime reachable and
+    /// NO captured handle, the refresh must be skipped (the
+    /// provider's refresh path needs a runtime and would panic).
+    /// The real `export()` reaches the refresh from a plain
+    /// std::thread via the captured handle — see
+    /// [`export_retries_refresh_on_std_thread_with_captured_runtime`].
     #[test]
     fn export_skips_refresh_without_tokio_runtime() {
         let provider = Arc::new(TokioDependentProvider {
@@ -767,6 +835,81 @@ mod tests {
                 .refresh_count
                 .load(std::sync::atomic::Ordering::Relaxed),
             1
+        );
+    }
+
+    /// Regression: production `BatchSpanProcessor` drives
+    /// `export()` from a plain `std::thread` where
+    /// `Handle::try_current()` fails — previously that made
+    /// the refresh+retry path unreachable (dead code), so
+    /// OTLP auth failures silently dropped spans. With the
+    /// runtime handle captured at layer construction, the
+    /// retry must still fire from that thread.
+    #[test]
+    fn export_retries_refresh_on_std_thread_with_captured_runtime() {
+        // `export()` is a `SpanExporter` trait method —
+        // bring it into scope for the direct call below
+        // (the production path reaches it via `export_batch`).
+        use opentelemetry_sdk::trace::SpanExporter as _;
+        // Session-metrics gate: `export()` only builds the
+        // exporter pipeline when telemetry is initialized.
+        crate::client::init(
+            crate::config::TelemetryConfig::default(),
+            crate::config::TelemetryMode::SessionMetrics,
+            None,
+            None,
+            None,
+            None,
+            "otel-layer-test".to_string(),
+            None,
+            reqwest::Client::new(),
+        );
+
+        let provider = Arc::new(TokioDependentProvider {
+            refresh_count: std::sync::atomic::AtomicU32::new(0),
+        });
+        let credentials: Arc<dyn AuthCredentialProvider> = provider.clone();
+        // Capture a real runtime handle the way
+        // `build_server_provider` does at layer construction
+        // time (inside the binary's runtime).
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let handle = runtime.handle().clone();
+        let mut exporter = make_exporter(credentials, "cached-token");
+        exporter.runtime = Some(handle);
+
+        // The OTLP collector at localhost:4318 does not exist
+        // in tests, so the first export fails and the
+        // refresh+retry path must engage.
+        let result = std::thread::spawn(move || {
+            futures_executor::block_on(exporter.export(vec![]))
+        })
+        .join()
+        .expect("export thread must not panic");
+
+        assert!(
+            result.is_err(),
+            "export to a non-existent collector must fail"
+        );
+        assert_eq!(
+            provider
+                .refresh_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "token refresh must be reachable from the BatchSpanProcessor std::thread via the captured runtime handle"
+        );
+
+        // Restore the process-global telemetry state for
+        // sibling tests.
+        crate::client::init(
+            crate::config::TelemetryConfig::default(),
+            crate::config::TelemetryMode::Disabled,
+            None,
+            None,
+            None,
+            None,
+            "otel-layer-test".to_string(),
+            None,
+            reqwest::Client::new(),
         );
     }
 }

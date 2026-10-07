@@ -18,8 +18,8 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::auth::ForceLoginTeam;
+use cf_token_estimation::estimate_tokens_aware;
 use cf_tools::types::config_source::ConfigSource;
-use cf_tools::util::truncate::estimate_tokens;
 
 const TREE: &str = "\u{2514}";
 
@@ -507,7 +507,11 @@ async fn list_instructions(cwd: &Path) -> Vec<InstructionFile> {
             let vendor = derive_vendor(&c.file_path).map(String::from);
             InstructionFile {
                 size_bytes: size,
-                approx_tokens: estimate_tokens(&c.content),
+                // P0-1 口径统一：指令文件（含中文密集的 AGENTS.md）的
+                // approx_tokens 与 /context、system_prompt 同走字符感知
+                // 估算，bytes/4 对中文内容会高估 ~13-50%；纯 ASCII 文件
+                // 两式恒等，显示值不变。display-only，无决策影响。
+                approx_tokens: estimate_tokens_aware(&c.content) as usize,
                 path: c.file_path,
                 scope,
                 file_type: file_type.to_string(),
@@ -1960,6 +1964,42 @@ mod tests {
         assert!(
             !entries.iter().any(|e| e.name == "inspect-cfg-ignored"),
             "[skills].ignore must hide the skill"
+        );
+    }
+
+    /// `list_instructions` must size instruction files with the
+    /// character-aware estimator (P0-1 口径统一): Chinese-heavy
+    /// AGENTS.md gets the CJK 3/5 ratio instead of the raw bytes/4
+    /// over-estimate; pure-ASCII content is identical under both
+    /// formulas, so existing display values for ASCII files are
+    /// unchanged. Display-only surface — no decision reads it.
+    #[tokio::test]
+    async fn list_instructions_approx_tokens_is_cjk_aware() {
+        // 200 CJK chars -> 600 UTF-8 bytes; aware = ceil(200*3/5)
+        // = 120 tokens, bytes/4 would report 150.
+        let zh = "你好世界".repeat(50);
+        let cwd = tempfile::tempdir().unwrap();
+        std::fs::write(cwd.path().join("AGENTS.md"), &zh).unwrap();
+
+        let entries = list_instructions(cwd.path()).await;
+        let entry = entries
+            .iter()
+            .find(|e| e.file_type == "agents_md")
+            .expect("AGENTS.md should be discovered");
+
+        assert_eq!(
+            entry.size_bytes,
+            zh.len(),
+            "size_bytes must be the raw UTF-8 byte length of the zh fixture"
+        );
+        assert_eq!(
+            entry.approx_tokens,
+            cf_token_estimation::estimate_tokens_aware(&zh) as usize,
+            "approx_tokens must use the CJK-aware estimator, not bytes/4"
+        );
+        assert!(
+            entry.approx_tokens < cf_token_estimation::estimate_tokens(&zh) as usize,
+            "aware estimate must under-cut the bytes/4 over-estimate for CJK"
         );
     }
 }
