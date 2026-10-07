@@ -190,17 +190,30 @@ impl SessionRegistryClient {
         self
     }
 
+    /// Send a request through the auth middleware, returning the response
+    /// plus the bearer tail the middleware stamped at send time (see
+    /// [`cf_auth::execute_with_stamp`]).
+    ///
+    /// The tail is the attribution source for 401s: it records the
+    /// credential that actually went on the wire. Re-resolving the
+    /// credential at 401-handling time would race the refresh the 401
+    /// itself triggers and always report a fresh token.
     async fn send_authed(
         &self,
         builder: RequestBuilder,
         op: &'static str,
-    ) -> Result<reqwest::Response> {
+    ) -> Result<(
+        reqwest::Response,
+        Option<cf_auth::StampedBearerSuffix>,
+    )> {
         let builder = cf_file_utils::trace_context::inject_trace_context_into_request(builder);
         let request = builder.build().context(op)?;
-        self.client.execute(request).await.map_err(|e| match e {
-            reqwest_middleware::Error::Middleware(e) => e.context(op),
-            reqwest_middleware::Error::Reqwest(e) => anyhow::Error::from(e).context(op),
-        })
+        cf_auth::execute_with_stamp(&self.client, request)
+            .await
+            .map_err(|e| match e {
+                reqwest_middleware::Error::Middleware(e) => e.context(op),
+                reqwest_middleware::Error::Reqwest(e) => anyhow::Error::from(e).context(op),
+            })
     }
 
     /// Non-auth headers only -- the `Authorization` header lives in
@@ -209,9 +222,14 @@ impl SessionRegistryClient {
         builder
     }
 
-    fn check_response(&self, response: reqwest::Response, op: &str) -> anyhow::Error {
+    fn check_response(
+        &self,
+        response: reqwest::Response,
+        op: &str,
+        sent_bearer: Option<&str>,
+    ) -> anyhow::Error {
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            self.record_401_attribution(op);
+            self.record_401_attribution(op, sent_bearer);
             anyhow::anyhow!("{op}: {}", self.credentials.auth_error_hint())
         } else {
             anyhow::anyhow!("{op} failed: {}", response.status())
@@ -222,19 +240,22 @@ impl SessionRegistryClient {
     /// `consumer = "SessionRegistryClient.<op>"`. The op string is the
     /// operation name passed to `check_response` (e.g.,
     /// `"session register"`).
-    fn record_401_attribution(&self, op: &str) {
+    ///
+    /// `sent_bearer` is the bearer tail captured at send time by the auth
+    /// middleware ([`cf_auth::StampedBearerSuffix`]) — the credential that
+    /// actually went on the wire, threaded from `send_authed`. It is
+    /// deliberately NOT re-resolved here: a re-resolve at 401 time reads
+    /// the post-refresh token (the 401 itself may have triggered the
+    /// refresh), which would always report a fresh credential and defeat
+    /// the stale-snapshot diagnostic.
+    fn record_401_attribution(&self, op: &str, sent_bearer: Option<&str>) {
         if let Some(manager) = self.credentials.auth_manager() {
-            let resolved = self.credentials.resolve();
-            let sent = resolved
-                .deployment_key
-                .clone()
-                .or(resolved.user_token.clone());
             crate::auth::attribution::record_consumer_401(
                 manager.as_ref(),
                 self.session_id.as_deref(),
                 crate::auth::attribution::ConsumerKind::SessionRegistryClient,
                 op,
-                sent.as_deref(),
+                sent_bearer,
             );
         }
     }
@@ -250,11 +271,15 @@ impl SessionRegistryClient {
     /// POST /v1/sessions/register (idempotent via ON CONFLICT)
     pub async fn register(&self, req: &RegisterRequest) -> Result<()> {
         let url = format!("{}/sessions/register", self.base_url);
-        let response = self
+        let (response, sent_bearer) = self
             .send_authed(self.post(&url).json(req), "session register")
             .await?;
         if !response.status().is_success() {
-            return Err(self.check_response(response, "session register"));
+            return Err(self.check_response(
+                response,
+                "session register",
+                sent_bearer.as_ref().map(|s| s.0.as_str()),
+            ));
         }
         Ok(())
     }
@@ -262,11 +287,15 @@ impl SessionRegistryClient {
     /// POST /v1/sessions/{id}/replicas/update
     pub async fn update(&self, session_id: &str, req: &UpdateRequest) -> Result<()> {
         let url = format!("{}/sessions/{}/replicas/update", self.base_url, session_id);
-        let response = self
+        let (response, sent_bearer) = self
             .send_authed(self.post(&url).json(req), "session update")
             .await?;
         if !response.status().is_success() {
-            return Err(self.check_response(response, "session update"));
+            return Err(self.check_response(
+                response,
+                "session update",
+                sent_bearer.as_ref().map(|s| s.0.as_str()),
+            ));
         }
         Ok(())
     }
@@ -277,11 +306,15 @@ impl SessionRegistryClient {
             "{}/sessions/{}/replicas/finalize",
             self.base_url, session_id
         );
-        let response = self
+        let (response, sent_bearer) = self
             .send_authed(self.post(&url), "session finalize")
             .await?;
         if !response.status().is_success() {
-            return Err(self.check_response(response, "session finalize"));
+            return Err(self.check_response(
+                response,
+                "session finalize",
+                sent_bearer.as_ref().map(|s| s.0.as_str()),
+            ));
         }
         Ok(())
     }
@@ -293,9 +326,13 @@ impl SessionRegistryClient {
         if let Some(q) = query {
             builder = builder.query(&[("query", q)]);
         }
-        let response = self.send_authed(builder, "session search").await?;
+        let (response, sent_bearer) = self.send_authed(builder, "session search").await?;
         if !response.status().is_success() {
-            return Err(self.check_response(response, "session search"));
+            return Err(self.check_response(
+                response,
+                "session search",
+                sent_bearer.as_ref().map(|s| s.0.as_str()),
+            ));
         }
         let resp: SearchResponse = response.json().await.context("parse search response")?;
         Ok(resp.sessions)
@@ -304,9 +341,13 @@ impl SessionRegistryClient {
     /// GET /v1/sessions/{id}/replicas
     pub async fn get_session(&self, session_id: &str) -> Result<SessionRecord> {
         let url = format!("{}/sessions/{}/replicas", self.base_url, session_id);
-        let response = self.send_authed(self.get(&url), "session get").await?;
+        let (response, sent_bearer) = self.send_authed(self.get(&url), "session get").await?;
         if !response.status().is_success() {
-            return Err(self.check_response(response, "session get"));
+            return Err(self.check_response(
+                response,
+                "session get",
+                sent_bearer.as_ref().map(|s| s.0.as_str()),
+            ));
         }
         response.json().await.context("parse session response")
     }
@@ -322,9 +363,13 @@ impl SessionRegistryClient {
         let builder = self
             .get(&url)
             .query(&[("file", file), ("turn", &turn.to_string())]);
-        let response = self.send_authed(builder, "session download url").await?;
+        let (response, sent_bearer) = self.send_authed(builder, "session download url").await?;
         if !response.status().is_success() {
-            return Err(self.check_response(response, "session download url"));
+            return Err(self.check_response(
+                response,
+                "session download url",
+                sent_bearer.as_ref().map(|s| s.0.as_str()),
+            ));
         }
         let resp: DownloadResponse = response.json().await.context("parse download response")?;
         Ok(resp.download_url)
@@ -342,9 +387,13 @@ impl SessionRegistryClient {
         let builder = self
             .get(&url)
             .query(&[("file", file), ("turn", &turn.to_string())]);
-        let response = self.send_authed(builder, "session download").await?;
+        let (response, sent_bearer) = self.send_authed(builder, "session download").await?;
         if !response.status().is_success() {
-            return Err(self.check_response(response, "session download"));
+            return Err(self.check_response(
+                response,
+                "session download",
+                sent_bearer.as_ref().map(|s| s.0.as_str()),
+            ));
         }
         let resp: DownloadResponse = response.json().await.context("parse download response")?;
 
@@ -613,6 +662,68 @@ mod tests {
             sent, "Bearer fresh-from-auth-manager",
             "outgoing bearer must come from AuthManager (not the build-time token)"
         );
+    }
+
+    /// `send_authed` must report the bearer tail the auth middleware
+    /// stamped at send time — the attribution source for 401s. Before
+    /// the send-time-capture fix, `send_authed` dropped the middleware's
+    /// request extensions, so a 401 could only be attributed by
+    /// re-resolving the credential (which races the refresh the 401
+    /// itself triggers and always reports a fresh token).
+    #[tokio::test]
+    async fn send_authed_reports_send_time_bearer_stamp() {
+        use axum::{Router, response::IntoResponse, routing::post};
+        use chrono::{Duration, Utc};
+        use std::net::SocketAddr;
+        use std::sync::Arc;
+        use tokio::net::TcpListener;
+
+        let captured = Arc::new(parking_lot::Mutex::new(None::<String>));
+        let captured_for_handler = captured.clone();
+        let router = Router::new().route(
+            "/sessions/register",
+            post(move |headers: axum::http::HeaderMap| {
+                let captured = captured_for_handler.clone();
+                async move {
+                    if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
+                        *captured.lock() = Some(auth.to_str().unwrap_or("").to_owned());
+                    }
+                    (axum::http::StatusCode::OK, "").into_response()
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+        let dir = tempfile::tempdir().unwrap();
+        let am = Arc::new(
+            crate::auth::AuthManager::new(dir.path(), crate::auth::GrokComConfig::default()),
+        );
+        am.hot_swap(crate::auth::GrokAuth {
+            key: "registry-stamp-token".into(),
+            auth_mode: crate::auth::AuthMode::ApiKey,
+            create_time: Utc::now(),
+            user_id: "user-42".into(),
+            expires_at: Some(Utc::now() + Duration::hours(1)),
+            ..crate::auth::GrokAuth::test_default()
+        });
+
+        let client =
+            SessionRegistryClient::new(format!("http://{addr}"), "build-time-token").with_auth(am);
+        let url = format!("{}/sessions/register", client.base_url);
+        let (response, sent_bearer) = client
+            .send_authed(client.post(&url), "session register")
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+        // The wire bearer is the AuthManager token, and the reported
+        // stamp is its tail — the exact value a 401 would attribute.
+        let sent = captured.lock().clone().expect("server saw the request");
+        assert_eq!(sent, "Bearer registry-stamp-token");
+        let stamp = sent_bearer.expect("auth middleware must stamp the bearer");
+        assert_eq!(stamp.0, cf_auth::bearer_suffix("registry-stamp-token"));
     }
 
     // Verify the split-pointer invariant: last_turn_number can be ahead of

@@ -1574,7 +1574,9 @@ fn real_main() -> i32 {
             eprintln!("QIDI Code crashed during your last session.");
             eprintln!("  Signal:  {}", report.signal_name);
             eprintln!("  Version: {}", report.app_version);
-            eprintln!("  Report:  {}", report.report_path.display());
+            if let Some(path) = &report.report_path {
+                eprintln!("  Report:  {}", path.display());
+            }
             eprintln!();
         }
         if !cf_crash_handler::install(cf_crash_handler::CrashHandlerConfig {

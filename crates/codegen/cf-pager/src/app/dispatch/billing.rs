@@ -133,9 +133,9 @@ pub(crate) const FREE_USAGE_USER_MESSAGE: &str = "You\u{2019}ve reached your fre
 /// continue action. No Q&A modal — the user can't upgrade further.
 #[allow(unreachable_code)]
 pub(super) fn open_credit_limit_upsell(
-    agent: &mut AgentView,
-    mode: CreditLimitUpsellMode,
-    max_tier: bool,
+    _agent: &mut AgentView,
+    _mode: CreditLimitUpsellMode,
+    _max_tier: bool,
 ) {
     // QIDI local patch: credit-limit upsell popup disabled - self-hosted
     // model endpoints make the upstream Grok paywall irrelevant.
@@ -158,7 +158,7 @@ pub(super) fn open_credit_limit_upsell(
         CreditLimitCardAction,
         cf_telemetry::events::CreditLimitChoice,
         bool,
-    ) = match mode {
+    ) = match _mode {
         CreditLimitUpsellMode::UnifiedCredits => (
             "You hit your weekly limit.",
             "Upgrade to a higher tier for more usage",
@@ -187,10 +187,10 @@ pub(super) fn open_credit_limit_upsell(
             false,
         ),
     };
-    let unified_billing = matches!(mode, CreditLimitUpsellMode::UnifiedCredits);
+    let unified_billing = matches!(_mode, CreditLimitUpsellMode::UnifiedCredits);
 
     // ── Max tier: inline scrollback card ─────────────────────────
-    if max_tier {
+    if _max_tier {
         use crate::scrollback::block::RenderBlock;
         log_event(cf_telemetry::events::CreditLimitUpsellShown {
             surface: cf_telemetry::events::CreditLimitUpsellSurface::InlineCard,
@@ -198,7 +198,7 @@ pub(super) fn open_credit_limit_upsell(
             pay_as_you_go: payg_telemetry,
             unified_billing,
         });
-        agent.scrollback.push_block(RenderBlock::credit_limit_card(
+        _agent.scrollback.push_block(RenderBlock::credit_limit_card(
             heading,
             card_action,
             UPSELL_URL_PAYG,
@@ -219,7 +219,7 @@ pub(super) fn open_credit_limit_upsell(
         Question, QuestionOption,
     };
 
-    if agent.question_view.is_some() {
+    if _agent.question_view.is_some() {
         return;
     }
 
@@ -243,7 +243,7 @@ pub(super) fn open_credit_limit_upsell(
         id: None,
     };
 
-    let stashed = agent.prompt.stash();
+    let stashed = _agent.prompt.stash();
     let state = QuestionViewState::new(
         format!("credit-limit-upsell-{}", uuid::Uuid::new_v4()),
         vec![question],
@@ -256,8 +256,8 @@ pub(super) fn open_credit_limit_upsell(
         ],
     })
     .with_no_freeform();
-    agent.question_view = Some(state);
-    agent.prompt.set_text("");
+    _agent.question_view = Some(state);
+    _agent.prompt.set_text("");
 }
 
 /// Open the free-usage paywall on the given agent: a Q&A modal in the
@@ -299,9 +299,9 @@ pub(super) enum UpsellReason {
 /// URL in the option `id` (position-independent submit handling).
 #[allow(unreachable_code)]
 fn open_supergrok_upsell(
-    agent: &mut AgentView,
-    reason: UpsellReason,
-    auth_method: Option<String>,
+    _agent: &mut AgentView,
+    _reason: UpsellReason,
+    _auth_method: Option<String>,
 ) -> bool {
     // QIDI local patch: SuperGrok upsell popup disabled - return not-opened
     // so callers keep the user's input instead of consuming it.
@@ -313,11 +313,11 @@ fn open_supergrok_upsell(
 
     // Never displace an already-open question modal. Callers that consume
     // input on open must check this `false` and keep the input instead.
-    if agent.question_view.is_some() {
+    if _agent.question_view.is_some() {
         return false;
     }
 
-    let (heading, source, modal_id_prefix) = match reason {
+    let (heading, source, modal_id_prefix) = match _reason {
         UpsellReason::FreeUsageLimit => (
             "You hit your free usage limit.",
             SuperGrokUpsell::FreeUsagePaywall,
@@ -332,7 +332,7 @@ fn open_supergrok_upsell(
 
     log_event(cf_telemetry::events::SuperGrokUpsellShown {
         source,
-        auth_method,
+        auth_method: _auth_method,
     });
 
     let options = vec![
@@ -358,7 +358,7 @@ fn open_supergrok_upsell(
         id: None,
     };
 
-    let stashed = agent.prompt.stash();
+    let stashed = _agent.prompt.stash();
     let state = QuestionViewState::new(
         format!("{modal_id_prefix}-{}", uuid::Uuid::new_v4()),
         vec![question],
@@ -366,8 +366,8 @@ fn open_supergrok_upsell(
     )
     .with_local_kind(LocalQuestionKind::FreeUsageUpsell { source })
     .with_no_freeform();
-    agent.question_view = Some(state);
-    agent.prompt.set_text("");
+    _agent.question_view = Some(state);
+    _agent.prompt.set_text("");
     true
 }
 

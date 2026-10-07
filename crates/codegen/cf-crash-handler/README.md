@@ -35,7 +35,9 @@ let crash_dir = PathBuf::from("/home/user/.myapp/crash");
 // install() opens last-crash.bin with O_TRUNC.
 if let Some(r) = xai_crash_handler::check_previous_crash(&crash_dir) {
     eprintln!("Crashed last session: {}", r.signal_name);
-    eprintln!("Report: {}", r.report_path.display());
+    if let Some(path) = &r.report_path {
+        eprintln!("Report: {}", path.display());
+    }
 }
 
 // install() before any threads or async runtime — sigaltstack is per-thread.

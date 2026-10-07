@@ -57,6 +57,16 @@ pub struct SplitPlan {
 /// `[Assistant-with-tool-requests, Tool, Tool, ...]` run. If the candidate
 /// split lands on a tool-result item, walk it forward until we pass the last
 /// tool-result item following the most recent assistant-with-tool-requests.
+///
+/// # Caller contract (debug-checked)
+///
+/// `item_token_counts` and `items` must have the same length. A mismatch
+/// is a programming error at the call site, not a runtime outcome callers
+/// can recover from, so it is enforced by `debug_assert_eq!` (debug builds
+/// only; release builds trust the caller — a shorter `item_token_counts`
+/// would then panic on indexing, a longer one would silently ignore the
+/// surplus). Promoting this to a `Result` would push a never-happens
+/// error into every caller's control flow.
 pub fn select_turns_to_compact<T: CompactionItem>(
     item_token_counts: &[u32],
     items: &[T],

@@ -7,7 +7,7 @@
 # the stable installer cannot accidentally break enterprise deployments.
 #
 # Auth: GROK_DEPLOYMENT_KEY (takes precedence) or ~/.grok/auth.json from `grok login`.
-# Env: GROK_BIN_DIR, GROK_PROXY_URL
+# Env: QIDI_BIN_DIR, QIDI_PROXY_URL
 #
 # Usage:
 #   curl -fsSL https://x.ai/cli/enterprise-install.sh | bash            # latest enterprise
@@ -158,7 +158,7 @@ esac
 BASE_URL_PRIMARY="https://x.ai/cli"
 BASE_URL_FALLBACK="https://storage.googleapis.com/grok-build-public-artifacts/cli"
 DOWNLOAD_DIR="$HOME/.grok/downloads"
-BIN_DIR="${GROK_BIN_DIR:-$HOME/.grok/bin}"
+BIN_DIR="${QIDI_BIN_DIR:-$HOME/.grok/bin}"
 mkdir -p "$DOWNLOAD_DIR" "$BIN_DIR"
 
 platform="${os}-${arch}"
@@ -280,7 +280,7 @@ fi
 
 # Fetch managed_config.toml + requirements.toml from server (deployment key only).
 if [ -n "$GROK_DEPLOYMENT_KEY" ]; then
-    PROXY_URL="${GROK_PROXY_URL:-https://cli-chat-proxy.grok.com/v1}"
+    PROXY_URL="${QIDI_PROXY_URL:-https://cli-chat-proxy.grok.com/v1}"
     echo "  Fetching deployment config..." >&2
     DEPLOY_RESPONSE=""
     AUTH_HEADER_FILE=$(mktemp 2>/dev/null) || AUTH_HEADER_FILE=""

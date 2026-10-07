@@ -18,6 +18,16 @@ use crate::views::picker::{PickerEntry, PickerField, PickerRow, PickerState};
 
 /// Offset added to content-hit indices in the picker `expanded` set so
 /// they don't collide with fuzzy-entry indices.
+///
+/// Namespace invariant: entry indices occupy `0..entries.len()` and
+/// content-hit keys occupy `CONTENT_EXPAND_OFFSET..`, so both live in
+/// one `HashSet<usize>` without collision while the entry list stays
+/// below `CONTENT_EXPAND_OFFSET` entries. That bound is unreachable
+/// in practice — the picker lists real sessions (tens to a few
+/// thousand), and a 100k-entry picker would be unusable long before
+/// the keys could collide. If the entry list can ever grow past the
+/// bound, split the set into an enum-keyed map instead of raising
+/// the offset.
 pub const CONTENT_EXPAND_OFFSET: usize = 100_000;
 
 /// Derive a short repo display name from a CWD path.

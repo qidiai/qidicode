@@ -5,7 +5,7 @@
 # the install logic so changes to the stable installer cannot break enterprise.
 #
 # Auth: GROK_DEPLOYMENT_KEY env var (takes precedence) or ~/.grok/auth.json from `grok login`.
-# Env: GROK_BIN_DIR, GROK_PROXY_URL
+# Env: QIDI_BIN_DIR, QIDI_PROXY_URL
 #
 # Usage:
 #   irm https://x.ai/cli/enterprise-install.ps1 | iex                                       # latest enterprise
@@ -153,7 +153,7 @@ $platform = "windows-$arch"
 $BaseUrlPrimary = 'https://x.ai/cli'
 $BaseUrlFallback = 'https://storage.googleapis.com/grok-build-public-artifacts/cli'
 $DownloadDir = Join-Path $GrokDir 'downloads'
-$BinDir = if ($env:GROK_BIN_DIR) { $env:GROK_BIN_DIR } else { Join-Path $GrokDir 'bin' }
+$BinDir = if ($env:QIDI_BIN_DIR) { $env:QIDI_BIN_DIR } else { Join-Path $GrokDir 'bin' }
 
 New-Item -ItemType Directory -Path $DownloadDir -Force | Out-Null
 New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
@@ -281,7 +281,7 @@ if (-not (Test-Path $ConfigFile)) {
 # --- Fetch deployment config (deployment key only) ---
 
 if ($env:GROK_DEPLOYMENT_KEY) {
-    $ProxyUrl = if ($env:GROK_PROXY_URL) { $env:GROK_PROXY_URL } else { 'https://cli-chat-proxy.grok.com/v1' }
+    $ProxyUrl = if ($env:QIDI_PROXY_URL) { $env:QIDI_PROXY_URL } else { 'https://cli-chat-proxy.grok.com/v1' }
     Write-Host '  Fetching deployment config...' -ForegroundColor DarkGray
     try {
         $headers = @{ 'Authorization' = "Bearer $($env:GROK_DEPLOYMENT_KEY)" }

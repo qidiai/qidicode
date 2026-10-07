@@ -2000,6 +2000,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-compression",
+ "async-trait",
  "aws-config",
  "aws-sdk-s3",
  "aws-smithy-http-client",
