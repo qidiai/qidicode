@@ -279,15 +279,26 @@ impl AgentView {
                     return InputOutcome::Changed;
                 }
                 match key.code {
-                    KeyCode::Up | KeyCode::Char('p')
-                        if key.code == KeyCode::Up || key.modifiers == KeyModifiers::CONTROL =>
-                    {
+                    // Bare Up/OwN navigate the dropdown; Ctrl+P/Ctrl+N keep
+                    // their readline-style aliases. Every other modifier
+                    // combination (Alt/Shift/Ctrl+arrows, Ctrl+<any other
+                    // key>) falls through to normal input handling — the
+                    // wide `|| CONTROL` form previously swallowed every
+                    // Ctrl+<key> while the dropdown was open (F-C1 audit,
+                    // 2026-10-09).
+                    KeyCode::Up if key.modifiers.is_empty() => {
                         self.prompt.completion_dropdown_move(-1);
                         return InputOutcome::Changed;
                     }
-                    KeyCode::Down | KeyCode::Char('n')
-                        if key.code == KeyCode::Down || key.modifiers == KeyModifiers::CONTROL =>
-                    {
+                    KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => {
+                        self.prompt.completion_dropdown_move(-1);
+                        return InputOutcome::Changed;
+                    }
+                    KeyCode::Down if key.modifiers.is_empty() => {
+                        self.prompt.completion_dropdown_move(1);
+                        return InputOutcome::Changed;
+                    }
+                    KeyCode::Char('n') if key.modifiers == KeyModifiers::CONTROL => {
                         self.prompt.completion_dropdown_move(1);
                         return InputOutcome::Changed;
                     }
@@ -295,7 +306,7 @@ impl AgentView {
                         self.prompt.completion_dropdown_move(-1);
                         return InputOutcome::Changed;
                     }
-                    KeyCode::Tab => {
+                    KeyCode::Tab if key.modifiers.is_empty() => {
                         if self.accept_completion_dropdown_item() {
                             return InputOutcome::Changed;
                         }
@@ -309,9 +320,11 @@ impl AgentView {
                         // Empty items (race): close and fall through to send.
                         self.prompt.completion_dropdown_close();
                     }
-                    KeyCode::Esc => {
+                    KeyCode::Esc if key.modifiers.is_empty() => {
                         // Consumed Esc: disarm the Esc→d flight-recorder
                         // combo (same convention as `try_handle_esc_policy`).
+                        // Alt(+Shift)+Esc falls through to the esc policy,
+                        // which rejects modified keys anyway.
                         self.esc_pressed_at = None;
                         self.prompt.completion_dropdown_close();
                         return InputOutcome::Changed;
@@ -1716,5 +1729,57 @@ mod slash_dropdown_modifier_tests {
             selected_before + 1,
             "bare Down must move the selection down"
         );
+    }
+
+    /// Negative-space test for the completion dropdown guards (F-C1
+    /// audit, 2026-10-09): the completion dropdown intercept must not
+    /// swallow modified keys either — and the pre-fix wide-match form
+    /// (`key.code == Up \|\| modifiers == CONTROL`) swallowed EVERY
+    /// Ctrl+<key> as dropdown navigation.
+    ///
+    /// Assertions: modified keys never move the completion selection
+    /// (mirrors the slash test's negative-space triple) while Ctrl+P /
+    /// Ctrl+N keep their readline aliases and bare Up/Down still
+    /// navigate.
+    #[test]
+    fn completion_dropdown_ignores_modified_keys_except_readline_aliases() {
+        use super::super::test_fixtures;
+
+        let mut agent = test_fixtures::make_agent();
+        // Open the completion dropdown in bash mode (accepts arbitrary
+        // words), then type a query fragment so the dropdown has rows.
+        agent
+            .prompt
+            .textarea
+            .replace_range(0..0, "read_");
+        agent.prompt.refresh_completion(&agent.session.models);
+        if !agent.prompt.completion_dropdown_open() {
+            // Fallback: force open via the same path the widget uses.
+            agent.prompt.open_completion_dropdown();
+        }
+        assert!(
+            agent.prompt.completion_dropdown_open(),
+            "precondition: completion dropdown open"
+        );
+
+        let selected_before = agent.prompt.completion_dropdown_selected();
+        for key in [
+            KeyEvent::new(KeyCode::Up, KeyModifiers::ALT),
+            KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT),
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
+        ] {
+            let _ = agent.handle_prompt_key_for_test(&key);
+            assert_eq!(
+                agent.prompt.completion_dropdown_selected(),
+                selected_before,
+                "{key:?} must not move the completion selection"
+            );
+            assert!(
+                agent.prompt.completion_dropdown_open(),
+                "{key:?} must not close the completion dropdown (only bare Tab/Esc/Enter may)"
+            );
+        }
     }
 }
