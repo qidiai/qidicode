@@ -1942,6 +1942,8 @@ async fn async_main() -> Result<()> {
                 background_wait_timeout: std::time::Duration::from_secs(
                     args.background_wait_timeout_secs,
                 ),
+                no_memory: args.no_memory,
+                experimental_memory: args.experimental_memory,
             },
         )
         .await;
