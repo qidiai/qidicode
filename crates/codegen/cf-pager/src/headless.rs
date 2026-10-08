@@ -192,6 +192,12 @@ pub struct HeadlessOptions {
     pub wait_for_background: bool,
     /// Max time to wait for background quiescence after the first turn ends.
     pub background_wait_timeout: Duration,
+    /// `--no-memory`: plumb the CLI memory-disable flag into the shell session.
+    /// Was previously hardcoded `false` at the ctx-construction site, which
+    /// silently ignored the flag (audit BUG-1, 2026-10-08).
+    pub no_memory: bool,
+    /// `--experimental-memory`: same silent-ignore bug, fixed alongside.
+    pub experimental_memory: bool,
 }
 
 // ── CLI flag helpers ─────────────────────────────────────────────────────
@@ -878,8 +884,8 @@ pub async fn run_single_turn(
         cli_subagents: None,
         cli_web_search_model: None,
         cli_session_summary_model: None,
-        cli_experimental_memory: false,
-        cli_no_memory: false,
+        cli_experimental_memory: options.experimental_memory,
+        cli_no_memory: options.no_memory,
         disable_web_search: options.disable_web_search,
         todo_gate: false,
         laziness_debug_log: None,
