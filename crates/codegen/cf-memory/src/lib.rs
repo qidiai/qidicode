@@ -76,6 +76,19 @@ pub async fn embed_missing_chunks(
         let texts: Vec<&str> = batch.iter().map(|(_, text)| text.as_str()).collect();
         match provider.embed_batch(&texts).await {
             Ok(embeddings) => {
+                // Defensive: the provider must return exactly one
+                // vector per input. A mismatched count would zip
+                // silently truncate (or mispair vectors with texts),
+                // polluting the index — skip the whole batch.
+                if embeddings.len() != batch.len() {
+                    tracing::error!(
+                        target: cf_telemetry::memory_log::TARGET,
+                        batch_size = batch.len(),
+                        vectors = embeddings.len(),
+                        "embedding batch vector count mismatch, skipping batch"
+                    );
+                    continue;
+                }
                 for ((chunk_id, _), embedding) in batch.iter().zip(embeddings.iter()) {
                     if let Err(e) = index.upsert_embedding(chunk_id, embedding) {
                         tracing::warn!(
@@ -109,4 +122,76 @@ pub async fn embed_missing_chunks(
         );
     }
     embedded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::embedding::EmbeddingProvider;
+    use cf_config::xai_grok_config_types::MemoryIndexConfig;
+    use tempfile::TempDir;
+
+    /// Provider that returns one vector fewer than requested —
+    /// mimics a misbehaving embeddings API.
+    struct ShortVectorProvider {
+        dimensions: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl EmbeddingProvider for ShortVectorProvider {
+        async fn embed_batch(
+            &self,
+            texts: &[&str],
+        ) -> Result<Vec<Vec<f32>>, Box<dyn std::error::Error>> {
+            let n = texts.len().saturating_sub(1);
+            Ok((0..n).map(|_| vec![0.5f32; self.dimensions]).collect())
+        }
+
+        fn model_name(&self) -> &str {
+            "short-vector"
+        }
+
+        fn dimensions(&self) -> usize {
+            self.dimensions
+        }
+    }
+
+    /// A batch whose vector count does not match its input
+    /// count must be skipped wholesale (error log, nothing
+    /// embedded) — never zip-truncated into wrong
+    /// chunk↔vector pairings.
+    #[tokio::test]
+    async fn embed_missing_chunks_skips_vector_count_mismatch() {
+        init_sqlite_vec();
+        let tmp = TempDir::new().unwrap();
+        let global = tmp.path().join("memory");
+        let workspace = global.join("test_ws");
+        let storage = MemoryStorage::with_paths(global, workspace);
+        let db_path = tmp.path().join("test.sqlite");
+        let mut index = MemoryIndex::open_or_create(
+            &db_path,
+            storage.clone(),
+            MemoryIndexConfig::default(),
+            4,
+        )
+        .unwrap();
+        let file_path = tmp.path().join("test.md");
+        std::fs::write(&file_path, "# Guide\n\nRust programming tutorial.").unwrap();
+        index.reindex_file(&file_path, "workspace").unwrap();
+
+        // Precondition: fresh chunks are waiting for embeddings.
+        assert!(
+            !index.chunks_without_embeddings().unwrap().is_empty(),
+            "precondition: unembedded chunks exist"
+        );
+
+        let provider = ShortVectorProvider { dimensions: 4 };
+        let embedded = embed_missing_chunks(&index, &provider).await;
+        assert_eq!(embedded, 0, "mismatched batch must be skipped, not zip-truncated");
+        // Fail-safe: no chunk received a (misaligned) embedding.
+        assert!(
+            !index.chunks_without_embeddings().unwrap().is_empty(),
+            "no chunk must gain an embedding from a mismatched batch"
+        );
+    }
 }

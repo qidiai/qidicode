@@ -338,6 +338,19 @@ impl MemoryBackend for MemoryBackendImpl {
                 let texts: Vec<&str> = batch.iter().map(|(_, t)| t.as_str()).collect();
                 match provider.embed_batch(&texts).await {
                     Ok(embeddings) => {
+                        // Defensive: reject mismatched batches (same
+                        // rationale as `embed_missing_chunks`)
+                        // instead of zip-truncating vectors onto the
+                        // wrong chunks.
+                        if embeddings.len() != batch.len() {
+                            tracing::error!(
+                                target: cf_telemetry::memory_log::TARGET,
+                                batch_size = batch.len(),
+                                vectors = embeddings.len(),
+                                "embedding batch vector count mismatch, skipping batch"
+                            );
+                            continue;
+                        }
                         for ((chunk_id, _), emb) in batch.iter().zip(embeddings.into_iter()) {
                             upserts.push((chunk_id.clone(), emb));
                         }
