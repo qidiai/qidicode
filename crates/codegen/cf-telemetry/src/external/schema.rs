@@ -829,6 +829,13 @@ pub fn map_api_request(ev: &events::ModelResponseReceived) -> Option<ExternalRec
         .attr_opt(ExternalKey::OutputTokens, ev.completion_tokens)
         .attr_opt(ExternalKey::ReasoningTokens, ev.reasoning_tokens)
         .attr_opt(ExternalKey::CacheReadTokens, ev.cached_prompt_tokens);
+    // Token usage is emitted per type (`input`, `output`,
+    // `reasoning`, `cache_read`) as raw counters; the KV-cache
+    // hit rate (cache_read / input — `input` includes cache
+    // reads) is derived by backends from those two counters,
+    // and is additionally carried on the signal layer as
+    // `PromptUsageModel.cache_read_ratio` (cf-shell
+    // notification extension).
     for (token_type, count) in [
         ("input", ev.prompt_tokens),
         ("output", ev.completion_tokens),

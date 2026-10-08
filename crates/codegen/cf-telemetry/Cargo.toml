@@ -49,9 +49,9 @@ sentry = { version = "0.42.0", default-features = false, features = [
     "debug-images",
 ] }
 # Single cross-edge: `events::ToolCallCompleted.outcome` reuses
-# `xai_file_utils::events::types::ToolOutcome` so the local event log and
+# `cf_file_utils::events::types::ToolOutcome` so the local event log and
 # the product telemetry event share the same enum surface. Semantically this enum
-# lives with the events module in data-collector; not worth a third crate.
+# lives with the events module in cf-file-utils; not worth a third crate.
 cf-file-utils = { path = "../cf-file-utils" }
 # `session_metrics::TraceUploadReason::from_upload_method` matches on the shared
 # `UploadMethod` enum (small, dependency-light types crate) so the reason->wire

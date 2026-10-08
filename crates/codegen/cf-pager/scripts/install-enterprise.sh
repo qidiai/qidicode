@@ -9,6 +9,14 @@
 # Auth: GROK_DEPLOYMENT_KEY (takes precedence) or ~/.grok/auth.json from `grok login`.
 # Env: QIDI_BIN_DIR, QIDI_PROXY_URL
 #
+# Env naming domains (authoritative contract: scripts/README.md):
+#   Installer scripts read the QIDI_* domain only (QIDI_BIN_DIR,
+#   QIDI_PROXY_URL). The running CLI reads the GROK_* domain
+#   (GROK_DEPLOYMENT_KEY, GROK_VERSION, ...). The only crossings
+#   are retained contract points: GROK_DEPLOYMENT_KEY (enterprise
+#   installer auth) and GROK_VERSION (ps1 version input).
+#   ~/.grok stays the runtime home regardless of QIDI_BIN_DIR.
+#
 # Usage:
 #   curl -fsSL https://x.ai/cli/enterprise-install.sh | bash            # latest enterprise
 #   curl -fsSL https://x.ai/cli/enterprise-install.sh | bash -s 0.1.42  # specific version
@@ -206,11 +214,19 @@ if [ "$os" = "windows" ]; then
     binary_path="${binary_path}.exe"
 fi
 
+# Download to a sibling .tmp.$$ file first so a failed/corrupt
+# fetch never destroys the previous install (atomic promote via mv,
+# mirroring install.sh). On POSIX the downloaded binary is also
+# executed once (--version) before promotion: a garbage or truncated
+# artifact is rejected while the existing install stays active.
+binary_tmp="${binary_path}.tmp.$$"
+rm -f "$binary_tmp" 2>/dev/null || true
+
 echo "  Downloading grok ${version}..." >&2
 if [ "$os" = "windows" ]; then
-    if ! download_file_parallel "${artifact_base}.exe" "$binary_path"; then
-        if ! download_file_parallel "$artifact_base" "$binary_path"; then
-            rm -f "$binary_path"
+    if ! download_file_parallel "${artifact_base}.exe" "$binary_tmp"; then
+        if ! download_file_parallel "$artifact_base" "$binary_tmp"; then
+            rm -f "$binary_tmp"
             if is_not_found "${artifact_base}.exe"; then
                 echo "Error: Grok is not yet available for your system ($platform)." >&2
             else
@@ -219,8 +235,8 @@ if [ "$os" = "windows" ]; then
             exit 1
         fi
     fi
-elif ! download_file_parallel "$artifact_base" "$binary_path"; then
-    rm -f "$binary_path"
+elif ! download_file_parallel "$artifact_base" "$binary_tmp"; then
+    rm -f "$binary_tmp"
     if is_not_found "$artifact_base"; then
         echo "Error: Grok is not yet available for your system ($platform)." >&2
     else
@@ -230,6 +246,7 @@ elif ! download_file_parallel "$artifact_base" "$binary_path"; then
 fi
 
 if [ "$os" = "windows" ]; then
+    mv -f "$binary_tmp" "$binary_path"
     # Symlinks require Developer Mode on Windows; copy instead.
     # If the exe is locked by a running process, rename it aside then retry.
     for bin_name in grok.exe agent.exe; do
@@ -246,7 +263,13 @@ if [ "$os" = "windows" ]; then
     done
     echo "  Binary installed to $BIN_DIR/grok.exe and $BIN_DIR/agent.exe." >&2
 else
-    chmod +x "$binary_path"
+    chmod +x "$binary_tmp"
+    if ! "$binary_tmp" --version </dev/null >/dev/null 2>&1; then
+        echo "Error: downloaded grok failed to run; keeping the existing install." >&2
+        rm -f "$binary_tmp"
+        exit 1
+    fi
+    mv -f "$binary_tmp" "$binary_path"
     ln -sf "$binary_path" "$BIN_DIR/grok"
     ln -sf "$binary_path" "$BIN_DIR/agent"
     echo "  Binary linked to $BIN_DIR/grok and $BIN_DIR/agent." >&2

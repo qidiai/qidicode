@@ -164,8 +164,8 @@ pub fn build_storage_client_for_proxy(
         .with_client_mode(crate::http::process_client_mode())
     }
 }
-/// Bridge that lets `StorageClient` (which lives in xai-file-utils)
-/// emit shell's 401-attribution event without the data-collector crate
+/// Bridge that lets `StorageClient` (which lives in cf-file-utils)
+/// emit shell's 401-attribution event without cf-file-utils
 /// having a direct dependency on shell. Holds a reference to the live
 /// `AuthManager` so attribution events carry the correct user_id.
 pub(crate) struct StorageClientAttributionBridge {
@@ -187,13 +187,13 @@ impl StorageClientAttributionBridge {
     }
 }
 impl cf_file_utils::storage_client::Auth401AttributionCallback for StorageClientAttributionBridge {
-    fn record_401(&self, operation: &str, sent_bearer_prefix: Option<&str>) {
+    fn record_401(&self, operation: &str, sent_bearer_suffix: Option<&str>) {
         crate::auth::attribution::record_consumer_401(
             self.auth_manager.as_ref(),
             self.session_id.as_deref(),
             crate::auth::attribution::ConsumerKind::StorageClient,
             operation,
-            sent_bearer_prefix,
+            sent_bearer_suffix,
         );
     }
 }

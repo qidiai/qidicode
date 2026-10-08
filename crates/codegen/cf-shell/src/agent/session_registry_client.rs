@@ -458,12 +458,18 @@ mod tests {
             repo_head_at_end: Some("abc123".into()),
             restorable_turn_number: None,
         };
-        let json = serde_json::to_value(&req).unwrap();
+        let json = serde_json::to_value(&req).expect("serialize UpdateRequest to JSON");
         assert_eq!(json["lastTurnNumber"], 5);
         assert_eq!(json["repoHeadAtEnd"], "abc123");
-        assert!(json.get("restorableTurnNumber").is_none());
-        assert!(json.get("summary").is_none());
-        assert!(json.get("firstPrompt").is_none());
+        assert!(
+            json.get("restorableTurnNumber").is_none(),
+            "restorableTurnNumber should be omitted when None"
+        );
+        assert!(json.get("summary").is_none(), "summary should be omitted when None");
+        assert!(
+            json.get("firstPrompt").is_none(),
+            "firstPrompt should be omitted when None"
+        );
     }
 
     #[test]
@@ -475,12 +481,21 @@ mod tests {
             repo_head_at_end: None,
             restorable_turn_number: Some(5),
         };
-        let json = serde_json::to_value(&req).unwrap();
+        let json = serde_json::to_value(&req).expect("serialize UpdateRequest to JSON");
         assert_eq!(json["restorableTurnNumber"], 5);
-        assert!(json.get("lastTurnNumber").is_none());
-        assert!(json.get("repoHeadAtEnd").is_none());
-        assert!(json.get("summary").is_none());
-        assert!(json.get("firstPrompt").is_none());
+        assert!(
+            json.get("lastTurnNumber").is_none(),
+            "lastTurnNumber should be omitted when None"
+        );
+        assert!(
+            json.get("repoHeadAtEnd").is_none(),
+            "repoHeadAtEnd should be omitted when None"
+        );
+        assert!(json.get("summary").is_none(), "summary should be omitted when None");
+        assert!(
+            json.get("firstPrompt").is_none(),
+            "firstPrompt should be omitted when None"
+        );
     }
 
     #[test]

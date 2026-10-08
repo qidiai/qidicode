@@ -64,6 +64,23 @@ impl UsageTotals {
         self.input_tokens.saturating_add(self.output_tokens)
     }
 
+    /// Fraction of prompt input served from the KV cache.
+    ///
+    /// `input_tokens` already includes cache reads (ACP wire
+    /// identity), so the ratio is `cached_read_tokens /
+    /// input_tokens`. Returns `0.0` when no input was recorded —
+    /// the 0-division guard keeps a usage-less session at a
+    /// defined 0.0 instead of panicking or emitting NaN. Values
+    /// above 1.0 can only come from inconsistent upstream
+    /// accounting and are passed through unclamped so they
+    /// surface as an anomaly signal instead of being hidden.
+    pub fn cache_read_ratio(&self) -> f64 {
+        if self.input_tokens == 0 {
+            return 0.0;
+        }
+        self.cached_read_tokens as f64 / self.input_tokens as f64
+    }
+
     pub fn cost_is_partial(&self) -> bool {
         self.cost_usd_ticks.is_some() && self.cost_missing_calls > 0
     }
@@ -191,5 +208,37 @@ mod tests {
 
         ledger.record_subagent(&[], true);
         assert!(ledger.incomplete);
+    }
+
+    #[test]
+    fn cache_read_ratio_zero_input_returns_zero_without_panic() {
+        // Empty ledger: defined 0.0, no NaN/panic.
+        assert_eq!(UsageTotals::default().cache_read_ratio(), 0.0);
+        // Degenerate upstream state (cached reads without any
+        // input count): guarded to 0.0 as well.
+        assert_eq!(
+            UsageTotals {
+                cached_read_tokens: 5,
+                ..Default::default()
+            }
+            .cache_read_ratio(),
+            0.0
+        );
+    }
+
+    #[test]
+    fn cache_read_ratio_is_monotonic_in_both_axes() {
+        let mk = |input: u64, cached: u64| UsageTotals {
+            input_tokens: input,
+            cached_read_tokens: cached,
+            ..Default::default()
+        };
+        // More cached reads (input fixed) => ratio grows.
+        assert!(mk(100, 25).cache_read_ratio() < mk(100, 50).cache_read_ratio());
+        // Larger input (cached fixed) => ratio shrinks.
+        assert!(mk(200, 50).cache_read_ratio() < mk(100, 50).cache_read_ratio());
+        // Boundaries: full hit = 1.0, zero hit = 0.0.
+        assert_eq!(mk(100, 100).cache_read_ratio(), 1.0);
+        assert_eq!(mk(100, 0).cache_read_ratio(), 0.0);
     }
 }

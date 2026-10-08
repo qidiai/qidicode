@@ -4,6 +4,14 @@
 # Auth: GROK_DEPLOYMENT_KEY env var (takes precedence) or ~/.grok/auth.json from `grok login`.
 # Env: QIDI_CHANNEL (stable|alpha|enterprise, default: stable), QIDI_BIN_DIR, QIDI_PROXY_URL
 #
+# Env naming domains (authoritative contract: scripts/README.md):
+#   Installer scripts read the QIDI_* domain only (QIDI_CHANNEL,
+#   QIDI_BIN_DIR, QIDI_PROXY_URL). The running CLI reads the GROK_*
+#   domain (GROK_DEPLOYMENT_KEY, GROK_VERSION, ...). The only
+#   crossings are retained contract points: GROK_DEPLOYMENT_KEY
+#   (enterprise installer auth) and GROK_VERSION (ps1 version
+#   input). ~/.grok stays the runtime home regardless of QIDI_BIN_DIR.
+#
 # Usage:
 #   irm https://x.ai/cli/install.ps1 | iex                                       # latest stable
 #   & ([scriptblock]::Create((irm https://x.ai/cli/install.ps1))) -Version 0.1.42 # specific version

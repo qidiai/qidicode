@@ -7,6 +7,14 @@
 # Auth: GROK_DEPLOYMENT_KEY env var (takes precedence) or ~/.grok/auth.json from `grok login`.
 # Env: QIDI_BIN_DIR, QIDI_PROXY_URL
 #
+# Env naming domains (authoritative contract: scripts/README.md):
+#   Installer scripts read the QIDI_* domain only (QIDI_BIN_DIR,
+#   QIDI_PROXY_URL). The running CLI reads the GROK_* domain
+#   (GROK_DEPLOYMENT_KEY, GROK_VERSION, ...). The only crossings
+#   are retained contract points: GROK_DEPLOYMENT_KEY (enterprise
+#   installer auth) and GROK_VERSION (ps1 version input).
+#   ~/.grok stays the runtime home regardless of QIDI_BIN_DIR.
+#
 # Usage:
 #   irm https://x.ai/cli/enterprise-install.ps1 | iex                                       # latest enterprise
 #   & ([scriptblock]::Create((irm https://x.ai/cli/enterprise-install.ps1))) -Version 0.1.42 # specific version
@@ -182,6 +190,13 @@ if ($Version) {
     exit 1
 }
 
+# Validate the resolved version too: $Version was checked above,
+# but a probe-returned channel pointer is server-controlled input.
+if ($resolvedVersion -notmatch '^\d+\.\d+\.\d+(-\S+)?$') {
+    Write-Error "Invalid version format: $resolvedVersion (expected X.Y.Z or X.Y.Z-suffix)"
+    exit 1
+}
+
 if ($AuthSource) {
     Write-Host "Installing Grok $resolvedVersion ($platform, $AuthSource)..." -ForegroundColor Cyan
 } else {
@@ -190,13 +205,17 @@ if ($AuthSource) {
 
 # --- Download binary ---
 
+# Download to a sibling .tmp.$PID file first so a failed fetch
+# never destroys the previous install (atomic promote via
+# Move-Item, mirroring install.sh / install-enterprise.sh).
 $binaryPath = Join-Path $DownloadDir "grok-$platform.exe"
+$binaryTmp = "$binaryPath.tmp.$PID"
 $artifactBase = "$BaseUrl/grok-$resolvedVersion-$platform"
 
 $downloaded = $false
 foreach ($url in @("$artifactBase.exe", $artifactBase)) {
     try {
-        Download-File $url $binaryPath
+        Download-File $url $binaryTmp
         $downloaded = $true
         break
     } catch {
@@ -205,10 +224,12 @@ foreach ($url in @("$artifactBase.exe", $artifactBase)) {
 }
 
 if (-not $downloaded) {
-    if (Test-Path $binaryPath) { Remove-Item $binaryPath -Force }
+    if (Test-Path $binaryTmp) { Remove-Item $binaryTmp -Force }
     Write-Error "Binary download failed from $artifactBase.exe and $artifactBase"
     exit 1
 }
+
+Move-Item -Path $binaryTmp -Destination $binaryPath -Force
 
 # --- Install binary (locked-file safe) ---
 
@@ -251,7 +272,9 @@ $cliLines = @('installer = "internal"', 'channel = "enterprise"')
 if (-not (Test-Path $ConfigFile)) {
     New-Item -ItemType Directory -Path (Split-Path $ConfigFile) -Force | Out-Null
     $content = "[cli]`r`n" + ($cliLines -join "`r`n") + "`r`n"
-    [System.IO.File]::WriteAllText($ConfigFile, $content, [System.Text.Encoding]::UTF8)
+    $configTmp = "$ConfigFile.tmp.$PID"
+    [System.IO.File]::WriteAllText($configTmp, $content, [System.Text.Encoding]::UTF8)
+    Move-Item -Path $configTmp -Destination $ConfigFile -Force
 } elseif ((Get-Content -Raw $ConfigFile) -match '(?m)^\[cli\]') {
     # Section-aware: only replace installer/channel under [cli], not other sections.
     $existingLines = Get-Content $ConfigFile
@@ -273,7 +296,9 @@ if (-not (Test-Path $ConfigFile)) {
         }
         [void]$output.Add($line)
     }
-    [System.IO.File]::WriteAllLines($ConfigFile, [string[]]$output.ToArray(), [System.Text.Encoding]::UTF8)
+    $configTmp = "$ConfigFile.tmp.$PID"
+    [System.IO.File]::WriteAllLines($configTmp, [string[]]$output.ToArray(), [System.Text.Encoding]::UTF8)
+    Move-Item -Path $configTmp -Destination $ConfigFile -Force
 } else {
     Add-Content -Path $ConfigFile -Value "`r`n[cli]`r`n$($cliLines -join "`r`n")`r`n"
 }
