@@ -164,6 +164,25 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
                         .and_then(|d| d.as_array())
                         .ok_or("embedding response missing 'data' array")?;
 
+                    // One vector per requested input, no more, no
+                    // less. A short response would silently misalign
+                    // vectors to texts downstream (zip truncation in
+                    // the callers) and pollute the index with wrong
+                    // embeddings — reject the whole batch instead.
+                    if data.len() != input.len() {
+                        tracing::error!(
+                            vectors = data.len(),
+                            inputs = input.len(),
+                            "embedding response vector count does not match input count, rejecting batch"
+                        );
+                        return Err(format!(
+                            "embedding response returned {} vectors for {} inputs",
+                            data.len(),
+                            input.len()
+                        )
+                        .into());
+                    }
+
                     for item in data {
                         let embedding: Vec<f32> = item
                             .get("embedding")
@@ -279,5 +298,80 @@ mod tests {
         let provider = MockEmbeddingProvider { dimensions: 128 };
         let results = provider.embed_batch(&["test"]).await.unwrap();
         assert_eq!(results[0].len(), 128);
+    }
+
+    /// One-shot HTTP server on a random local port that replies
+    /// with a fixed JSON body. Returns the base URL to target.
+    /// Runs the listener on a dedicated OS thread (std listener)
+    /// so the test does not depend on tokio's `net` feature.
+    fn serve_one_response(body: String) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 1024];
+            // Read until the end of the request headers.
+            let header_end = loop {
+                let n = socket.read(&mut chunk).unwrap();
+                assert!(n > 0, "client closed before sending headers");
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break pos + 4;
+                }
+            };
+            // Drain the request body (Content-Length bytes).
+            let headers = String::from_utf8_lossy(&buf[..header_end]).to_string();
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    (name.trim().eq_ignore_ascii_case("content-length"))
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+                .unwrap_or(0);
+            while buf.len() < header_end + content_length {
+                let n = socket.read(&mut chunk).unwrap();
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket.write_all(response.as_bytes()).unwrap();
+            let _ = socket.shutdown(std::net::Shutdown::Both);
+        });
+        format!("http://{addr}")
+    }
+
+    /// A response carrying fewer vectors than requested inputs must
+    /// reject the whole batch (an explicit error) — never
+    /// zip-truncate vectors onto the wrong texts.
+    #[tokio::test]
+    async fn api_provider_rejects_vector_count_mismatch() {
+        let base = serve_one_response(
+            r#"{"data":[{"embedding":[0.1,0.2,0.3,0.4]}]}"#.to_string(),
+        );
+        // The ambient environment defines no proxy variables, so the
+        // shared client routes straight to the local mock server.
+        // (auth-retry middleware is a pass-through for 200s.)
+        let client = build_static_middleware_client(None);
+        let provider =
+            ApiEmbeddingProvider::new(base, "test-model".to_string(), 4, client);
+        let err = provider
+            .embed_batch(&["hello", "world"])
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("1 vectors for 2 inputs"),
+            "expected count-mismatch error, got: {msg}"
+        );
     }
 }

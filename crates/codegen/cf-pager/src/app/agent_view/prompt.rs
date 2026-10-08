@@ -165,14 +165,18 @@ impl AgentView {
                 return InputOutcome::Changed;
             }
             match key.code {
-                // Up / Ctrl-P: move selection up.
-                KeyCode::Up => {
+                // Up / Ctrl-P: move selection up. Bare keys only —
+                // modified arrows (Alt/Ctrl/Shift+Up) fall through
+                // to their normal bindings instead of being
+                // swallowed as dropdown navigation.
+                KeyCode::Up if key.modifiers.is_empty() => {
                     self.prompt.slash_move_selection(-1);
                     self.prompt.slash_preview_current_selection();
                     return InputOutcome::Changed;
                 }
-                // Down / Ctrl-N: move selection down.
-                KeyCode::Down => {
+                // Down / Ctrl-N: move selection down. Bare keys
+                // only — modified arrows fall through (see Up).
+                KeyCode::Down if key.modifiers.is_empty() => {
                     self.prompt.slash_move_selection(1);
                     self.prompt.slash_preview_current_selection();
                     return InputOutcome::Changed;
@@ -188,13 +192,16 @@ impl AgentView {
                     return InputOutcome::Changed;
                 }
                 // Tab: accept completion (text only, no execute).
-                KeyCode::Tab => {
+                // Bare Tab only — chords like Ctrl+Tab fall
+                // through to their normal bindings.
+                KeyCode::Tab if key.modifiers.is_empty() => {
                     self.prompt.slash_commit_preview();
                     self.prompt.accept_slash_completion(&self.session.models);
                     return InputOutcome::Changed;
                 }
                 // Esc: close dropdown, revert any live preview.
-                KeyCode::Esc => {
+                // Bare Esc only (same guard as the Enter arm).
+                KeyCode::Esc if key.modifiers.is_empty() => {
                     self.prompt.slash_cancel_preview();
                     self.prompt.slash_close();
                     return InputOutcome::Changed;
@@ -1644,5 +1651,70 @@ mod prompt_suggestion_key_tests {
             "the key event latches the impression before dismissing"
         );
         assert!(!agent.prompt.prompt_suggestion.has_suggestion());
+    }
+}
+
+#[cfg(test)]
+mod slash_dropdown_modifier_tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    /// Agent with the slash dropdown open on a bare `/` draft.
+    fn slash_agent() -> AgentView {
+        let mut agent = super::test_fixtures::make_agent();
+        agent.prompt.set_text("/");
+        agent.prompt.refresh_slash(&agent.session.models);
+        agent
+    }
+
+    /// Modifier-held arrows / Tab / Esc must NOT be swallowed
+    /// by the slash dropdown — only bare keys navigate or
+    /// accept. Without the guards, Alt/Ctrl/Shift+Up/Down and
+    /// Ctrl+Tab were captured as dropdown navigation/accept
+    /// (the "interface keys feel dead" root cause).
+    #[test]
+    fn slash_dropdown_ignores_modified_keys() {
+        let mut agent = slash_agent();
+        assert!(agent.prompt.slash_open(), "precondition: dropdown open");
+        let selected_before = agent.prompt.slash_snapshot().selected;
+
+        for key in [
+            KeyEvent::new(KeyCode::Up, KeyModifiers::ALT),
+            KeyEvent::new(KeyCode::Down, KeyModifiers::ALT),
+            KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::ALT),
+        ] {
+            let _ = agent.handle_prompt_key_for_test(&key);
+            assert!(
+                agent.prompt.slash_open(),
+                "{key:?} must not close the slash dropdown"
+            );
+            assert_eq!(
+                agent.prompt.slash_snapshot().selected, selected_before,
+                "{key:?} must not move the slash selection"
+            );
+            assert_eq!(
+                agent.prompt.text(),
+                "/",
+                "{key:?} must not edit the draft"
+            );
+        }
+    }
+
+    /// Bare arrows still navigate the dropdown (regression
+    /// guard for the `modifiers.is_empty()` guards).
+    #[test]
+    fn slash_dropdown_bare_arrow_still_navigates() {
+        let mut agent = slash_agent();
+        let selected_before = agent.prompt.slash_snapshot().selected;
+        let outcome = agent
+            .handle_prompt_key_for_test(&KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(
+            agent.prompt.slash_snapshot().selected,
+            selected_before + 1,
+            "bare Down must move the selection down"
+        );
     }
 }

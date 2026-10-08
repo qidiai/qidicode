@@ -92,7 +92,16 @@ pub fn select_turns_to_compact<T: CompactionItem>(
         let count = item_token_counts[i];
         if kept.saturating_add(count) > target_tokens {
             // Adding this item would exceed the budget — split here.
-            split_idx = i + 1;
+            //
+            // Exception: when the newest item alone busts the budget
+            // (`i == total - 1` on the first backward step), keep it
+            // unconditionally and compact everything older. Otherwise
+            // the split lands at `total` (compact everything, keep
+            // nothing), snaps to `total`, and the plan is abandoned
+            // (None) — partial compaction would never fire for this
+            // conversation even though there is older history to
+            // compact.
+            split_idx = if i == total - 1 { total - 1 } else { i + 1 };
             break;
         }
         kept = kept.saturating_add(count);
@@ -285,5 +294,40 @@ mod tests {
         // Snap forward: items[1]=Tool, items[2]=Tool, idx=3=total.
         // Return None — nothing left to keep.
         assert!(select_turns_to_compact(&counts, &items, 0, 5).is_none());
+    }
+
+    #[test]
+    fn newest_item_alone_over_budget_keeps_it_and_compacts_older() {
+        // The newest item alone busts the budget: it must be kept
+        // unconditionally while the older history is compacted —
+        // the pre-fix behavior abandoned the whole plan (None),
+        // so partial compaction never fired.
+        let items = vec![
+            MockItem::user(),
+            MockItem::assistant(),
+            MockItem::user(), // newest, alone over budget
+        ];
+        let counts = vec![10, 10, 100];
+        // Target 50 → walking back: the newest item (100) already
+        // exceeds it on the first backward step.
+        let plan =
+            select_turns_to_compact(&counts, &items, 50, 5).expect("should split");
+        assert_eq!(
+            plan.split_idx, 2,
+            "newest item must be kept, older history compacted"
+        );
+        assert_eq!(plan.tokens_to_compact, 20);
+    }
+
+    #[test]
+    fn red_line_overbudget_newest_with_plain_older() {
+        // Red line: [plain older item, over-budget newest item] →
+        // keep the single newest item, compact the rest.
+        let items = vec![MockItem::user(), MockItem::user()];
+        let counts = vec![10, 100];
+        let plan =
+            select_turns_to_compact(&counts, &items, 50, 5).expect("should split");
+        assert_eq!(plan.split_idx, 1, "keep only the newest item");
+        assert_eq!(plan.tokens_to_compact, 10, "compact the plain older item");
     }
 }
