@@ -140,6 +140,10 @@ mod shell_suggestion_key_tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
+    fn key_mod(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, modifiers)
+    }
+
     /// Wire-shaped token item: `insert_text` is the compat whole line,
     /// `token_text` the span replacement (what a new shell sends).
     fn token_item(line: &str, token: &str, range: std::ops::Range<usize>) -> CompletionItemParsed {
@@ -987,6 +991,65 @@ mod shell_suggestion_key_tests {
                 .iter()
                 .any(|e| matches!(e, Effect::FetchShellSuggestions { .. })),
             "Tab must refetch for the clicked position"
+        );
+    }
+
+    /// F-C1 audit (2026-10-09): the completion-dropdown intercept's
+    /// Up/Down arms previously used a wide `key.code == Up \|\| modifiers
+    /// == CONTROL` match that swallowed EVERY Ctrl+<key> as dropdown
+    /// navigation while the dropdown was open. Negative space: modified
+    /// keys must fall through untouched; positive space: bare Up/Down
+    /// navigate and the Ctrl+P/Ctrl+N readline aliases keep working.
+    #[test]
+    fn completion_dropdown_ignores_modified_keys_except_readline_aliases() {
+        let mut agent = bash_agent("ls | gr");
+        agent.prompt.suggestions.dropdown.open = true;
+        // Two items: move_selection wraps, so a single-item dropdown can
+        // never show a selection change (0 → 1 → wraps back to 0).
+        agent.prompt.suggestions.dropdown.items = vec![
+            token_item("ls | grep", "grep", 5..7),
+            token_item("ls | grip", "grip", 5..7),
+        ];
+        assert!(agent.prompt.completion_dropdown_open());
+
+        let selected_before = agent.prompt.suggestions.dropdown.selected;
+
+        // Negative space, scoped to the actual fix: Ctrl+<key> (other
+        // than the p/n readline aliases) must not be swallowed as
+        // dropdown navigation. Note the selection-invariance anchor is
+        // deliberately NOT "dropdown stays open" — Alt/Shift/Esc keys
+        // may legitimately park or close the dropdown via unrelated
+        // branches (that behavior predates this fix and is not its
+        // contract); the narrow invariant this pins is the intercept
+        // arm's navigation side effect.
+        for k in [
+            key_mod(KeyCode::Char('s'), KeyModifiers::CONTROL),
+            key_mod(KeyCode::Char('x'), KeyModifiers::CONTROL),
+        ] {
+            let _ = agent.handle_prompt_key_for_test(&k);
+            assert_eq!(
+                agent.prompt.suggestions.dropdown.selected,
+                selected_before,
+                "{k:?} must not be swallowed as dropdown navigation"
+            );
+        }
+
+        // Positive space: bare Down still navigates (and the selection
+        // moves), then Ctrl+P walks back to the baseline.
+        let outcome = agent.handle_prompt_key_for_test(&key(KeyCode::Down));
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(
+            agent.prompt.suggestions.dropdown.selected,
+            selected_before + 1,
+            "bare Down must still navigate the dropdown"
+        );
+        let outcome =
+            agent.handle_prompt_key_for_test(&key_mod(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        assert!(matches!(outcome, InputOutcome::Changed));
+        assert_eq!(
+            agent.prompt.suggestions.dropdown.selected,
+            selected_before,
+            "readline alias Ctrl+P must still walk back up"
         );
     }
 }
