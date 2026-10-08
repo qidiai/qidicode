@@ -135,6 +135,9 @@ impl PromptUsage {
             cost_usd_ticks: _,  // cost without usage cannot occur
             cost_is_partial: _,
             cost_missing_calls: _,
+            cache_read_ratio: _, // derived from cached_read_tokens/input_tokens
+            // (both above) — not an independent token count, so it cannot
+            // make a token-empty usage non-empty
         } = self.totals;
         model_calls == 0
             && input_tokens == 0
@@ -157,6 +160,14 @@ pub struct PromptUsageModel {
     pub total_tokens: u64,
     #[serde(default)]
     pub cached_read_tokens: u64,
+    /// `cached_read_tokens / input_tokens` (input includes
+    /// cache reads); `0.0` when no input was recorded.
+    /// Signal-layer view of the KV-cache hit rate — the OTel
+    /// `grok_code.token.usage` counter already carries the
+    /// raw `cache_read`/`input` counts (type attribute), so
+    /// backends can derive the same ratio from counters.
+    #[serde(default)]
+    pub cache_read_ratio: f64,
     #[serde(default)]
     pub reasoning_tokens: u64,
     #[serde(default)]
@@ -200,6 +211,7 @@ impl From<&cf_chat_state::UsageTotals> for PromptUsageModel {
             output_tokens,
             total_tokens: t.total_tokens(),
             cached_read_tokens,
+            cache_read_ratio: t.cache_read_ratio(),
             reasoning_tokens,
             model_calls,
             api_duration_ms,
@@ -260,6 +272,7 @@ pub fn project_result_usage(result: &mut serde_json::Value, usage: &PromptUsage)
         output_tokens,
         total_tokens,
         cached_read_tokens,
+        cache_read_ratio,
         reasoning_tokens,
         model_calls: _,     // totals-level; headless carries num_turns instead
         api_duration_ms: _, // dropped: not part of the frozen headless shape
@@ -270,6 +283,7 @@ pub fn project_result_usage(result: &mut serde_json::Value, usage: &PromptUsage)
     result["usage"] = serde_json::json!({
         "input_tokens": uncached_input_tokens(input_tokens, cached_read_tokens),
         "cache_read_input_tokens": cached_read_tokens,
+        "cache_read_ratio": cache_read_ratio,
         "output_tokens": output_tokens,
         "reasoning_tokens": reasoning_tokens,
         "total_tokens": total_tokens,
@@ -297,6 +311,7 @@ pub fn project_result_usage(result: &mut serde_json::Value, usage: &PromptUsage)
                 output_tokens,
                 total_tokens: _, // derivable per row
                 cached_read_tokens,
+                cache_read_ratio: _, // dropped: reduced per-model schema
                 reasoning_tokens: _, // dropped: reduced per-model schema
                 model_calls,
                 api_duration_ms: _, // dropped: reduced per-model schema
@@ -2418,16 +2433,20 @@ mod tests {
         project_result_usage(&mut result, &usage);
         let uncached = result["usage"]["input_tokens"].as_u64().unwrap();
         let cache = result["usage"]["cache_read_input_tokens"].as_u64().unwrap();
+        let ratio = result["usage"]["cache_read_ratio"].as_f64().unwrap();
         let output = result["usage"]["output_tokens"].as_u64().unwrap();
         let total = result["usage"]["total_tokens"].as_u64().unwrap();
         assert_eq!(uncached, 60);
         assert_eq!(cache, 40);
+        // 40 cached of 100 full input (input includes cache reads).
+        assert!((ratio - 0.4).abs() < 1e-12);
         assert_eq!(output, 10);
         assert_eq!(total, uncached + cache + output);
         // ACP serde keeps full input_tokens; headless identity differs.
         let acp = serde_json::to_value(&usage).unwrap();
         assert_eq!(acp["inputTokens"], 100);
         assert_eq!(acp["cachedReadTokens"], 40);
+        assert!((acp["cacheReadRatio"].as_f64().unwrap() - 0.4).abs() < 1e-12);
         assert_ne!(acp["inputTokens"], result["usage"]["input_tokens"]);
         assert_eq!(result["modelUsage"]["m"]["inputTokens"], 60);
         assert_eq!(result["modelUsage"]["m"]["cacheReadInputTokens"], 40);

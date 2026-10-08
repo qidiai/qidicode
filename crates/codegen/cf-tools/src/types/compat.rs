@@ -358,7 +358,7 @@ impl CompatConfig {
     }
 
     /// Config directories that may contain `skills/` subdirectories, in
-    /// priority order. `.grok` and `.agents` are always included; `.claude`
+    /// priority order. `.qidi` and `.agents` are always included; `.claude`
     /// and `.cursor` are gated on their respective `skills` cell.
     ///
     /// Replaces the hard-coded `[".qidi", ".agents", ".claude", ".cursor"]`

@@ -461,3 +461,126 @@ fn install_sh_shell_rc_rewrite_matrix_body() {
         run_shell_rc_case(case);
     }
 }
+
+/// Enterprise channel: an explicitly passed bad TARGET version
+/// is rejected before any network access (exit 1 + message on
+/// stderr), mirroring the stable installer's format gate.
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "no bash on windows: enterprise version-format gate runs on ubuntu or WSL"
+)]
+fn install_enterprise_sh_rejects_bad_version_format() {
+    #[cfg(unix)]
+    install_enterprise_sh_rejects_bad_version_format_body();
+}
+
+#[cfg(unix)]
+fn install_enterprise_sh_rejects_bad_version_format_body() {
+    let script = script_path("install-enterprise.sh").unwrap_or_else(|| {
+        panic!(
+            "install-enterprise.sh not found relative to crate; the sibling-crate layout changed -- update script_path()"
+        )
+    });
+    let home = tempfile::tempdir().unwrap();
+    let out = Command::new("/bin/bash")
+        .arg(script)
+        .arg("999bad")
+        .env_clear()
+        .env("HOME", home.path())
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .expect("spawn bash install-enterprise.sh");
+    assert!(
+        !out.status.success(),
+        "bad TARGET version must exit non-zero"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Invalid version format"),
+        "stderr must carry the format error, got: {stderr}"
+    );
+}
+
+/// Enterprise channel keeps the active grok runnable under
+/// download corruption: the installer downloads to a `.tmp.$$`
+/// file, executes it (`--version`) before promoting, and only
+/// then links it — so a corrupt artifact never becomes the
+/// active binary and the previous-good install survives with no
+/// `.tmp` partial left behind.
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "no bash on windows: run the enterprise blitz on ubuntu or WSL (CI: test-install-sh job)"
+)]
+fn install_enterprise_sh_blitz_keeps_grok_runnable_under_corruption() {
+    #[cfg(unix)]
+    install_enterprise_sh_blitz_body();
+}
+
+#[cfg(unix)]
+fn install_enterprise_sh_blitz_body() {
+    let script = script_path("install-enterprise.sh").unwrap_or_else(|| {
+        panic!(
+            "install-enterprise.sh not found relative to crate; the sibling-crate layout changed -- update script_path()"
+        )
+    });
+    let platform = host_platform();
+    let fakedir = tempfile::tempdir().unwrap();
+    write_fake_curl(fakedir.path());
+
+    // Same corruption matrix as the stable blitz: full downloads
+    // promote, truncate/garbage downloads fail the pre-promote
+    // --version gate and keep the previous-good install.
+    let cases = [
+        ("full", true),
+        ("truncate", false),
+        ("garbage", false),
+        ("full", true),
+        ("truncate", false),
+        ("garbage", false),
+        ("full", true),
+    ];
+
+    for (mode, expect_ok) in cases {
+        let home = tempfile::tempdir().unwrap();
+        seed_previous_good(home.path(), &platform);
+
+        let path_env = format!("{}:/usr/bin:/bin", fakedir.path().display());
+        let status = Command::new("/bin/bash")
+            .arg(&script)
+            .arg("0.1.181")
+            .env_clear()
+            .env("HOME", home.path())
+            .env("PATH", path_env)
+            .env("SHELL", "/bin/bash")
+            .env("QIDI_BIN_DIR", home.path().join(".qidi").join("bin"))
+            .env("FAKE_MODE", mode)
+            .status()
+            .expect("spawn bash install-enterprise.sh");
+        assert_eq!(
+            status.success(),
+            expect_ok,
+            "install-enterprise.sh mode={mode} exit success mismatch"
+        );
+
+        // The invariant holds regardless of which path was taken:
+        // the active grok always runs (new good binary on
+        // success, previous-good on rejection).
+        assert_active_grok_runs(home.path());
+
+        // No .tmp partial may survive in the download dir —
+        // every failure path must clean up its own temp file.
+        let downloads = home.path().join(".grok").join("downloads");
+        let leftovers: Vec<_> = std::fs::read_dir(&downloads)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "install-enterprise.sh must clean .tmp partials: {:?}",
+            leftovers
+        );
+    }
+}

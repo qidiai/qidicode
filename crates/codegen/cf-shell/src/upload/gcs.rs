@@ -1,8 +1,8 @@
 //! Shell-side adapter that threads the live `AuthManager` through to the
 //! `StorageClient` constructed inside `cf_file_utils::gcs::*` helpers.
 //!
-//! Background: the data-collector helpers (`upload_bytes`,
-//! `upload_file`, `upload_stream`, `upload_bytes_signed`)
+//! Background: the upload helpers in this module
+//! (`upload_bytes`, `upload_file`, `upload_stream`, `upload_bytes_signed`)
 //! build a `StorageClient` per call. Without a `StorageConfig` impl that
 //! provides `proxy_credentials` / `proxy_attribution`, that client falls
 //! back to a static `user_token` snapshot baked into `TraceExportConfig`

@@ -861,6 +861,11 @@ mod tests {
 
     // --- end-to-end via suggest() ---
 
+    /// POSIX-only test helper: the only callers are the `#[cfg(unix)]`
+    /// end-to-end tests below (the provider early-returns on Windows,
+    /// see the module-level `cfg!(windows)` gate), so the helper is
+    /// compiled out on Windows instead of tripping dead_code.
+    #[cfg(unix)]
     fn ctx(text: &str, cwd: &Path) -> SuggestContext {
         SuggestContext::new(
             text.to_owned(),

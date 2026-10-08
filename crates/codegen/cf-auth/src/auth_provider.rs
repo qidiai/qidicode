@@ -1,7 +1,7 @@
-//! Credential dependency-inversion seam for outbound HTTP made by the
-//! data-collector. Shell installs `ShellAuthCredentialProvider` wrapping
-//! `AuthManager` + `TokenRefresher`; data-collector code holds an
-//! `Arc<dyn AuthCredentialProvider>`.
+//! Credential dependency-inversion seam for outbound HTTP made by
+//! telemetry/storage client crates (cf-file-utils, OTel exporters).
+//! Shell installs `ShellAuthCredentialProvider` wrapping `AuthManager`
+//! + `TokenRefresher`; caller crates hold an `Arc<dyn AuthCredentialProvider>`.
 
 use reqwest::RequestBuilder;
 
@@ -56,7 +56,7 @@ impl std::fmt::Debug for CredentialSnapshot {
     }
 }
 
-/// Source of truth for outbound auth on data-collector requests.
+/// Source of truth for outbound auth on client requests.
 ///
 /// Supertrait of `HttpAuth` so a single impl satisfies both this trait
 /// (refresh-aware snapshot + 401 recovery) and the visibility seam

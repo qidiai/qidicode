@@ -1,6 +1,6 @@
 //! Telemetry-engine configuration.
 //!
-//! Extracted from `qidi-code::agent::config` so the data-collector
+//! Extracted from `qidi-code::agent::config` so the telemetry
 //! engine can construct a [`TelemetryClient`](crate::client::TelemetryClient)
 //! without a build-time dependency on the shell.
 //!

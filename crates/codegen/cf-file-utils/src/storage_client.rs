@@ -55,12 +55,16 @@ fn storage_breaker_config() -> BreakerConfig {
 /// a bridge implementation that wires into
 /// `crate::auth::attribution::record_consumer_401`.
 ///
-/// `sent_bearer_prefix` is the first-N characters of the bearer that was
-/// actually sent on the wire (extracted at the trait boundary so the full
-/// bearer never escapes `StorageClient`). `None` indicates no bearer was
-/// configured (the unauthenticated test/CI path).
+/// `sent_bearer_suffix` is the last-N characters (tail fragment) of the
+/// bearer that was actually sent on the wire (extracted at the trait
+/// boundary so the full bearer never escapes `StorageClient`). `None`
+/// indicates no bearer was configured (the unauthenticated test/CI path).
+///
+/// Wire-key mapping: the JSON payload key remains `sent_key_prefix`
+/// (historical external contract name) even though the value is a
+/// suffix — see `cf-shell::auth::attribution` for the payload schema.
 pub trait Auth401AttributionCallback: Send + Sync + std::fmt::Debug {
-    fn record_401(&self, operation: &str, sent_bearer_prefix: Option<&str>);
+    fn record_401(&self, operation: &str, sent_bearer_suffix: Option<&str>);
 }
 
 // ============================================================================
@@ -3500,7 +3504,7 @@ mod attribution_tests {
         (addr, handle)
     }
 
-    /// Captures the `(operation, sent_bearer_prefix)` pairs the
+    /// Captures the `(operation, sent_bearer_suffix)` pairs the
     /// attribution callback receives.
     #[derive(Debug, Default)]
     struct CapturingAttribution {
@@ -3508,11 +3512,11 @@ mod attribution_tests {
     }
 
     impl Auth401AttributionCallback for CapturingAttribution {
-        fn record_401(&self, operation: &str, sent_bearer_prefix: Option<&str>) {
+        fn record_401(&self, operation: &str, sent_bearer_suffix: Option<&str>) {
             self.calls
                 .lock()
                 .unwrap()
-                .push((operation.to_string(), sent_bearer_prefix.map(str::to_string)));
+                .push((operation.to_string(), sent_bearer_suffix.map(str::to_string)));
         }
     }
 
