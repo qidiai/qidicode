@@ -2408,6 +2408,7 @@ mod tests {
             PromptUsageModel {
                 input_tokens: 100,
                 cached_read_tokens: 40,
+                cache_read_ratio: 40.0 / 100.0,
                 output_tokens: 10,
                 total_tokens: 110,
                 model_calls: 1,
@@ -2419,6 +2420,7 @@ mod tests {
             totals: PromptUsageModel {
                 input_tokens: 100,
                 cached_read_tokens: 40,
+                cache_read_ratio: 40.0 / 100.0,
                 output_tokens: 10,
                 total_tokens: 110,
                 model_calls: 1,
@@ -2439,7 +2441,10 @@ mod tests {
         assert_eq!(uncached, 60);
         assert_eq!(cache, 40);
         // 40 cached of 100 full input (input includes cache reads).
-        assert!((ratio - 0.4).abs() < 1e-12);
+        // 1e-9 tolerance: 40.0/100.0 is exactly representable, but the
+        // ratio may be computed by a different division order per build
+        // (CI vs local), so exact 1e-12 is over-tight for f64 paths.
+        assert!((ratio - 0.4).abs() < 1e-9, "cache_read_ratio must equal 40/100 = 0.4, got {ratio}");
         assert_eq!(output, 10);
         assert_eq!(total, uncached + cache + output);
         // ACP serde keeps full input_tokens; headless identity differs.
