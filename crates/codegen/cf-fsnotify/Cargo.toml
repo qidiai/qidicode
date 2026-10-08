@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 license = "Apache-2.0"
 name = "cf-fsnotify"
 version = "0.1.0"
@@ -20,7 +20,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-serial_test = "3"
+serial_test = "4"
 criterion = { workspace = true }
 cf-tracing-macros = { workspace = true }
 
