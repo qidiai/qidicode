@@ -95,10 +95,10 @@ pub struct TerminalConfig {
     pub cols: u16,
     /// Answer terminal device queries (cursor-position reports for `ESC[6n`,
     /// etc.) from the embedded vt100 emulator, like a real terminal would.
-    /// Off by default — most scenarios don't need it. Required for `--minimal`
-    /// scenarios: the inline viewport's startup cursor-position probe otherwise
-    /// times out and `--minimal` silently downgrades to full-height inline
-    /// (see `PtyHarness::set_respond_to_queries`).
+    /// On by default: the pager's default TUI (inline viewport) probes the
+    /// cursor position on startup and deadlocks under ConPTY when nobody
+    /// answers (see `PtyHarness::set_respond_to_queries`). Scenario YAML may
+    /// set it to false to script probe replies by hand.
     #[serde(default)]
     pub respond_to_queries: bool,
 }
@@ -108,7 +108,7 @@ impl Default for TerminalConfig {
         Self {
             rows: DEFAULT_ROWS,
             cols: DEFAULT_COLS,
-            respond_to_queries: false,
+            respond_to_queries: true,
         }
     }
 }
