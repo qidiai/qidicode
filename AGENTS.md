@@ -153,7 +153,7 @@
 | 出产品 exe | `cargo build --release -p cf-pager-bin --bin qidi -j 4` | 冷 30-90 分钟；有缓存快；**运行中的 qidi.exe 无法覆盖 → 先改名旧 exe（Windows 允许改名不允许覆盖）** |
 | cf-memory 测试 | `cargo test -p cf-memory --lib` | ~2-10 分钟 |
 | **cf-shell 测试** | `$env:CARGO_TARGET_DIR='C:\qidi-cfshell-test'; $env:CARGO_PROFILE_DEV_DEBUG='0'; cargo test -p cf-shell --lib -j 4` | **热缓存全量 ~2.5 分钟**；`DEBUG=0`+串行是内存 OOM 的解药（本机 16GB，cf-shell 测试二进制直跑必 OOM） |
-| cf-chat-state 测试 | `cargo test -p cf-chat-state --lib`；⚠️ G 盘 target 对该 crate 测试二进制**链接确定性挂起**（2026-10-04 实测：link.exe 在 ~369MB 读偏移零 I/O 冻结，两次复现）→ 挂起时改用 C 盘热 target 方案（同 cf-shell 行） | C 盘热缓存 ~16s-5 分钟；基线 343 passed（2026-10-04） |
+| cf-chat-state 测试 | `cargo test -p cf-chat-state --lib`（G 盘直跑）；历史注记：2026-10-04 曾报 G 盘链接确定性挂起（link.exe ~369MB 零 I/O 冻结，两次复现），**2026-10-09 复测未复现**——冷编 21m22s + link.exe 活跃推进（工作集 5.4GB，非冻结特征）+ 链接正常完成 + 测试 0.53s；若再现挂起，改用 C 盘热 target 方案（同 cf-shell 行） | G 盘冷编（禁 sccache）~21 分钟；基线 345 passed / 0 failed（2026-10-09，较 2026-10-04 基线 343 +2 = B1-6 新增 cache_read_ratio 两测试，数目自洽） |
 | **cf-pager 测试** | ⚠️ G 盘冷链**严重偏离旧记载**（2026-10-04 实测 >90 分钟未完成，pdb 1.6GB 链接为瓶颈）→ **一律用 C 盘热 target 方案**（同 cf-shell 行） | C 盘 ~15 分钟；基线 6968 passed + 53 预先存在字形失败（字体/终端环境类，失败集与业务改动零交集，2026-10-04 实测记录） |
 | 快速全局校验 | `cargo check --workspace` | 0 errors 为过 |
 | 清理 | `cargo clean` | 先备份 `target/release/qidi.exe` 到 `G:\qidi-exe-backup\`；**注意 §6 target/debug 历史文件雷** |
