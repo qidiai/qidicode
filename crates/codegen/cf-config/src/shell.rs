@@ -286,6 +286,24 @@ pub fn shell_command_argv(command: &str) -> ShellInvocation {
     invocation_for(detect_windows_shell(), command)
 }
 
+/// Build `(program, args, env)` for running a **hook command** on Windows.
+///
+/// Unlike [`shell_command_argv`] — which follows the user's detected
+/// terminal shell (`QIDI_SHELL` override > pwsh > powershell.exe >
+/// Git Bash) — hook commands use a FIXED `powershell.exe` invocation,
+/// so a hook config behaves identically on every Windows machine. This
+/// mirrors Unix, where hooks always run under `sh -c`. The
+/// terminal-shell cascade is a user-preference concern for the
+/// interactive terminal; hooks need deterministic semantics.
+///
+/// Windows hook-script convention (one line): PowerShell semantics —
+/// single-quoted strings, `;` as the statement separator, `exit N` to
+/// signal the decision exit code (0 = allow, 2 = deny).
+#[cfg(not(unix))]
+pub fn hook_shell_command_argv(command: &str) -> ShellInvocation {
+    invocation_for(&WindowsShell::PowerShell, command)
+}
+
 /// Pure builder split out of `shell_command_argv` so tests can exercise every
 /// `WindowsShell` variant, not just the one installed on the test host.
 #[cfg(not(unix))]
@@ -657,6 +675,32 @@ mod tests {
                 inv.env
             );
         }
+    }
+
+    /// Hook commands pin `powershell.exe` on Windows regardless of the
+    /// detected terminal shell or a `QIDI_SHELL` override, so a hook
+    /// config behaves identically on every machine (Unix hooks are
+    /// likewise always `sh -c`).
+    #[cfg(not(unix))]
+    #[test]
+    fn hook_shell_command_argv_is_fixed_powershell() {
+        let inv = hook_shell_command_argv("echo hi");
+        assert_eq!(inv.program, "powershell.exe");
+        assert_eq!(
+            inv.args,
+            vec![
+                "-NoProfile".to_string(),
+                "-NonInteractive".to_string(),
+                "-Command".to_string(),
+                "echo hi".to_string(),
+            ],
+            "hook command must run via fixed powershell.exe -Command"
+        );
+        // UTF-8 defaults still applied.
+        assert!(inv.env.contains(&("PYTHONUTF8", "1")));
+        assert!(inv
+            .env
+            .contains(&("PYTHONIOENCODING", "utf-8:surrogateescape")));
     }
 
     /// GitBash keeps its pre-existing MSYS2 path-translation guards in addition

@@ -420,6 +420,33 @@ mod tests {
         }
     }
 
+    /// Helper: create a HookSpec whose command prints the given JSON
+    /// payload and exits with the given code.
+    ///
+    /// The payload is written to a temp file and emitted via `cat`
+    /// (Unix) / `type` (Windows) instead of an inline
+    /// `echo '...'`, so the JSON passes through verbatim under
+    /// every shell the runner may use (`sh -c` on Unix, fixed
+    /// `powershell.exe -Command` on Windows) — no shell-quoting
+    /// semantics in play. The returned `TempDir` must stay alive
+    /// until the dispatch call completes.
+    fn make_json_command_spec(
+        name: &str,
+        matcher: Option<&str>,
+        enabled: bool,
+        json: &str,
+        exit_code: i32,
+    ) -> (HookSpec, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("hook-output.json");
+        std::fs::write(&file, json).unwrap();
+        #[cfg(unix)]
+        let script = format!("cat \"{}\"; exit {exit_code}", file.display());
+        #[cfg(windows)]
+        let script = format!("type \"{}\"; exit {exit_code}", file.display());
+        (make_command_spec(name, matcher, enabled, &script), dir)
+    }
+
     /// Build a registry from a list of specs using the public API.
     fn registry_from_specs(specs: Vec<HookSpec>) -> HookRegistry {
         let (mut registry, _) = crate::discovery::load_hooks(None, None);
@@ -480,7 +507,8 @@ mod tests {
 
     #[tokio::test]
     async fn single_allow_hook() {
-        let spec = make_command_spec("allow-hook", None, true, "echo '{\"decision\":\"allow\"}'");
+        let (spec, _dir) =
+            make_json_command_spec("allow-hook", None, true, r#"{"decision":"allow"}"#, 0);
         let registry = registry_from_specs(vec![spec]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
         let result = dispatch_pre_tool_use(&registry, &envelope, &run_ctx()).await;
@@ -489,11 +517,12 @@ mod tests {
 
     #[tokio::test]
     async fn single_deny_hook() {
-        let spec = make_command_spec(
+        let (spec, _dir) = make_json_command_spec(
             "deny-hook",
             None,
             true,
-            "echo '{\"decision\":\"deny\",\"reason\":\"blocked\"}'; exit 2",
+            r#"{"decision":"deny","reason":"blocked"}"#,
+            2,
         );
         let registry = registry_from_specs(vec![spec]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
@@ -513,11 +542,12 @@ mod tests {
     #[tokio::test]
     async fn disabled_hook_is_skipped_allows() {
         // A deny hook that is disabled should be skipped entirely.
-        let spec = make_command_spec(
+        let (spec, _dir) = make_json_command_spec(
             "disabled-deny",
             None,
             false, // disabled!
-            "echo '{\"decision\":\"deny\",\"reason\":\"should not run\"}'; exit 2",
+            r#"{"decision":"deny","reason":"should not run"}"#,
+            2,
         );
         let registry = registry_from_specs(vec![spec]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
@@ -528,11 +558,12 @@ mod tests {
     #[tokio::test]
     async fn matcher_skips_non_matching_tool() {
         // Deny hook with matcher for "read_file" should not fire for "run_terminal_cmd".
-        let spec = make_command_spec(
+        let (spec, _dir) = make_json_command_spec(
             "read-only-deny",
             Some("read_file"),
             true,
-            "echo '{\"decision\":\"deny\",\"reason\":\"blocked\"}'; exit 2",
+            r#"{"decision":"deny","reason":"blocked"}"#,
+            2,
         );
         let registry = registry_from_specs(vec![spec]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
@@ -543,11 +574,12 @@ mod tests {
     #[tokio::test]
     async fn matcher_fires_on_matching_tool() {
         // Deny hook with matcher for "run_terminal_cmd" should fire.
-        let spec = make_command_spec(
+        let (spec, _dir) = make_json_command_spec(
             "bash-deny",
             Some("run_terminal_cmd"),
             true,
-            "echo '{\"decision\":\"deny\",\"reason\":\"bash blocked\"}'; exit 2",
+            r#"{"decision":"deny","reason":"bash blocked"}"#,
+            2,
         );
         let registry = registry_from_specs(vec![spec]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
@@ -561,18 +593,15 @@ mod tests {
     #[tokio::test]
     async fn first_deny_wins_short_circuits() {
         // Two hooks: first denies, second allows. First deny should win.
-        let deny_spec = make_command_spec(
+        let (deny_spec, _deny_dir) = make_json_command_spec(
             "first-deny",
             None,
             true,
-            "echo '{\"decision\":\"deny\",\"reason\":\"first says no\"}'; exit 2",
+            r#"{"decision":"deny","reason":"first says no"}"#,
+            2,
         );
-        let allow_spec = make_command_spec(
-            "second-allow",
-            None,
-            true,
-            "echo '{\"decision\":\"allow\"}'",
-        );
+        let (allow_spec, _allow_dir) =
+            make_json_command_spec("second-allow", None, true, r#"{"decision":"allow"}"#, 0);
         let registry = registry_from_specs(vec![deny_spec, allow_spec]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
         let result = dispatch_pre_tool_use(&registry, &envelope, &run_ctx()).await;
@@ -593,13 +622,14 @@ mod tests {
     async fn allow_then_deny_denies() {
         // First hook allows, second hook denies. The deny should win.
         // This is the key "stricter deny filter takes precedence" scenario.
-        let allow_spec =
-            make_command_spec("broad-allow", None, true, "echo '{\"decision\":\"allow\"}'");
-        let deny_spec = make_command_spec(
+        let (allow_spec, _allow_dir) =
+            make_json_command_spec("broad-allow", None, true, r#"{"decision":"allow"}"#, 0);
+        let (deny_spec, _deny_dir) = make_json_command_spec(
             "strict-deny",
             None,
             true,
-            "echo '{\"decision\":\"deny\",\"reason\":\"strict policy\"}'; exit 2",
+            r#"{"decision":"deny","reason":"strict policy"}"#,
+            2,
         );
         let registry = registry_from_specs(vec![allow_spec, deny_spec]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
@@ -621,13 +651,14 @@ mod tests {
     async fn allow_broad_deny_specific_tool_match() {
         // Broad allow hook (no matcher), specific deny hook for "run_terminal_cmd".
         // The deny should fire for matching tool even though allow came first.
-        let allow_spec =
-            make_command_spec("allow-all", None, true, "echo '{\"decision\":\"allow\"}'");
-        let deny_spec = make_command_spec(
+        let (allow_spec, _allow_dir) =
+            make_json_command_spec("allow-all", None, true, r#"{"decision":"allow"}"#, 0);
+        let (deny_spec, _deny_dir) = make_json_command_spec(
             "deny-bash",
             Some("run_terminal_cmd"),
             true,
-            "echo '{\"decision\":\"deny\",\"reason\":\"bash not allowed\"}'; exit 2",
+            r#"{"decision":"deny","reason":"bash not allowed"}"#,
+            2,
         );
         let registry = registry_from_specs(vec![allow_spec, deny_spec]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
@@ -642,13 +673,14 @@ mod tests {
     async fn allow_broad_deny_specific_non_matching_allows() {
         // Broad allow hook, specific deny for "read_file" only.
         // Calling with "run_terminal_cmd" should allow (deny doesn't match).
-        let allow_spec =
-            make_command_spec("allow-all", None, true, "echo '{\"decision\":\"allow\"}'");
-        let deny_spec = make_command_spec(
+        let (allow_spec, _allow_dir) =
+            make_json_command_spec("allow-all", None, true, r#"{"decision":"allow"}"#, 0);
+        let (deny_spec, _deny_dir) = make_json_command_spec(
             "deny-read",
             Some("read_file"),
             true,
-            "echo '{\"decision\":\"deny\",\"reason\":\"no read\"}'; exit 2",
+            r#"{"decision":"deny","reason":"no read"}"#,
+            2,
         );
         let registry = registry_from_specs(vec![allow_spec, deny_spec]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
@@ -683,11 +715,12 @@ mod tests {
         // fail-open the chain continues past the crash and the second
         // hook's explicit deny is what blocks the call.
         let crash_spec = make_command_spec("crasher", None, true, "exit 1");
-        let deny_spec = make_command_spec(
+        let (deny_spec, _deny_dir) = make_json_command_spec(
             "denier",
             None,
             true,
-            "echo '{\"decision\":\"deny\",\"reason\":\"nope\"}'; exit 2",
+            r#"{"decision":"deny","reason":"nope"}"#,
+            2,
         );
         let registry = registry_from_specs(vec![crash_spec, deny_spec]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
@@ -709,11 +742,10 @@ mod tests {
 
     #[tokio::test]
     async fn all_hooks_allow_results_in_allow() {
-        let specs = vec![
-            make_command_spec("a1", None, true, "echo '{\"decision\":\"allow\"}'"),
-            make_command_spec("a2", None, true, "echo '{\"decision\":\"allow\"}'"),
-            make_command_spec("a3", None, true, "echo '{\"decision\":\"allow\"}'"),
-        ];
+        let (a1, _d1) = make_json_command_spec("a1", None, true, r#"{"decision":"allow"}"#, 0);
+        let (a2, _d2) = make_json_command_spec("a2", None, true, r#"{"decision":"allow"}"#, 0);
+        let (a3, _d3) = make_json_command_spec("a3", None, true, r#"{"decision":"allow"}"#, 0);
+        let specs = vec![a1, a2, a3];
         let registry = registry_from_specs(specs);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
         let result = dispatch_pre_tool_use(&registry, &envelope, &run_ctx()).await;
@@ -723,18 +755,15 @@ mod tests {
     #[tokio::test]
     async fn mixed_disabled_and_deny() {
         // Disabled deny hook followed by enabled allow. Should allow.
-        let disabled_deny = make_command_spec(
+        let (disabled_deny, _dd_dir) = make_json_command_spec(
             "disabled-deny",
             None,
             false,
-            "echo '{\"decision\":\"deny\",\"reason\":\"should not run\"}'; exit 2",
+            r#"{"decision":"deny","reason":"should not run"}"#,
+            2,
         );
-        let enabled_allow = make_command_spec(
-            "enabled-allow",
-            None,
-            true,
-            "echo '{\"decision\":\"allow\"}'",
-        );
+        let (enabled_allow, _ea_dir) =
+            make_json_command_spec("enabled-allow", None, true, r#"{"decision":"allow"}"#, 0);
         let registry = registry_from_specs(vec![disabled_deny, enabled_allow]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
         let result = dispatch_pre_tool_use(&registry, &envelope, &run_ctx()).await;
@@ -748,7 +777,7 @@ mod tests {
         // A hook that returns malformed output and exits non-zero now
         // results in Allow (fail-open) but the failure detail is still
         // captured in run_results for the UI scrollback.
-        let spec = make_command_spec("bad-output", None, true, "echo 'not json'; exit 1");
+        let (spec, _dir) = make_json_command_spec("bad-output", None, true, "not json", 1);
         let registry = registry_from_specs(vec![spec]);
         let envelope = pre_tool_use_envelope("run_terminal_cmd");
         let result = dispatch_pre_tool_use(&registry, &envelope, &run_ctx()).await;

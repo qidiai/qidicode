@@ -111,8 +111,16 @@ pub async fn run_command_hook(
     //
     // If the command contains shell metacharacters (spaces, pipes, &&, ||,
     // redirects, semicolons, env-var refs) or starts with `~` (tilde
-    // expansion), run it through `sh -c` so that shell command strings
-    // from compatible configs work correctly.
+    // expansion), run it through a shell so that shell command strings
+    // from compatible configs work correctly:
+    //
+    // * Unix: always `sh -c` (POSIX semantics).
+    // * Windows: always `powershell.exe -NoProfile -NonInteractive
+    //   -Command` (fixed, NOT the user's detected terminal shell), so a
+    //   hook config behaves identically on every Windows machine. The
+    //   documented Windows hook convention is PowerShell semantics —
+    //   single-quoted strings, `;` statement separator, `exit N` for
+    //   the decision exit code.
     //
     // Otherwise, treat it as a direct executable path (resolve relative
     // paths from the hook file's directory).
@@ -161,7 +169,11 @@ pub async fn run_command_hook(
         }
         #[cfg(not(unix))]
         {
-            let inv = cf_config::shell::shell_command_argv(&command_str);
+            // Fixed powershell.exe — not the detected terminal
+            // shell (QIDI_SHELL / auto-detect cascade applies to
+            // the interactive terminal only). See
+            // `cf_config::shell::hook_shell_command_argv`.
+            let inv = cf_config::shell::hook_shell_command_argv(&command_str);
             let mut c = tokio::process::Command::new(&inv.program);
             c.args(&inv.args).envs(inv.env);
             c
@@ -874,9 +886,22 @@ mod tests {
     }
 
     /// Regression: blocking hooks still parse JSON decisions correctly.
+    ///
+    /// The JSON payload is written to a temp file and emitted via
+    /// `cat` (Unix) / `type` (Windows) so the hook output is free
+    /// of shell-quoting semantics — the decision JSON passes through
+    /// verbatim under every shell the runner may use (`sh -c` on
+    /// Unix, fixed `powershell.exe -Command` on Windows).
     #[tokio::test]
     async fn test_hook_blocking_allow() {
-        let spec = make_shell_spec(r#"echo '{"decision":"allow"}'"#);
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("hook-output.json");
+        std::fs::write(&file, r#"{"decision":"allow"}"#).unwrap();
+        #[cfg(unix)]
+        let script = format!("cat \"{}\"; exit 0", file.display());
+        #[cfg(windows)]
+        let script = format!("type \"{}\"; exit 0", file.display());
+        let spec = make_shell_spec(&script);
         let envelope = make_envelope();
         let ctx = make_ctx();
 
