@@ -173,6 +173,58 @@ pub(crate) fn date_rollover_reminder(
          earlier in the session and is now stale; use {today} as the current date."
     ))
 }
+/// The literal label that [`construct_user_message_minimal`] stamps into the
+/// `<user_info>` prefix; kept in one place so the parser and the builder agree.
+///
+/// [`construct_user_message_minimal`]: crate::session::user_message::construct_user_message_minimal
+const TODAYS_DATE_LABEL: &str = "Today's date: ";
+/// Parse the `Today's date: YYYY-MM-DD` stamp out of a session's cached
+/// `<user_info>` prefix.
+///
+/// The prefix is injected once, near the top of the conversation (index 1) and
+/// preserved verbatim on resume to keep the prompt/KV cache warm — which is
+/// exactly why a resumed session still advertises the date it was *created*
+/// (see Bug B). We scan only the head of the conversation (the prefix never
+/// moves) so long sessions pay no full-history cost, and return `None` when no
+/// parseable stamp is found (fresh sessions, foreign/legacy sessions) so
+/// callers can fall back to "now".
+pub(crate) fn prefix_stamped_date(
+    conversation: &[ConversationItem],
+) -> Option<chrono::NaiveDate> {
+    // The prefix is at/near index 1; a handful of head items is plenty and
+    // keeps this O(1) in the conversation length.
+    const HEAD_SCAN_LIMIT: usize = 5;
+    for item in conversation.iter().take(HEAD_SCAN_LIMIT) {
+        if !matches!(item, ConversationItem::User(_)) {
+            continue;
+        }
+        let text = item.text_content();
+        let Some(idx) = text.find(TODAYS_DATE_LABEL) else {
+            continue;
+        };
+        let rest = &text[idx + TODAYS_DATE_LABEL.len()..];
+        let candidate = rest.lines().next().unwrap_or("").trim();
+        if let Ok(date) = chrono::NaiveDate::parse_from_str(candidate, "%Y-%m-%d") {
+            return Some(date);
+        }
+    }
+    None
+}
+/// Baseline for [`SessionActor::last_announced_local_date`] at actor
+/// construction.
+///
+/// A *fresh* session has no `<user_info>` prefix yet, so we start at "now" and
+/// the first turn stays silent (`today == last`). A *resumed* session carries
+/// the prefix preserved from disk, so we seed the stamped (stale) date instead
+/// — that makes the next turn's [`date_rollover_reminder`] notice the gap and
+/// announce the real current date, correcting the stale `Today's date` without
+/// rewriting any historical message.
+///
+/// [`SessionActor::last_announced_local_date`]: super::SessionActor
+pub(crate) fn initial_announced_date(conversation: &[ConversationItem]) -> chrono::NaiveDate {
+    prefix_stamped_date(conversation)
+        .unwrap_or_else(|| chrono::Local::now().date_naive())
+}
 /// Body of the one-shot interrupt `<system-reminder>` injected on the next real
 /// user turn after a mid-stream abort that left the model with no other signal.
 /// Wrapped in grok's `<system-reminder>` shape by [`SessionActor::push_system_reminder`].

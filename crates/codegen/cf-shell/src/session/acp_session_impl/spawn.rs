@@ -977,6 +977,13 @@ pub(crate) async fn spawn_session_actor(
         save_system_prompt(&session_info, &system_prompt);
     }
     persist_chat_history_jsonl_sync(&session_info, &conversation);
+    // Bug B: seed the date-rollover baseline from the session's cached
+    // `<user_info>` prefix. A resumed session keeps that prefix verbatim (to
+    // preserve the prompt cache), so it still advertises the date the session
+    // was *created*; seeding the baseline to that stale date lets
+    // `maybe_inject_date_rollover_reminder` announce the real current date on
+    // the next turn. Fresh sessions have no prefix yet → fall back to "now".
+    let seeded_local_date = initial_announced_date(&conversation);
     chat_state_handle.replace_conversation(conversation);
     let feedback_client = feedback_proxy_url.map(|base_url| {
         let mut client =
@@ -1312,7 +1319,7 @@ pub(crate) async fn spawn_session_actor(
         laziness_debug_log: laziness_debug_log.map(|p| std::sync::Arc::from(p.as_path())),
         deferred_prefix: TaskSlot::new(),
         extension_registry: session_extension_registry(weak.clone()),
-        last_announced_local_date: std::cell::Cell::new(chrono::Local::now().date_naive()),
+        last_announced_local_date: std::cell::Cell::new(seeded_local_date),
         last_search_prompt_index: std::sync::atomic::AtomicI64::new(-1),
         last_api_request_at: std::sync::atomic::AtomicI64::new(0),
         hook_registry: std::cell::RefCell::new(built_hook_registry),
