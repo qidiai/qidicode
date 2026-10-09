@@ -1,0 +1,67 @@
+{
+ "meta": {
+  "experiment": "zerostep probe (grok-4.7 席规格): tokenizer surgery acquittal",
+  "ckpt": "G:\\qidicode\\target\\tmp\\c-line\\bw_localeval\\weights_repo\\baize23_v32\\best_model.pt",
+  "variant": "T0",
+  "config": "120m_v1",
+  "tokenizer_old": "G:\\qidicode\\target\\tmp\\c-line\\bw_localeval\\code_repo\\assets\\bpe32k_gen.json",
+  "tokenizer_new": "G:\\qidicode\\target\\tmp\\c-line\\bw_localeval\\code_repo\\assets\\bpe32k_v2.json",
+  "n_samples": 1000,
+  "data": "d18 every-20th, train_sft_m4 同款渲染",
+  "max_seq": 512,
+  "batch": 16,
+  "device": "cuda",
+  "verdict_rule": "|content_nll(B-A)|<0.05 且 stop-rank B 变好 → 无罪",
+  "threshold_source": "grok-4.7 席审计 2026-10-09"
+ },
+ "results": {
+  "A_old": {
+   "tag": "A 旧分词 bpe32k_gen",
+   "n_samples": 1000,
+   "n_tokens": 72030,
+   "content_nll": 2.7902,
+   "all_nll": 3.2106,
+   "n_stop_events": 2000,
+   "stop_rank_mean": 17745.2,
+   "stop_top1_pct": 0.0,
+   "stop_top5_pct": 0.0
+  },
+  "B_new": {
+   "tag": "B 新分词 bpe32k_v2",
+   "n_samples": 1000,
+   "n_tokens": 55030,
+   "content_nll": 1.629,
+   "all_nll": 1.6745,
+   "n_stop_events": 2000,
+   "stop_rank_mean": 809.0,
+   "stop_top1_pct": 48.8,
+   "stop_top5_pct": 59.0
+  },
+  "C1_random": {
+   "tag": "C1 随机初始化对照",
+   "n_samples": 1000,
+   "n_tokens": 55030,
+   "content_nll": 2.6214,
+   "all_nll": 2.8996,
+   "n_stop_events": 2000,
+   "stop_rank_mean": 607.5,
+   "stop_top1_pct": 10.7,
+   "stop_top5_pct": 35.6
+  },
+  "C2_mean": {
+   "tag": "C2 原子均值对照",
+   "n_samples": 1000,
+   "n_tokens": 55030,
+   "content_nll": 2.4989,
+   "all_nll": 3.0356,
+   "n_stop_events": 2000,
+   "stop_rank_mean": 10246.5,
+   "stop_top1_pct": 0.0,
+   "stop_top5_pct": 0.0
+  }
+ },
+ "delta_content_nll": -1.1612,
+ "stop_better": true,
+ "acquitted": false,
+ "verdict": "有罪/存疑（见明细）"
+}
