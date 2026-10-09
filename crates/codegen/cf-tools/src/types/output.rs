@@ -2,6 +2,25 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use strip_ansi_escapes::strip_str;
 use cf_tool_types::SubagentCompletedOutput;
+
+/// Render a background-task timestamp for display in the model prompt.
+///
+/// The background-task machinery stores wall-clock times as RFC3339 UTC
+/// strings (e.g. `"2026-03-09T00:00:00Z"`, see `format_epoch_ms_as_rfc3339`).
+/// Printing them verbatim shows the user a `Z` time that is offset from their
+/// own clock, so we convert to the machine's local timezone here. Parsing is
+/// fallible on purpose: legacy/foreign values that are not RFC3339 are returned
+/// unchanged (never dropped) so older sessions still render.
+fn render_local_ts(raw: &str) -> String {
+    match chrono::DateTime::parse_from_rfc3339(raw) {
+        Ok(dt) => dt
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string(),
+        Err(_) => raw.to_string(),
+    }
+}
+
 /// `(added, removed)` line counts for the `edit.lines` telemetry counter.
 pub fn line_diff(old: &str, new: &str) -> (i64, i64) {
     let mut added = 0i64;
@@ -798,10 +817,10 @@ impl ToolOutput {
                         format!("=== Task {} ===", r.task_id),
                         format!("Command: {}", r.command),
                         format!("Status: {}", r.status),
-                        format!("Started: {}", r.started),
+                        format!("Started: {}", render_local_ts(&r.started)),
                     ];
                     if let Some(ref ended) = r.ended {
-                        lines.push(format!("Ended: {}", ended));
+                        lines.push(format!("Ended: {}", render_local_ts(ended)));
                     }
                     lines.push(format!("Duration: {:.2}s", r.duration_secs));
                     if let Some(code) = r.exit_code {
@@ -1613,6 +1632,96 @@ mod tests {
             "not found")
         );
     }
+    /// Render an RFC3339 UTC stamp the same way `render_local_ts` should, so the
+    /// assertion is timezone-agnostic (CI may run in any local timezone).
+    fn expected_local_ts(raw: &str) -> String {
+        chrono::DateTime::parse_from_rfc3339(raw)
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string()
+    }
+
+    #[test]
+    fn render_local_ts_converts_rfc3339_utc_to_local() {
+        let raw = "2026-03-09T00:00:00Z";
+        assert_eq!(render_local_ts(raw), expected_local_ts(raw));
+        // The raw UTC `Z` form must not survive verbatim.
+        assert!(
+            !render_local_ts(raw).ends_with('Z'),
+            "rendered timestamp should drop the raw UTC Z suffix"
+        );
+    }
+
+    #[test]
+    fn render_local_ts_passes_through_non_rfc3339() {
+        // Legacy / foreign values that are not RFC3339 datetimes are returned
+        // unchanged rather than dropped.
+        assert_eq!(render_local_ts("not a timestamp"), "not a timestamp");
+        assert_eq!(render_local_ts(""), "");
+        assert_eq!(render_local_ts("2026-03-09"), "2026-03-09");
+    }
+
+    #[test]
+    fn task_output_result_prompt_format_renders_local_timestamps() {
+        let output = ToolOutput::TaskOutput(TaskOutputOutput::Result(TaskOutputResult {
+            task_id: "task-1".into(),
+            command: "sleep 10".into(),
+            status: "completed".into(),
+            exit_code: Some(0),
+            started: "2026-03-09T00:00:00Z".into(),
+            ended: Some("2026-03-09T00:00:05Z".into()),
+            duration_secs: 5.0,
+            output: "hello".into(),
+            output_file: "/tmp/task-1.log".into(),
+            truncated: false,
+            truncation_hint: String::new(),
+            raw_output_bytes: 5,
+        }));
+        let rendered = output.to_prompt_format();
+        assert!(
+            rendered.contains(&format!(
+                "Started: {}",
+                expected_local_ts("2026-03-09T00:00:00Z")
+            )),
+            "started line must render in local time: {rendered}"
+        );
+        assert!(
+            rendered.contains(&format!(
+                "Ended: {}",
+                expected_local_ts("2026-03-09T00:00:05Z")
+            )),
+            "ended line must render in local time: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Started: 2026-03-09T00:00:00Z"),
+            "raw UTC Z timestamp must not be shown verbatim: {rendered}"
+        );
+    }
+
+    #[test]
+    fn task_output_result_prompt_format_falls_back_on_bad_timestamp() {
+        let output = ToolOutput::TaskOutput(TaskOutputOutput::Result(TaskOutputResult {
+            task_id: "task-1".into(),
+            command: "sleep 10".into(),
+            status: "running".into(),
+            exit_code: None,
+            started: "legacy-start".into(),
+            ended: None,
+            duration_secs: 1.0,
+            output: "hello".into(),
+            output_file: "/tmp/task-1.log".into(),
+            truncated: false,
+            truncation_hint: String::new(),
+            raw_output_bytes: 5,
+        }));
+        let rendered = output.to_prompt_format();
+        assert!(
+            rendered.contains("Started: legacy-start"),
+            "non-RFC3339 timestamp must pass through unchanged: {rendered}"
+        );
+    }
+
     #[test]
     fn task_output_result_json() {
         let json = to_json(

@@ -1,8 +1,9 @@
 use super::support::create_test_actor;
 use super::{
-    date_rollover_reminder, goal_slash_and_harness_available, laziness_injection_active,
-    resolve_reminder_policy, todo_gate_active,
+    date_rollover_reminder, goal_slash_and_harness_available, initial_announced_date,
+    laziness_injection_active, prefix_stamped_date, resolve_reminder_policy, todo_gate_active,
 };
+use crate::sampling::ConversationItem;
 use crate::session::persistence::PersistenceMsg;
 use crate::util::config::RemoteSettings;
 use cf_agent::AgentDefinition;
@@ -330,6 +331,102 @@ async fn same_session_rolls_over_once_when_local_date_advances() {
                 1,
                 "rollover must not re-fire on a later same-day turn"
             );
+        })
+        .await;
+}
+/// A realistic `<user_info>` prefix as built by `construct_user_message_minimal`.
+fn user_info_prefix(date: NaiveDate) -> String {
+    format!(
+        "<user_info>\nOS Version: windows\nShell: pwsh\nWorkspace Path: C:\\repo\n\
+         Today's date: {date}\n</user_info>"
+    )
+}
+#[test]
+fn prefix_stamped_date_parses_user_info_prefix() {
+    // Prefix lives at index 1, right after the system prompt.
+    let conv = vec![
+        ConversationItem::system("sys"),
+        ConversationItem::user(user_info_prefix(ymd(2026, 1, 1))),
+    ];
+    assert_eq!(prefix_stamped_date(&conv), Some(ymd(2026, 1, 1)));
+    // Seeding picks up the stamped (stale) date instead of "now".
+    assert_eq!(initial_announced_date(&conv), ymd(2026, 1, 1));
+}
+#[test]
+fn prefix_stamped_date_returns_none_without_or_with_bad_stamp() {
+    // No prefix at all (fresh session).
+    assert_eq!(prefix_stamped_date(&[]), None);
+    assert_eq!(
+        prefix_stamped_date(&[ConversationItem::system("sys")]),
+        None
+    );
+    // Malformed date → no parseable stamp.
+    let bad = vec![ConversationItem::user(
+        "<user_info>\nToday's date: not-a-date\n</user_info>",
+    )];
+    assert_eq!(prefix_stamped_date(&bad), None);
+    // Non-user items are skipped, not mistaken for the prefix.
+    let sys_only = vec![ConversationItem::system("Today's date: 2026-01-01")];
+    assert_eq!(prefix_stamped_date(&sys_only), None);
+}
+#[test]
+fn prefix_stamped_date_only_scans_conversation_head() {
+    // Companion to the fallback: a stamp buried past the head window must NOT
+    // be found (guards against an O(n) full-history scan on long sessions).
+    let mut conv = vec![ConversationItem::system("sys")];
+    for _ in 0..6 {
+        conv.push(ConversationItem::user("filler turn"));
+    }
+    conv.push(ConversationItem::user(user_info_prefix(ymd(2026, 1, 1))));
+    assert_eq!(
+        prefix_stamped_date(&conv),
+        None,
+        "a prefix buried past the head window must be ignored"
+    );
+}
+#[test]
+fn initial_announced_date_falls_back_to_now_without_prefix() {
+    let today = chrono::Local::now().date_naive();
+    assert_eq!(initial_announced_date(&[]), today);
+    let bad = vec![ConversationItem::user(
+        "<user_info>\nToday's date: garbage\n</user_info>",
+    )];
+    assert_eq!(initial_announced_date(&bad), today);
+}
+/// Bug B end-to-end at the pure-function seam: a session resumed on a later day
+/// seeds its baseline from the stale prefix, and the very next turn's rollover
+/// reminder fires with the current date.
+#[tokio::test(flavor = "current_thread")]
+async fn resumed_prefix_seed_makes_rollover_reminder_fire() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _) =
+                tokio::sync::mpsc::unbounded_channel::<cf_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = create_test_actor(50_000, 256_000, 85, gateway_tx, persistence_tx).await;
+            let today = chrono::Local::now().date_naive();
+            let yesterday = today.pred_opt().expect("today is never the min date");
+            // Simulate what spawn does on resume: seed from the persisted prefix.
+            let resumed = vec![
+                ConversationItem::system("sys"),
+                ConversationItem::user(user_info_prefix(yesterday)),
+            ];
+            actor.last_announced_local_date.set(initial_announced_date(&resumed));
+            assert_eq!(
+                actor.last_announced_local_date.get(),
+                yesterday,
+                "baseline must be seeded from the stale prefix, not 'now'"
+            );
+            actor.maybe_inject_date_rollover_reminder().await;
+            let conv = actor.chat_state_handle.get_conversation().await;
+            assert_eq!(conv.len(), 1, "rollover must inject exactly one reminder");
+            let text = conv[0].text_content();
+            assert!(
+                text.contains(&today.to_string()),
+                "the injected reminder must carry the current date {today}: {text}"
+            );
+            assert_eq!(actor.last_announced_local_date.get(), today);
         })
         .await;
 }
