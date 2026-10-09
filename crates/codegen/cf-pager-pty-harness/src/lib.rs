@@ -89,9 +89,10 @@ pub struct PtyHarness {
     cast_size: (u16, u16),
     /// When true, [`update`](Self::update) forwards terminal-generated replies
     /// (cursor-position reports, device attributes, …) back to the child.
-    /// Off by default so tests that script their own probe replies (e.g.
-    /// `pty_xtversion`) keep full control; minimal-mode tests turn it on so the
-    /// inline viewport's startup cursor query completes instead of timing out.
+    /// ON by default (real terminals answer device queries automatically, and
+    /// the pager's default TUI mode deadlocks without it — see
+    /// [`set_respond_to_queries`]); tests that script their own probe replies
+    /// (e.g. `pty_xtversion`) turn it off.
     respond_to_queries: bool,
 }
 
@@ -135,16 +136,19 @@ impl PtyHarness {
             spawned_at: Instant::now(),
             cast_events: Vec::new(),
             cast_size: (cols, rows),
-            respond_to_queries: false,
+            respond_to_queries: true,
         })
     }
 
     /// Enable (or disable) forwarding terminal-generated replies back to the
     /// child during [`update`](Self::update). Real terminals answer device
-    /// queries automatically; the harness leaves this off by default so probe
-    /// tests can script their own replies. Minimal-mode tests enable it so the
-    /// inline viewport's startup cursor-position query (`ESC[6n`) is answered
-    /// and `--minimal` is not silently downgraded to full-screen inline.
+    /// queries automatically, so the harness defaults to answering them:
+    /// the pager's default TUI (inline viewport) probes the cursor position
+    /// (`ESC[6n`) on startup, and without a reply the probe deadlocks under
+    /// ConPTY (2026-10-09 PTY diagnosis: child emits exactly `1b 5b 36 6e`
+    /// then goes silent forever). Probe tests that want to script their own
+    /// replies turn this off; `--minimal` relies on it to avoid silently
+    /// downgrading to full-screen inline.
     pub fn set_respond_to_queries(&mut self, enabled: bool) {
         self.respond_to_queries = enabled;
     }
