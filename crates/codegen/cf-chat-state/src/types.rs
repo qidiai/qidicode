@@ -97,6 +97,66 @@ impl Default for PruningConfig {
     }
 }
 
+/// Applicability domain of the **C-2 batched-pruning invariant**
+/// (P0-2 第二步 design doc §Q3 / Phase C, v3.2 裁决 ④ + v3.3
+/// 双模裁决 ⑧): the "window-internal prefix-growth + one
+/// batch-exempt trigger turn" invariant only holds when **both**
+/// conditions are true —
+///
+/// 1. the batched execution mode is enabled (the Phase C
+///    `PruningConfig` execution mode; the current default
+///    `per_turn` mode runs the retained layer's hard-clear
+///    every user turn, so the invariant is vacuously outside
+///    its domain there — GLM 加重: per-turn hard-clear
+///    breaks the absolute "existing items never rewritten"
+///    form even below the watermark), **and**
+/// 2. the batch trigger fires below the 50% context
+///    watermark (above it the API-copy layer's own
+///    `should_prune` gate engages and rewrites items on the
+///    clone — a different layer with different rules).
+///
+/// **Phase A placeholder** (design doc §6 Phase A 范围 4):
+/// the batched mode itself ships in Phase C — this module
+/// declares the domain and the Phase A test asserts the
+/// current (per-turn) build sits **outside** it, so the
+/// placeholder is honest: nothing claims the invariant
+/// today. Phase C implements the mode and converts the
+/// placeholder test into the real invariant.
+// `Eq` intentionally omitted: the context fraction is an
+// `f64` (watermark comparison), and `f64` is not `Eq`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BatchedPruningDomain {
+    /// Whether the batched execution mode is enabled
+    /// (Phase C flag; default `false` = per-turn).
+    pub batched_enabled: bool,
+    /// Context-window utilization fraction at the
+    /// trigger point (0.0–1.0).
+    pub context_fraction: f64,
+}
+
+impl BatchedPruningDomain {
+    /// The 50% context watermark (design doc v3.3 ⑧).
+    pub const WATERMARK: f64 = 0.5;
+
+    /// Whether the C-2 invariant's applicability domain
+    /// holds: batched mode enabled **and** the trigger
+    /// fired below the 50% watermark.
+    pub fn applies(self) -> bool {
+        self.batched_enabled && self.context_fraction < Self::WATERMARK
+    }
+}
+
+impl Default for BatchedPruningDomain {
+    /// The Phase A / current-build state: per-turn mode
+    /// (batched disabled) — outside the C-2 domain.
+    fn default() -> Self {
+        Self {
+            batched_enabled: false,
+            context_fraction: 0.0,
+        }
+    }
+}
+
 /// Where the session's current api_key came from.
 /// Determines whether the key can be refreshed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +228,56 @@ pub struct AutoCompactTrigger {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Design-doc contract C-2 applicability domain (P0-2
+    /// 第二步 §Q3 / Phase C, v3.3 ⑧): the batched-mode
+    /// prefix-growth invariant applies **only** when the
+    /// batched execution mode is enabled AND the trigger
+    /// fires below the 50% context watermark. **Phase A
+    /// placeholder**: the batched mode ships in Phase C,
+    /// so this asserts the domain *declaration* — the
+    /// current per-turn build (default domain) sits
+    /// outside it, and every quadrant of the domain
+    /// predicate evaluates as specified. Phase C
+    /// converts this into the real invariant test.
+    #[test]
+    fn c2_applicability_domain_requires_batched_and_below_watermark() {
+        // Phase A / current build: per-turn mode —
+        // outside the domain regardless of watermark.
+        assert!(!BatchedPruningDomain::default().applies());
+        assert!(!BatchedPruningDomain {
+            batched_enabled: false,
+            context_fraction: 0.1,
+        }
+        .applies());
+        // Both conditions required: batched on but at/
+        // above the 50% watermark → outside (the
+        // API-copy layer's own gate owns that region).
+        assert!(!BatchedPruningDomain {
+            batched_enabled: true,
+            context_fraction: 0.5,
+        }
+        .applies());
+        assert!(!BatchedPruningDomain {
+            batched_enabled: true,
+            context_fraction: 0.9,
+        }
+        .applies());
+        // Inside the domain: batched enabled AND below
+        // the watermark.
+        assert!(BatchedPruningDomain {
+            batched_enabled: true,
+            context_fraction: 0.49,
+        }
+        .applies());
+        assert!(BatchedPruningDomain {
+            batched_enabled: true,
+            context_fraction: 0.0,
+        }
+        .applies());
+        // Watermark constant is the design-doc 50%.
+        assert_eq!(BatchedPruningDomain::WATERMARK, 0.5);
+    }
 
     #[test]
     fn snapshot_round_trips_through_serde_json() {

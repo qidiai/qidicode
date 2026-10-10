@@ -1151,6 +1151,11 @@ pub(crate) async fn spawn_session_actor(
         }
     };
     let doom_loop_recovery = effective_config.resolve_doom_loop_recovery();
+    // Dynamic tool pipeline switch (P0-2 第二步, design doc §6
+    // Phase A): single-shot session-startup read, frozen for the
+    // session (design doc A-4). Default false; `true` is a
+    // Phase A no-op + warn at the defs-assembly point.
+    let dynamic_tools = effective_config.resolve_dynamic_tools();
     let session = Arc::new_cyclic(|weak: &std::sync::Weak<SessionActor>| SessionActor {
         session_info: session_info.clone(),
         auth_method_id,
@@ -1178,6 +1183,7 @@ pub(crate) async fn spawn_session_actor(
         compactions_remaining: std::cell::Cell::new(sampling_config.compactions_remaining),
         compaction_at_tokens: std::cell::Cell::new(sampling_config.compaction_at_tokens),
         doom_loop_recovery,
+        dynamic_tools,
         doom_loop_turn_tally: Default::default(),
         file_state_tracker,
         rewind_pending_prompt: std::sync::Mutex::new(None),

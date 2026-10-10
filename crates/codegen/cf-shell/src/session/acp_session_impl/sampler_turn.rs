@@ -165,6 +165,29 @@ impl SessionActor {
             .collect()
     }
     pub(super) async fn prepare_tool_definitions_inner(&self) -> Vec<ToolDefinition> {
+        // Dynamic tool pipeline (P0-2 第二步, design doc §6
+        // Phase A). The switch is read from the session-startup
+        // snapshot (`self.dynamic_tools` — resolved once from
+        // `Config::resolve_dynamic_tools`, never re-read, so a
+        // mid-session config edit cannot alter this session's
+        // defs; design doc A-4). Phase A semantics (design doc
+        // A-3 + Sonnet 2.12): **single code path** — every
+        // polarity ships the full built-in defs below. A `true`
+        // flag is a deliberate no-op: the resident/imported
+        // segmentation ships in Phase B, so warn here (once per
+        // defs assembly) that the flag is inert rather than
+        // half-implementing an on-state or rejecting the config
+        // (which would force a config migration at Phase B
+        // rollout). When Phase B lands, this is the only site
+        // that branches on the flag — the pass-through below
+        // becomes the `false` arm.
+        if self.dynamic_tools {
+            tracing::warn!(
+                "dynamic_tools=true is a no-op in Phase A \
+                 (resident/imported tool segmentation not implemented); \
+                 shipping the full tool definitions"
+            );
+        }
         let bridge = self.agent.borrow().tool_bridge().clone();
         let defs = bridge.tool_definitions_builtins_only().await;
         let plan_active = self.plan_mode.lock().is_active();

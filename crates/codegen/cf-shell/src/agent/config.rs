@@ -2718,6 +2718,22 @@ impl Config {
             None,
         )
     }
+    /// Resolve the dynamic tool pipeline switch (P0-2 第二步,
+    /// design doc §6 Phase A). **Default `false`** — off
+    /// unless `[features] dynamic_tools = true` in
+    /// config.toml. This is the single-shot session-startup
+    /// read: the caller captures the result once when the
+    /// session is spawned and never re-reads it (design doc
+    /// A-4 — a mid-session config edit must not alter the
+    /// live session's defs). Phase A semantics for `true`:
+    /// documented no-op + warn at the defs-assembly point;
+    /// the resident/imported segmentation itself ships in
+    /// Phase B. Per-endpoint override resolution is a
+    /// reserved hook (挂点预留) — Phase B灰度 lands on top
+    /// of this accessor without changing its signature.
+    pub fn resolve_dynamic_tools(&self) -> bool {
+        self.features.dynamic_tools.unwrap_or(false)
+    }
 }
 /// Canonical resolver for `mcp.liveness_watchers`. Stacks the full
 /// 7-step `BoolFlag` precedence:
@@ -4340,6 +4356,22 @@ pub struct Features {
     /// MCP tool search/discovery. `None` = defer to remote settings / env / default (true).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_search: Option<bool>,
+    /// Dynamic tool pipeline (P0-2 第二步): split the per-turn
+    /// tool definitions into a stable resident segment + an
+    /// on-demand imported segment (design doc
+    /// `docs/token-optimization/P0-2第二步-动态工具管线设计稿.md`
+    /// §6 Phase A). `None`/`false` = **off** (default — the
+    /// LAN-endpoint KV-segment asymmetry risk, design doc
+    /// Q3, keeps the flag dark until endpoint灰度); `true` is
+    /// accepted from day one but is a **documented no-op in
+    /// Phase A** (segmentation ships in Phase B) — the
+    /// defs-assembly point warns and ships the full defs.
+    /// Read **once** at session startup (never re-read
+    /// mid-session; a mid-session flip must not change the
+    /// current session's defs — design doc A-4). Per-endpoint
+    /// override hook is reserved (挂点预留) for Phase B灰度.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamic_tools: Option<bool>,
     /// Web fetch tool. `None` = defer to remote settings / env / default (false).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_fetch: Option<bool>,

@@ -103,6 +103,7 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
         compaction_at_tokens: std::cell::Cell::new(None),
         doom_loop_recovery: None,
         doom_loop_turn_tally: Default::default(),
+        dynamic_tools: false,
         file_state_tracker: Arc::new(FileStateTracker::new()),
         rewind_pending_prompt: std::sync::Mutex::new(None),
         startup_hints: StartupHints::default(),

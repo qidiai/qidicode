@@ -1789,6 +1789,35 @@ mod tests {
         );
     }
 
+    /// Design-doc contract C-1 (P0-2 第二步 §Q4): a blank
+    /// `--tools`/`--disallowed-tools` value is **exactly
+    /// equivalent to the flag being unset** — both parse to
+    /// `None`, which is the "no filter branch" sentinel
+    /// (empty allowlist ≠ empty toolset: `None` means
+    /// "inherit all", so defs ship at full count). This is
+    /// the YOLO-false-positive guard: a search_tool-mode
+    /// session must never read a blank allowlist as "unlock
+    /// domain = ∅".
+    #[test]
+    fn c1_blank_tools_list_is_equivalent_to_unset() {
+        // Three spellings of "not set" must agree — None,
+        // empty string, all-blank entries.
+        let unset = super::parse_comma_list(None);
+        let blank = super::parse_comma_list(Some(""));
+        let commas_only = super::parse_comma_list(Some(" , ,"));
+        assert_eq!(unset, None);
+        assert_eq!(blank, unset, "blank --tools ≡ unset --tools (C-1)");
+        assert_eq!(
+            commas_only,
+            unset,
+            "comma-only --tools ≡ unset --tools (C-1)"
+        );
+        // And the same equivalence holds for the denylist
+        // flag — both flags share one parser and one
+        // no-filter sentinel.
+        assert_eq!(super::parse_comma_list(Some("")), None);
+    }
+
     #[test]
     fn lifecycle_tracking_is_independent_of_wait_flag() {
         let mut pending = std::collections::HashSet::new();
