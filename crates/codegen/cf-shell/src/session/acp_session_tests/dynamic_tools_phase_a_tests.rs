@@ -18,6 +18,21 @@
 //!    在任何裁剪配置下不被移除、plan 对恒在（无条件
 //!    钉槽是 Phase B 投影行为，Q2-plan）、plan 进出
 //!    defs 字节级不变。
+//!
+//! 后补加固（Phase A 审计可后补清单，`docs/token-optimization/
+//! P0-2-PhaseA审计-GLM.md`）：
+//! - **① committed golden 外部锚（A-3/B-8 前置）**：现状
+//!   基线不再只锚"运行时 bridge 直出"（自证锚——bridge 与
+//!   组装点同源，同向漂移检测不到），同时锚 **committed
+//!   golden 文件**（`tests/golden/defs_snapshot.json`）——
+//!   bridge / 工具定义任何漂移红此灯，为 Phase B 的 B-8
+//!   （flag=true→false 逐字节回退断言）提供外部锚；
+//! - **④ C-8b 全量注册面扫描变体**：in-crate 夹具只盖
+//!   5 工具，本文件扫 `default_qidi_build` 全量注册面；
+//! - **⑤ A-4 链路级钉子**：真实热刷新入口
+//!   `Config::re_resolve_runtime_fields` 不触 dynamic_tools；
+//! - **⑥ no-op warn 断言**：flag=true 的 warn! 分支必须
+//!   真实发射（tracing-capture），防静默失效。
 
 use super::support::*;
 use super::*;
@@ -27,6 +42,69 @@ use super::*;
 /// `Serialize`，序列化串即 wire 形态。
 fn defs_fingerprint(defs: &[cf_tools::types::definition::ToolDefinition]) -> String {
     serde_json::to_string(defs).expect("ToolDefinition serializes")
+}
+
+// ── ① committed golden defs 快照（B-8 前置的外部锚） ──────────────
+//
+// Phase A 审计（`docs/token-optimization/P0-2-PhaseA审计-GLM.md`
+// 可后补 1 + grok47 B-8 前置，合并项）指出：A-3 的“现状基线”
+// 断言锚在运行时 bridge 直出——**自证锚**（组装点与 bridge 同
+// 源，两者同步漂移时检测不到任何变化）。Phase B 的 B-8 回退
+// 断言（flag=true→false 逐字节回 Phase A 完成态）必须有**外部**
+// 锚：本仓库 committed 的 golden 快照。
+//
+// **golden 更新流程（显式、opt-in——CI/正常测试永不写文件）**：
+// 桥/工具定义**有意**变更时：
+// 1. `CF_UPDATE_DEFS_GOLDEN=1 cargo test -p cf-shell --lib a3_flag_polarities_defs_byte_identical`
+// 2. 审查 diff（golden 漂移是**评审点**，不是要消音的事故）；
+// 3. `git add tests/golden/defs_snapshot.json` 并随改动一起 commit。
+const DEFS_GOLDEN_FILE: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/defs_snapshot.json");
+
+/// Golden 文件载体 = pretty JSON（人可审、diff 友好）。
+/// `to_string_pretty` 与 `to_string` 同源（同一 serde 实现、
+/// 同一键序），pretty 形态的字节级对比与紧凑 fingerprint
+/// 的强度等价。
+fn defs_golden_pretty(defs: &[cf_tools::types::definition::ToolDefinition]) -> String {
+    serde_json::to_string_pretty(defs).expect("ToolDefinition serializes")
+}
+
+/// A-3 外部锚：assembled defs 必须与 committed golden 逐字节
+/// 一致（CRLF 归一后）。漂移即 panic，消息中写明重生成流程；
+/// `CF_UPDATE_DEFS_GOLDEN=1` 时改为重写 golden 文件（重生成模式）。
+fn assert_defs_match_committed_golden(defs: &[cf_tools::types::definition::ToolDefinition]) {
+    let pretty = defs_golden_pretty(defs);
+    if std::env::var_os("CF_UPDATE_DEFS_GOLDEN").is_some_and(|v| v == "1") {
+        if let Some(dir) = std::path::Path::new(DEFS_GOLDEN_FILE).parent() {
+            std::fs::create_dir_all(dir).expect("create golden dir");
+        }
+        std::fs::write(DEFS_GOLDEN_FILE, &pretty)
+            .expect("write regenerated golden defs snapshot");
+        eprintln!(
+            "CF_UPDATE_DEFS_GOLDEN=1: rewrote {} — review the diff and commit it",
+            DEFS_GOLDEN_FILE
+        );
+        return;
+    }
+    let golden = match std::fs::read_to_string(DEFS_GOLDEN_FILE) {
+        // CRLF 防御（Windows autocrlf 检出会改行尾）：
+        // 归一到 LF 再比，比较本身仍是逐字节的。
+        Ok(g) => g.replace("\r\n", "\n"),
+        Err(e) => panic!(
+            "committed golden defs snapshot missing at {DEFS_GOLDEN_FILE}: {e}.\n\
+             Regenerate + commit it with: CF_UPDATE_DEFS_GOLDEN=1 \
+             cargo test -p cf-shell --lib a3_flag_polarities_defs_byte_identical"
+        ),
+    };
+    assert_eq!(
+        pretty,
+        golden.trim_end(),
+        "A-3/B-8 golden anchor: assembled defs drifted from the committed \
+         snapshot (bridge or tool definitions changed). If the drift is \
+         deliberate, regenerate + commit the golden file: \
+         CF_UPDATE_DEFS_GOLDEN=1 cargo test -p cf-shell --lib \
+         a3_flag_polarities_defs_byte_identical"
+    );
 }
 
 /// 已组装 defs 的工具名集合（C-4 矩阵断言载体）。
@@ -97,9 +175,14 @@ async fn a3_flag_polarities_defs_byte_identical() {
                 "A-3: flag=true must be a byte-level no-op over flag=false in Phase A"
             );
 
-            // 与现状基线一致：组装点输出 == bridge 直出
-            // 全量 builtins（plan 恒等过滤 + 无 plan 激活
-            // 时不改变任何字节）。
+            // 与现状基线一致（双锚，审计后补 ①）：
+            // a) 内部一致锚：组装点输出 == bridge 直出全量
+            //    builtins（plan 恒等过滤 + 无 plan 激活时不改
+            //    变任何字节）——证明组装点单路径直通；
+            // b) 外部锚（committed golden）：defs == 仓库
+            //    committed 快照——bridge/工具定义漂移（与组装
+            //    点同源的自证锚检测不到的那种）红此灯，B-8
+            //    （Phase B 回退断言）以此为前置。
             let bridge = actor_off.agent.borrow().tool_bridge().clone();
             let raw_builtins = bridge.tool_definitions_builtins_only().await;
             assert_eq!(
@@ -112,6 +195,7 @@ async fn a3_flag_polarities_defs_byte_identical() {
                 !defs_off.is_empty(),
                 "fixture must expose a non-empty toolset for the identity to be meaningful"
             );
+            assert_defs_match_committed_golden(&defs_off);
         })
         .await;
 }
@@ -232,6 +316,48 @@ async fn a4_flag_snapshot_survives_mid_session_config_flip() {
             );
         })
         .await;
+}
+
+/// A-4 链路级钉子（审计后补 ⑤）：真实配置热刷新入口
+/// `Config::re_resolve_runtime_fields`（config watcher →
+/// re_resolve 的同一条链路）**不得触碰
+/// `features.dynamic_tools`**——上面的 A-4 会话级测试只证
+/// "actor 快照不追踪 config 对象翻转"，本测补上热刷新链路
+/// 这一环：watcher 触发 re_resolve 全流程跑完后，
+/// `features.dynamic_tools` 的 Option 原值不动、
+/// `resolve_dynamic_tools()` 读数不变——中途改 TOML 的生效
+/// 路径被结构性限定为"下次会话启动"，当次会话（及其启动
+/// 快照）无感。Phase B 实施若把 flag 读取挪进热刷新链，
+/// 此测即红。
+#[test]
+fn a4_re_resolve_runtime_fields_leaves_dynamic_tools_untouched() {
+    for initial in [Some(true), Some(false), None] {
+        let mut config = crate::agent::config::Config::default();
+        config.features.dynamic_tools = initial;
+        let readout_before = config.resolve_dynamic_tools();
+
+        // 真实热刷新链路（空 TOML + 无 cwd ≈ watcher 场景的
+        // 最小输入）：该函数内部完整重跑
+        // resolve_runtime_fields（subagents/tools/mcps/models/
+        // memory/storage 等逐区重解析）——若有人在其中把
+        // features 区块一并"重解析"，断言即红。
+        config.re_resolve_runtime_fields(
+            &toml::Value::Table(toml::map::Map::new()),
+            None,
+        );
+
+        assert_eq!(
+            config.features.dynamic_tools, initial,
+            "re_resolve must not rewrite the features.dynamic_tools Option \
+             (initial={initial:?})"
+        );
+        assert_eq!(
+            config.resolve_dynamic_tools(),
+            readout_before,
+            "A-4: hot-reload re-resolution must not flip the dynamic_tools \
+             readout (initial={initial:?})"
+        );
+    }
 }
 
 /// C-7（plan 恒等回归保护，设计稿 §Q4 + §3.2.4）：
@@ -442,6 +568,208 @@ async fn c4_meta_pair_survives_every_trim_config() {
             assert_eq!(
                 ToolKind::UseTool.pipeline_segment(),
                 cf_tools::registry::resident_set::ToolSegment::Meta
+            );
+        })
+        .await;
+}
+
+/// C-8b 全量注册面扫描变体（审计后补 ④）：cf-tools 内的
+/// in-crate C-8b 测试（`registry/types.rs`
+/// `c8b_declared_kind_matches_metadata_kind_for_all_tools`）
+/// 只盖 5 工具小夹具——本测用 `default_qidi_build` 的**全量
+/// 注册面**（默认 toolset + builder 注入件）扫每一把注册
+/// 工具：注册期 `declared_kind`（信任源，注册点一次写入）
+/// 必须等于运行时 `metadata.kind()`。漂移 = 伪造的
+/// `metadata.kind()` 试图把工具改挂常驻判定面——即红。
+#[tokio::test(flavor = "current_thread")]
+async fn c8b_full_default_qidi_build_surface_declared_kind_scan() {
+    use cf_agent::AgentBuilder;
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let mut definition = cf_agent::AgentDefinition::default_qidi_build();
+            definition.discover_skills = false; // 无 FS 扫描（C-4 同构）
+            let agent = AgentBuilder::new(
+                std::path::PathBuf::from("/tmp"),
+                std::sync::Arc::new(
+                    cf_tools::computer::local::LocalTerminalBackend::new(),
+                ),
+                cf_tools::notification::ToolNotificationHandle::noop(),
+            )
+            .from_definition(definition)
+            .build()
+            .await
+            .expect("AgentBuilder::build must succeed for the C-8b full scan");
+
+            let toolset = agent.tool_bridge().toolset();
+            let scan = toolset.declared_kind_scan();
+            assert!(
+                scan.len() >= 15,
+                "default_qidi_build registration surface must be substantial \
+                 for the scan to be meaningful (got {} tools)",
+                scan.len()
+            );
+            for (client_name, declared_kind, runtime_kind) in &scan {
+                assert_eq!(
+                    declared_kind, runtime_kind,
+                    "C-8b drift: declared_kind != metadata.kind() for {client_name}"
+                );
+            }
+        })
+        .await;
+}
+
+// ── ⑥ no-op warn 日志捕获基建（审计后补 ⑥） ─────────────────────
+//
+// **双保险安装**（首轮全量跑实测：单模块绿、全量并行红）：
+// 1. **全局一次性安装（尽力而为）**：tracing 的 callsite interest
+//    是**进程级缓存**，临时 subscriber（`set_default`/
+//    `with_default`）不参与缓存重建——本套件 A-1 测试（两极性
+//    循环）与本文件 ⑥ 断言的 warn 共用同一 callsite
+//    （`sampler_turn.rs` 组装点），若 A-1 先在无 subscriber
+//    状态下触发该 callsite，interest 被缓存为 Never，之后任何
+//    临时捕获都静默收不到事件（间歇性失效）。
+//    `set_global_default` 触发全量 interest 重建，根治该竞态；
+//    若套件内其它测试（test-helpers 链）先抢注了全局 dispatcher，
+//    该步退化为 no-op（兴趣缓存同样由抢注者的安装重建到
+//    非 Never）。
+// 2. **线程局部 `set_default` guard（每测试必装，测试持有）**：
+//    优先于任何全局 dispatcher，事件必定到达本线程 CAPTURE——
+//    全局位无论归谁，捕获都成立。
+// 捕获面 thread-local（current_thread runtime 下整测在单线程），
+// 并行测试互不串扰。
+#[cfg(test)]
+mod warn_capture {
+    use std::sync::Once;
+
+    thread_local! {
+        // RefCell（非 Mutex）：thread-local 本就单线程访问，
+        // 且 `with_borrow*` 便捷方法只对 LocalKey<RefCell> 存在。
+        static CAPTURE: std::cell::RefCell<Vec<String>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// 只收 "message" 字段（`warn!` 静态消息所在）。
+    struct MessageCollector;
+    impl tracing::field::Visit for MessageCollector {
+        fn record_debug(
+            &mut self,
+            field: &tracing::field::Field,
+            value: &dyn std::fmt::Debug,
+        ) {
+            if field.name() == "message" {
+                CAPTURE.with_borrow_mut(|buf| buf.push(format!("{value:?}")));
+            }
+        }
+    }
+
+    struct WarnCaptureSubscriber;
+    impl tracing::Subscriber for WarnCaptureSubscriber {
+        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+            metadata.level() <= &tracing::Level::WARN
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            let mut collector = MessageCollector;
+            event.record(&mut collector);
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    static GLOBAL_INSTALL: Once = Once::new();
+
+    /// Install capture for the current test thread — **two layers**:
+    ///
+    /// 1. One-shot global install, **best effort**: its real job is
+    ///    defeating the callsite-interest `Never` cache (the
+    ///    interest-cache rebuild that `set_global_default`
+    ///    performs) — a temporary subscriber cannot rebuild it, and
+    ///    a sibling test may have first registered the shared warn
+    ///    callsite under `NoSubscriber` (parallel test scheduling).
+    ///    If another global subscriber won the race, this is a
+    ///    no-op — layer 2 still captures.
+    /// 2. A thread-local `set_default` **guard**, which takes
+    ///    priority over whatever the global dispatcher is — events
+    ///    always reach `CAPTURE` on this thread. The caller must
+    ///    hold the guard for the test's lifetime.
+    ///
+    /// Interest note: when the global slot is ours, interest is
+    /// rebuilt to `Always`; when a sibling won it, that subscriber
+    /// (fmt, INFO-max) also registers WARN as interested — either
+    /// way the callsite is never `Never`-cached while this test
+    /// runs, so the temporary guard reliably sees the event.
+    pub(super) fn install() -> tracing::subscriber::DefaultGuard {
+        GLOBAL_INSTALL.call_once(|| {
+            let _ = tracing::subscriber::set_global_default(WarnCaptureSubscriber);
+        });
+        tracing::subscriber::set_default(WarnCaptureSubscriber)
+    }
+
+    /// 清空本线程捕获缓冲（每个断言相位前调用）。
+    pub(super) fn clear() {
+        CAPTURE.with_borrow_mut(|buf| buf.clear());
+    }
+
+    /// 本线程迄今捕获的全部 WARN+ 消息。
+    pub(super) fn captured() -> Vec<String> {
+        CAPTURE.with_borrow(|buf| buf.clone())
+    }
+}
+
+/// ⑥（审计后补 6）no-op warn 断言：Phase A `flag=true` 的
+/// warn! 分支必须**真实发射**（`sampler_turn.rs` 组装点）——
+/// warn 被误删/降级时"no-op + warn"契约就剩无声 no-op，模型
+/// 侧无从得知 flag 未生效，此测防静默失效。反向相位：
+/// `flag=false`（缺省）不发射该 warn（零噪声）。
+#[tokio::test(flavor = "current_thread")]
+async fn a3_noop_warn_emitted_for_true_and_silent_for_false() {
+    // 捕获守卫持有到测试结束（线程局部捕获生效期）。
+    let _capture_guard = warn_capture::install();
+
+    async fn defs_under_flag(
+        dynamic_tools: bool,
+    ) -> Vec<cf_tools::types::definition::ToolDefinition> {
+        let (gateway_tx, _) =
+            tokio::sync::mpsc::unbounded_channel::<cf_acp_lib::AcpClientMessage>();
+        let (persistence_tx, _) =
+            tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+        let mut actor =
+            create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+        actor.agent.replace(test_agent_with_goal_tool().await);
+        actor.dynamic_tools = dynamic_tools;
+        actor.prepare_tool_definitions_inner().await
+    }
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            // 相位 1：flag=true → warn 发射。
+            warn_capture::clear();
+            let _ = defs_under_flag(true).await;
+            let warnings = warn_capture::captured();
+            assert!(
+                warnings.iter().any(|msg| msg.contains(
+                    "dynamic_tools=true is a no-op in Phase A"
+                )),
+                "A-3 no-op contract: flag=true must emit the Phase A warn; \
+                 captured: {warnings:?}"
+            );
+
+            // 相位 2：flag=false → 同组装点不发射该 warn。
+            warn_capture::clear();
+            let _ = defs_under_flag(false).await;
+            let quiet = warn_capture::captured();
+            assert!(
+                !quiet.iter().any(|msg| msg.contains(
+                    "dynamic_tools=true is a no-op in Phase A"
+                )),
+                "flag=false must not emit the no-op warn; captured: {quiet:?}"
             );
         })
         .await;

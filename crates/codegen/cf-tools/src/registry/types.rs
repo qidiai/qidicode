@@ -1463,6 +1463,29 @@ impl FinalizedToolset {
             .map(|t| (t.registry_id.clone(), t.client_name.clone()))
             .collect()
     }
+    /// C-8b full-surface scan support (design doc Q4, kind
+    /// 信任源防线): every registered tool as
+    /// `(client_name, declared_kind, metadata.kind())` — all
+    /// three domains of the trust-source contract in one row.
+    /// The in-crate C-8b test covers a 5-tool fixture only; host
+    /// crates (cf-shell) use this to run the **full
+    /// `default_qidi_build` registration-surface variant** of the
+    /// scan: assert `declared_kind == metadata.kind()` for each
+    /// row — a drift (a forged runtime `metadata.kind()`) trips
+    /// the scan instead of silently reclassifying the tool.
+    pub fn declared_kind_scan(&self) -> Vec<(String, ToolKind, ToolKind)> {
+        self.tools
+            .read()
+            .iter()
+            .map(|t| {
+                (
+                    t.client_name.clone(),
+                    t.declared_kind,
+                    t.metadata.kind(),
+                )
+            })
+            .collect()
+    }
     pub async fn update_resource<T: Send + Sync + 'static>(&self, resource: T) {
         self.resources.lock().await.insert(resource);
     }

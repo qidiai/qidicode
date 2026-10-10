@@ -54,6 +54,16 @@ pub enum ToolSegment {
     /// (Phase B). Until then (Phase A) everything ships full — this
     /// classification is the declaration of intent, not an active
     /// filter.
+    ///
+    /// **Q2.3-6 kill-criterion gate (design doc v3.1, §3.2
+    /// 常驻/按需切分)**: the imported-append enhancement path
+    /// (B-2) is gated by the Q2.3-6 kill criterion — if measured
+    /// data proves it unprofitable across all scenarios, B-2 is
+    /// cut **entirely** and the MVP stands alone (B-2 is not a
+    /// dependency of B-1/B-12). Phase B implementers: re-read
+    /// design doc Q2.3-6 **before** wiring any imported-segment
+    /// projection — this variant declares intent, not a
+    /// commitment to ship the append path.
     Imported,
 }
 
