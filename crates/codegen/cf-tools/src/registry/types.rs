@@ -470,6 +470,16 @@ struct FinalizedTool {
     /// the client-facing `id` / `client_name`.
     registry_id: String,
     client_name: String,
+    /// Registration-time kind, captured from `ToolEntry::kind` (the
+    /// non-`Option` field `register::<T>()` filled at registration —
+    /// `registry/types.rs` `ToolEntry`) when this tool was moved from
+    /// the builder into the finalized set. This is the **trust source**
+    /// for kind-based queries (design doc Q1 规则 2 / C-8b, v3.2 信任源
+    /// 重构 + v3.3 源落定): `tools_for_kind` and the resident-set
+    /// judgment read `declared_kind`, while C-8b asserts it equals
+    /// `metadata.kind()` — a drift (a forged `metadata.kind()`) trips
+    /// the scan instead of silently reclassifying the tool.
+    declared_kind: ToolKind,
     /// Tool metadata — kind, fingerprinting, doom-loop, reminders.
     metadata: Arc<dyn ToolMetadata>,
     /// Converts `serde_json::Value` (from dispatch) back to `ToolOutput`.
@@ -1261,6 +1271,7 @@ impl ToolRegistryBuilder {
                 registry_id: entry.id.clone(),
                 id: entry.id,
                 client_name,
+                declared_kind: entry.kind,
                 metadata: Arc::from(entry.metadata),
                 output_converter: Arc::from(entry.output_converter),
                 definition,
@@ -1430,6 +1441,26 @@ impl FinalizedToolset {
             .read()
             .iter()
             .map(|t| (t.client_name.clone(), t.metadata.kind().as_key().to_owned()))
+            .collect()
+    }
+    /// Every registered tool of `kind`, as `(registry_id,
+    /// client_name)` pairs — **both domains** (design doc Q1 规则 1,
+    /// v3.2 双域): `client_name` is the relay/lookup domain
+    /// (`use_tool` dispatch resolves by `client_name` —
+    /// `call_raw`), `registry_id` is the gate-judgment domain
+    /// (B-12 corrective triage). Unlike [`Self::tool_name_for_kind`]
+    /// (the single *first* tool of a kind), this returns **every**
+    /// registered instance — a multi-instance kind (`List` carries
+    /// both `list_dir` and `glob`; `Search` carries the grep
+    /// double-implementation) is fully enumerated. Kind matching
+    /// reads the registration-time `declared_kind` (trust source,
+    /// C-8b), not the runtime `metadata.kind()`.
+    pub fn tools_for_kind(&self, kind: ToolKind) -> Vec<(String, String)> {
+        self.tools
+            .read()
+            .iter()
+            .filter(|t| t.declared_kind == kind)
+            .map(|t| (t.registry_id.clone(), t.client_name.clone()))
             .collect()
     }
     pub async fn update_resource<T: Send + Sync + 'static>(&self, resource: T) {
@@ -1836,6 +1867,7 @@ impl FinalizedToolset {
             id: name.clone(),
             registry_id,
             client_name: name.clone(),
+            declared_kind: kind,
             metadata: Arc::new(DefaultToolMetadata {
                 kind,
                 description: description.clone(),
@@ -3331,6 +3363,112 @@ mod tests {
             );
         }
     }
+    /// C-8b (design doc Q4, kind 信任源防线): the registration-time
+    /// `declared_kind` must equal the runtime `metadata.kind()` for
+    /// **every** registered tool — built-ins and MCP alike. A drift
+    /// means a forged `metadata.kind()` (e.g. an MCP tool claiming
+    /// `SearchTool`/`UseTool`/`EnterPlan` to escape the resident
+    /// judgment); the scan is the tripwire. `declared_kind` is
+    /// written once at the registration point (`ToolEntry::kind`
+    /// for builder-registered tools, the registering `ToolMetadata`
+    /// for dynamic MCP tools) and never re-derived, so equality
+    /// here proves the two sources agree.
+    #[tokio::test]
+    async fn c8b_declared_kind_matches_metadata_kind_for_all_tools() {
+        let tmp = TempDir::new().unwrap();
+        let builder = ToolRegistryBuilder::new();
+        let config = ToolServerConfig {
+            tools: vec![
+                ToolConfig::for_tool::<qidi_build::ReadFileTool>(),
+                ToolConfig::for_tool::<qidi_build::ListDirTool>(),
+                ToolConfig::for_tool::<qidi_build::GrepTool>(),
+                ToolConfig::for_tool::<crate::implementations::use_tool::UseTool>(),
+            ],
+            behavior_preset: None,
+        };
+        let ctx = test_session_context(&tmp);
+        let toolset = builder.finalize(config, ctx).unwrap();
+        toolset
+            .register_tool(
+                "linear__save_issue".to_string(),
+                FakeMcpTool {
+                    description: "Create or update a Linear issue".into(),
+                },
+                Some(serde_json::json!({ "type" : "object", "properties" : {} })),
+            )
+            .unwrap();
+        let tools = toolset.tools.read();
+        assert!(
+            !tools.is_empty(),
+            "fixture must register tools for the drift scan"
+        );
+        for tool in tools.iter() {
+            assert_eq!(
+                tool.declared_kind,
+                tool.metadata.kind(),
+                "C-8b drift: declared_kind != metadata.kind() for {}",
+                tool.client_name
+            );
+        }
+    }
+
+    /// Design doc Q1 规则 1: the kind→Vec query returns **every**
+    /// registered instance of a kind — not just the first — in
+    /// **both domains** (`registry_id` for the B-12 gate
+    /// judgment, `client_name` for the `use_tool` relay lookup).
+    /// `List` is the multi-instance witness: `list_dir`
+    /// (qidi_build) and `glob` (opencode) share `ToolKind::List`,
+    /// so the single `tool_name_for_kind` cannot enumerate them
+    /// but this query must.
+    #[tokio::test]
+    async fn tools_for_kind_returns_all_instances_in_both_domains() {
+        let tmp = TempDir::new().unwrap();
+        let builder = ToolRegistryBuilder::new();
+        let config = ToolServerConfig {
+            tools: vec![
+                ToolConfig::for_tool::<qidi_build::ListDirTool>(),
+                ToolConfig::for_tool::<crate::implementations::opencode::OpenCodeGlobTool>(),
+                ToolConfig::for_tool::<qidi_build::ReadFileTool>(),
+            ],
+            behavior_preset: None,
+        };
+        let ctx = test_session_context(&tmp);
+        let toolset = builder.finalize(config, ctx).unwrap();
+        let list_tools = toolset.tools_for_kind(ToolKind::List);
+        assert_eq!(
+            list_tools.len(),
+            2,
+            "List carries both list_dir and glob; got {list_tools:?}"
+        );
+        // Dual domain: every pair carries a registry_id and a
+        // client_name, and both are non-empty and distinct
+        // fields of the same tool.
+        for (registry_id, client_name) in &list_tools {
+            assert!(!registry_id.is_empty(), "registry_id domain must be populated");
+            assert!(!client_name.is_empty(), "client_name domain must be populated");
+        }
+        let names: Vec<&str> = list_tools
+            .iter()
+            .map(|(_, client)| client.as_str())
+            .collect();
+        assert!(
+            names.contains(&"list_dir"),
+            "list_dir must be enumerated (got {names:?})"
+        );
+        assert!(
+            names.contains(&"glob"),
+            "glob must be enumerated (got {names:?})"
+        );
+        // Single-instance kind: exactly one pair, both domains
+        // populated.
+        let read_tools = toolset.tools_for_kind(ToolKind::Read);
+        assert_eq!(read_tools.len(), 1);
+        assert_eq!(read_tools[0].1, "read_file");
+        // A kind with no registered instance yields an empty
+        // Vec (not an error, not the first-of-another-kind).
+        assert!(toolset.tools_for_kind(ToolKind::Lsp).is_empty());
+    }
+
     /// `task` tool must be rejected when neither `get_task_output` nor
     /// `kill_task` are present in the toolset.
     #[test]

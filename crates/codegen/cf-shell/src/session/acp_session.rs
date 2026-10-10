@@ -634,6 +634,18 @@ pub(crate) struct SessionActor {
     /// `reconstruct_full_config` threads it into the sampler config, and the
     /// sampler itself sends the matching `x-grok-doom-loop-check` header.
     pub(crate) doom_loop_recovery: Option<cf_sampling_types::DoomLoopRecoveryPolicy>,
+    /// Dynamic tool pipeline switch (P0-2 第二步, design doc
+    /// §6 Phase A) — **resolved once at session startup**
+    /// (`Config::resolve_dynamic_tools`, default `false`) and
+    /// frozen for the session's lifetime: a mid-session
+    /// config.toml edit must not change the live session's
+    /// defs (design doc A-4). Phase A semantics: every value
+    /// ships the full defs via the single assembly path
+    /// (`false` silently, `true` with a warn that the
+    /// resident/imported segmentation is not implemented yet —
+    /// design doc A-3, Sonnet 2.12: no half-implemented
+    /// on-state, no config validation rejection).
+    pub(crate) dynamic_tools: bool,
     /// Telemetry-only per-turn doom-loop recovery tally (attempts, whether a
     /// budget-spent accept happened, tightest trigger label). Accumulated by
     /// the event drainer, taken at turn end for the per-turn analytics event.
@@ -1622,6 +1634,13 @@ mod record_response_token_usage_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/tool_definition_caliber_tests.rs"]
 mod tool_definition_caliber_tests;
+/// P0-2 第二步 Phase A 验收（设计稿 §6 Phase A：
+/// A-1~A-4 + 契约 C-4 条件版 / C-7）——
+/// `dynamic_tools` 骨架的空操作定调、旗标纪律、
+/// plan 恒等与 meta 二元保留。
+#[cfg(test)]
+#[path = "acp_session_tests/dynamic_tools_phase_a_tests.rs"]
+mod dynamic_tools_phase_a_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/replay_buffer_send_update_tests.rs"]
 mod replay_buffer_send_update_tests;

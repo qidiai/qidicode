@@ -1087,6 +1087,50 @@ mod tests {
         );
     }
 
+    /// Design-doc contract C-2 (P0-2 第二步 §Q4): a mixed
+    /// `--tools "非法名,read_file"` value threads
+    /// **verbatim** — the legal name (`read_file`) and
+    /// the unmappable name (`非法名`) both reach
+    /// `cli_agent_overrides.tools`. Fail-soft is the
+    /// contract: the illegal name must not block the
+    /// legal one (the downstream builder resolves
+    /// names to registered tools, warns on entries
+    /// that match nothing, and keeps the full toolset
+    /// when an allowlist is wholly unmappable —
+    /// exercised in the cf-agent builder tests).
+    /// Phase A note: the "常驻段 = 白名单 ∪ meta"
+    /// projection half of C-2 is a Phase B assertion
+    /// (segmentation ships in Phase B); the parse +
+    /// threading half asserted here is the Phase A
+    /// scope.
+    #[test]
+    fn c2_mixed_illegal_and_legal_tools_thread_verbatim() {
+        let empty: toml::Value = toml::Value::Table(toml::map::Map::new());
+        let mut agent_config =
+            AgentConfig::new_from_toml_cfg(&empty).expect("empty config should parse");
+        let flags = ConnectFlags {
+            tools: Some(vec!["非法名".into(), "read_file".into()]),
+            ..Default::default()
+        };
+        apply_cli_tool_overrides(&flags, &mut agent_config);
+        assert_eq!(
+            agent_config.cli_agent_overrides.tools,
+            Some(vec!["非法名".to_string(), "read_file".to_string()]),
+            "mixed legal/illegal --tools must thread verbatim (C-2 fail-soft)"
+        );
+        // The denylist shares the same fail-soft contract.
+        let flags = ConnectFlags {
+            disallowed_tools: Some(vec!["read_file".into(), "不存在的工具".into()]),
+            ..Default::default()
+        };
+        apply_cli_tool_overrides(&flags, &mut agent_config);
+        assert_eq!(
+            agent_config.cli_agent_overrides.disallowed_tools,
+            Some(vec!["read_file".to_string(), "不存在的工具".to_string()]),
+            "mixed legal/illegal --disallowed-tools must thread verbatim (C-2 fail-soft)"
+        );
+    }
+
     #[test]
     fn unsupported_leader_flags_ignores_supported() {
         let flags = ConnectFlags {

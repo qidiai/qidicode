@@ -116,6 +116,19 @@ impl ToolBridge {
             .and_then(|r| r.tool_for_kind(kind).map(str::to_string))
     }
 
+    /// Every registered tool of `kind`, as `(registry_id,
+    /// client_name)` pairs — both domains (design doc Q1 规则 1,
+    /// v3.2 双域; `registry_id` = B-12 gate-judgment domain,
+    /// `client_name` = `use_tool` relay/lookup domain). Plural
+    /// counterpart of [`Self::tool_for_kind`]: returns **all**
+    /// registered instances of the kind, not the first — multi-
+    /// instance kinds (`List` → `list_dir` + `glob`) are fully
+    /// enumerated. Sync — the registry read is a microsecond
+    /// `RwLock::read` (same discipline as [`Self::tool_kind`]).
+    pub fn tools_for_kind(&self, kind: ToolKind) -> Vec<(String, String)> {
+        self.registry.tools_for_kind(kind)
+    }
+
     /// [`ToolKind`] for a registered tool by client-facing name, or
     /// `None` for unknown names. Sync — uses the registry's
     /// `RwLock::read`.
@@ -737,6 +750,48 @@ mod tests {
         assert_eq!(bridge.tool_kind("not_a_registered_tool"), None);
         // Exact client-name lookup is case-sensitive.
         assert_eq!(bridge.tool_kind("write"), None);
+    }
+
+    /// Design doc Q1 规则 1 (bridge surface): `tools_for_kind`
+    /// enumerates **every** registered instance of a kind as
+    /// `(registry_id, client_name)` pairs — the plural
+    /// counterpart of the single-first `tool_for_kind`. Two
+    /// fixtures of one kind prove the plural behavior; the
+    /// dual domains are asserted per pair.
+    #[test]
+    fn tools_for_kind_enumerates_all_instances_in_both_domains() {
+        let bridge = ToolBridge::for_test();
+        let toolset = bridge.toolset();
+        register_fixture(
+            &toolset,
+            "fixture_list_a",
+            ToolKind::List,
+            "fixture_list_a",
+        );
+        register_fixture(
+            &toolset,
+            "fixture_list_b",
+            ToolKind::List,
+            "fixture_list_b",
+        );
+        register_fixture(&toolset, "Write", ToolKind::Write, "fixture_write");
+
+        let lists = bridge.tools_for_kind(ToolKind::List);
+        assert_eq!(lists.len(), 2, "both List instances must be enumerated");
+        let mut client_names: Vec<&str> =
+            lists.iter().map(|(_, c)| c.as_str()).collect();
+        client_names.sort_unstable();
+        assert_eq!(
+            client_names,
+            vec!["fixture_list_a", "fixture_list_b"],
+            "client_name domain must carry both instances"
+        );
+        for (registry_id, client_name) in &lists {
+            assert_eq!(registry_id, client_name, "no-override fixtures keep both domains equal");
+        }
+        // Single instance kind → one pair; absent kind → empty.
+        assert_eq!(bridge.tools_for_kind(ToolKind::Write).len(), 1);
+        assert!(bridge.tools_for_kind(ToolKind::Lsp).is_empty());
     }
 
     // ── drain_between_turn_bash_completions owner scoping (the "While you
