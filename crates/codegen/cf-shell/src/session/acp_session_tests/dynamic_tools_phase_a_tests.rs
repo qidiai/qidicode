@@ -56,7 +56,7 @@ fn defs_fingerprint(defs: &[cf_tools::types::definition::ToolDefinition]) -> Str
 //
 // **golden 更新流程（显式、opt-in——CI/正常测试永不写文件）**：
 // 桥/工具定义**有意**变更时：
-// 1. `CF_UPDATE_DEFS_GOLDEN=1 cargo test -p cf-shell --lib a3_flag_polarities_defs_byte_identical`
+// 1. `CF_UPDATE_DEFS_GOLDEN=1 cargo test -p cf-shell --lib a3_flag_polarities_off_matches_golden_on_matches_resident`
 // 2. 审查 diff（golden 漂移是**评审点**，不是要消音的事故）；
 // 3. `git add tests/golden/defs_snapshot.json` 并随改动一起 commit。
 const DEFS_GOLDEN_FILE: &str =
@@ -94,7 +94,7 @@ fn assert_defs_match_committed_golden(defs: &[cf_tools::types::definition::ToolD
         Err(e) => panic!(
             "committed golden defs snapshot missing at {DEFS_GOLDEN_FILE}: {e}.\n\
              Regenerate + commit it with: CF_UPDATE_DEFS_GOLDEN=1 \
-             cargo test -p cf-shell --lib a3_flag_polarities_defs_byte_identical"
+             cargo test -p cf-shell --lib a3_flag_polarities_off_matches_golden_on_matches_resident"
         ),
     };
     assert_eq!(
@@ -104,7 +104,7 @@ fn assert_defs_match_committed_golden(defs: &[cf_tools::types::definition::ToolD
          snapshot (bridge or tool definitions changed). If the drift is \
          deliberate, regenerate + commit the golden file: \
          CF_UPDATE_DEFS_GOLDEN=1 cargo test -p cf-shell --lib \
-         a3_flag_polarities_defs_byte_identical"
+         a3_flag_polarities_off_matches_golden_on_matches_resident"
     );
 }
 
@@ -133,7 +133,7 @@ async fn tool_names(agent: &cf_agent::Agent) -> Vec<String> {
 /// 确定性分段函数得到的**常驻段**（C-10 append-only 前缀稳定性的
 /// 直接体现——常驻段是 flag=false 视图的一个字节级前缀函数）。
 #[tokio::test(flavor = "current_thread")]
-async fn a3_flag_polarities_defs_byte_identical() {
+async fn a3_flag_polarities_off_matches_golden_on_matches_resident() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {

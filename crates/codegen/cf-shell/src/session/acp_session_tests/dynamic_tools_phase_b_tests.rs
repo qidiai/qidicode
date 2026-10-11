@@ -183,6 +183,70 @@ async fn c11_unlock_append_only_and_projection_prefix_grows() {
         .await;
 }
 
+/// S-1（registry_ids 域契约断言，不删字段）：B-12 快照的 `registry_ids`
+/// 域 == 该轮投影 def 的 registry_id 集合（写入侧
+/// `sampler_turn::prepare_tool_definitions_inner` 的 `registry_id_of` 链）
+/// ——让这一域有断言钉住，不再是无读方、无断言的死数据。消费侧 use_tool
+/// 门控按 `client_names` 直判（relay 域），两域对本轮 built-in 面结构性同源
+/// （C-5 双域裁决）。任何投影 def 若解析不出 registry_id（filter_map 静默
+/// 丢）即红。
+#[tokio::test(flavor = "current_thread")]
+async fn s1_defs_snapshot_registry_ids_match_projection() {
+    use cf_tools::types::resources::DefsSnapshot;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _) =
+                tokio::sync::mpsc::unbounded_channel::<cf_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) =
+                tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let mut actor =
+                create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            actor.agent.replace(test_agent_dynamic_tools_fixture().await);
+            actor.dynamic_tools = true;
+            let bridge = actor.agent.borrow().tool_bridge().clone();
+
+            let projected = actor.prepare_tool_definitions_inner().await;
+
+            let snap = bridge
+                .read_resource::<DefsSnapshot>()
+                .await
+                .expect("assembly must publish DefsSnapshot under flag=true");
+
+            // 写入侧：每个投影 def 都必须能解析出 registry_id（无一被静默丢）。
+            let expected_registry_ids: std::collections::HashSet<String> = projected
+                .iter()
+                .map(|d| {
+                    bridge.registry_id_of(&d.function.name).unwrap_or_else(|| {
+                        panic!(
+                            "S-1: projected def `{}` has no registry_id — the snapshot's \
+                             registry_ids domain would silently drop it",
+                            d.function.name
+                        )
+                    })
+                })
+                .collect();
+            assert!(
+                !expected_registry_ids.is_empty(),
+                "S-1: the fixture projection must be non-empty for this assertion to bite"
+            );
+            assert_eq!(
+                snap.registry_ids, expected_registry_ids,
+                "S-1: DefsSnapshot.registry_ids must equal the projection's registry_id set \
+                 (write side sampler_turn vs consumer side use_tool gate)"
+            );
+
+            // 消费侧对齐：client_names 域 == 投影名集合（门控直判域）。
+            let expected_client_names: std::collections::HashSet<String> =
+                projected.iter().map(|d| d.function.name.clone()).collect();
+            assert_eq!(
+                snap.client_names, expected_client_names,
+                "S-1: DefsSnapshot.client_names must equal the projection's wire-name set"
+            );
+        })
+        .await;
+}
+
 /// C-12 + 金标准（search → 解锁 → 中转全链，hermetic）：`search_tool`
 /// 查询命中被藏内建工具 → 返回其完整 schema 与逐字节 callable_name
 /// （C-5 中转域）并记录解锁 → 同一轮 `use_tool` 按该名中转**真实到达**
@@ -339,12 +403,12 @@ async fn b8_flag_off_byte_identical_to_baseline() {
         .await;
 }
 
-/// imported 生命周期四场景（设计稿 Q2.4）——状态级声明 + 断言。
-/// resume 沿用 / fork 继承 / subagent 隔离（从零）/ compact 保留；
-/// /clear 清空。解锁状态是 per-session 资源，生命周期语义落在这四个
-/// 操作如何处置它。
+/// imported 生命周期**状态语义**（设计稿 Q2.4）——状态级声明 + 断言
+/// （**非**四场景接线验收；接线落地后另立真·场景测试）。resume 沿用 /
+/// fork 继承 / subagent 隔离（从零）/ compact 保留；/clear 清空。解锁
+/// 状态是 per-session 资源，生命周期语义落在这些操作如何处置它。
 #[test]
-fn imported_lifecycle_four_scenarios() {
+fn imported_lifecycle_state_semantics() {
     use cf_tools::types::resources::DynamicToolState;
 
     // 基线：会话中途解锁了两个工具。

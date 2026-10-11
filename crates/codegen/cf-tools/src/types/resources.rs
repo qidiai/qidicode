@@ -768,8 +768,11 @@ impl DynamicToolState {
             .unlocked
             .clone()
     }
-    /// Count a `search_tool` invocation this session (C-9 cap telemetry);
-    /// returns the new count.
+    /// Count a `search_tool` invocation for this task and return the new
+    /// count. The return value drives the C-9 per-task call cap — `search_tool`
+    /// stops searching and returns the full hidden list once the count exceeds
+    /// the cap (`search_tool::C9_MAX_SEARCH_CALLS`) — so this is enforcement
+    /// state, not telemetry-only.
     pub fn count_search_call(&self) -> usize {
         let mut inner = self.0.lock().unwrap_or_else(|e| e.into_inner());
         inner.search_calls += 1;

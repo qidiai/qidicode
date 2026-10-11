@@ -271,6 +271,29 @@ impl cf_tool_runtime::Tool for SearchTool {
             )
         };
 
+        // C-9 cap enforcement: the single-task `search_tool` call cap. Count
+        // this invocation up front; past the cap we stop searching **entirely**
+        // (no MCP retrieval, no built-in match) and hand back the full
+        // hidden-tool list as the escape hatch. This is the anti-dead-loop
+        // ceiling of C-9 (echoing the B-6 no-dead-loop criterion), not a soft
+        // hint. Pre-pipeline (no `DynamicToolState`, i.e. flag=false) the
+        // count is 0, so the cap is inert and behavior is byte-identical to
+        // before.
+        let call_no = dyn_state
+            .as_ref()
+            .map(|state| state.count_search_call())
+            .unwrap_or(0);
+        if call_no > C9_MAX_SEARCH_CALLS {
+            tracing::info!(
+                call_no = call_no,
+                "search_tool.search: C-9 call cap reached — returning full hidden list"
+            );
+            return Ok(hidden_tools_fallback_response(
+                builtin_surface.as_ref(),
+                C9FallbackReason::CapExceeded,
+            ));
+        }
+
         // Phase B (B-0/B-1): built-in tools hidden from `defs`, widened onto
         // the search surface beyond MCP. This must run even when the MCP
         // index is absent (previously the only source).
@@ -279,9 +302,12 @@ impl cf_tool_runtime::Tool for SearchTool {
             .map(|s| match_builtin_tools(&s.0, &input.query, limit))
             .unwrap_or_default();
 
-        // Record unlocks (append-only, C-11) + count the search call (C-9).
+        // Record unlocks (append-only, C-11) for the tools actually surfaced.
+        // The fallback responses below deliberately do **not** unlock the whole
+        // hidden pool: the escape hatch is a read-only listing the model
+        // relays through `use_tool`, and those tools stay hidden (so the relay
+        // path still applies, C-8a).
         if let Some(state) = &dyn_state {
-            state.count_search_call();
             for entry in &builtin_matches {
                 state.record_unlock(&entry.client_name);
             }
@@ -289,6 +315,18 @@ impl cf_tool_runtime::Tool for SearchTool {
 
         let Some(tool_index) = tool_index else {
             if builtin_matches.is_empty() {
+                // C-9 refine fallback: the query matched no built-in tool
+                // (e.g. a <3-char non-exact query — the `match_builtin_tools`
+                // empty-result site) but a hidden pool exists. Return the
+                // whole pool (with full schemas) so the model has a same-turn
+                // escape hatch instead of re-running the search into the same
+                // empty result.
+                if let Some(surface) = builtin_surface.as_ref().filter(|s| !s.0.is_empty()) {
+                    return Ok(hidden_tools_fallback_response(
+                        Some(surface),
+                        C9FallbackReason::NoMatch,
+                    ));
+                }
                 return Ok(ToolOutput::Text(
                     serde_json::to_string_pretty(&serde_json::json!({
                         "results": [],
@@ -315,6 +353,18 @@ impl cf_tool_runtime::Tool for SearchTool {
             all_results = %serde_json::to_string(&all_results_json).unwrap_or_default(),
             "search_tool.search"
         );
+
+        // C-9 refine fallback (MCP index present): neither the MCP index nor
+        // the built-in surface matched anything, but a hidden built-in pool
+        // exists — return it as the same-turn escape hatch.
+        if snapshot.results.is_empty() && builtin_matches.is_empty() {
+            if let Some(surface) = builtin_surface.as_ref().filter(|s| !s.0.is_empty()) {
+                return Ok(hidden_tools_fallback_response(
+                    Some(surface),
+                    C9FallbackReason::NoMatch,
+                ));
+            }
+        }
 
         // Group results by server, preserving BM25 score order within each
         // group. Groups are sorted by highest score (best-matching server first).
@@ -369,7 +419,7 @@ impl cf_tool_runtime::Tool for SearchTool {
 
         let response = serde_json::json!({
             "results": result_groups,
-            "total_hidden_tools": snapshot.total_hidden_tools + builtin_surface.as_ref().map(|s| s.0.len()).unwrap_or(0),
+            "total_hidden_tools": snapshot.total_hidden_tools + builtin_matches.len(),
             "status": status,
             "note": note,
             "hint": "Pass each tool's `callable_name` verbatim as `use_tool`'s `tool_name` parameter.",
@@ -392,6 +442,68 @@ fn builtin_tool_json(entry: &crate::types::resources::BuiltinToolEntry) -> serde
         "description": truncate_description(&entry.description),
         "score": 1.0,
         "input_schema": entry.input_schema,
+    })
+}
+
+/// C-9 single-task `search_tool` call cap: the model may search at most this
+/// many times per task (`DynamicToolState` lifetime, reset by `/clear`) before
+/// the anti-dead-loop ceiling trips (design doc Q4 C-9).
+const C9_MAX_SEARCH_CALLS: usize = 3;
+
+/// Why a C-9 full-hidden-list fallback was returned (selects the note text).
+#[derive(Debug, Clone, Copy)]
+enum C9FallbackReason {
+    /// The per-task call cap was exceeded — search is terminated for the task.
+    CapExceeded,
+    /// The query matched nothing but a hidden pool exists (refine miss).
+    NoMatch,
+}
+
+/// C-9 fallback: return the **full** hidden built-in tool list, each entry
+/// carrying its complete `input_schema`, so the model can pick a tool and call
+/// it via `use_tool` in the same turn (design doc Q4 C-9: `≥2 refine miss` /
+/// `call cap` → full list + stop notice + search-only termination). The list
+/// is intentionally not unlocked (see `run`).
+fn hidden_tools_fallback_response(
+    surface: Option<&crate::types::resources::BuiltinToolSearchSurface>,
+    reason: C9FallbackReason,
+) -> ToolOutput {
+    let entries: &[crate::types::resources::BuiltinToolEntry] =
+        surface.map(|s| s.0.as_slice()).unwrap_or(&[]);
+    let tools: Vec<serde_json::Value> = entries.iter().map(builtin_tool_json).collect();
+    let note = match reason {
+        C9FallbackReason::CapExceeded => format!(
+            "search_tool call limit reached ({C9_MAX_SEARCH_CALLS} per task, C-9): search-only \
+             mode is terminated for this task — no further refine/`search_tool` call will search. \
+             The full list of {} hidden tool(s) follows, each with its complete input schema; \
+             pick the tool you need and call it via `use_tool` (pass `callable_name` verbatim).",
+            entries.len(),
+        ),
+        C9FallbackReason::NoMatch => format!(
+            "No tool matched your query (C-9 refine fallback): here is the full list of {} hidden \
+             tool(s), each with its complete input schema, so you can pick the right one this turn \
+             instead of re-running `search_tool` into the same empty result. If you still need an \
+             MCP integration tool, re-run `search_tool` with a `server__tool`-style query.",
+            entries.len(),
+        ),
+    };
+    let mut response = serde_json::json!({
+        "results": [{
+            "server": "builtin",
+            "tools": tools,
+        }],
+        "total_hidden_tools": entries.len(),
+        "status": "ready",
+        "note": note,
+        "hint": "Pass each tool's `callable_name` verbatim as `use_tool`'s `tool_name` parameter.",
+        "fallback": "full_hidden_list",
+    });
+    if matches!(reason, C9FallbackReason::CapExceeded) {
+        response["search_only_terminated"] = serde_json::Value::Bool(true);
+    }
+    ToolOutput::SearchTool(SearchToolOutput {
+        result_count: entries.len(),
+        content: serde_json::to_string_pretty(&response).unwrap(),
     })
 }
 
@@ -599,6 +711,182 @@ mod tests {
         );
         assert_eq!(state.unlocked(), vec!["think".to_string()]);
         assert_eq!(state.search_call_count(), 1);
+    }
+
+    /// C-9 cap enforcement: the first `C9_MAX_SEARCH_CALLS` (3) invocations
+    /// search normally; from the 4th on, search is skipped entirely and the
+    /// full hidden list is returned with a stop notice declaring search-only
+    /// mode terminated (the anti-dead-loop ceiling, echoing B-6).
+    #[tokio::test]
+    async fn c9_call_cap_returns_full_hidden_list_after_three_calls() {
+        use crate::types::resources::{
+            BuiltinToolEntry, BuiltinToolSearchSurface, DynamicToolState, Resources,
+        };
+        let resources = Resources::default().into_shared();
+        let state = DynamicToolState::default();
+        {
+            let mut guard = resources.lock().await;
+            guard.insert(BuiltinToolSearchSurface(vec![
+                BuiltinToolEntry {
+                    client_name: "think".into(),
+                    description: "Record internal reasoning".into(),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": { "thought": { "type": "string" } }
+                    }),
+                },
+                BuiltinToolEntry {
+                    client_name: "video_gen".into(),
+                    description: "Generate a video".into(),
+                    input_schema: serde_json::json!({"type": "object"}),
+                },
+            ]));
+            guard.insert(state.clone());
+        }
+        let mut ctx =
+            cf_tool_runtime::ToolCallContext::new(cf_tool_protocol::ToolCallId::new_v7());
+        ctx.extensions.insert(resources);
+
+        // Calls 1..=cap: normal search (exactly one built-in match for `think`).
+        for i in 1..=C9_MAX_SEARCH_CALLS {
+            let output = SearchTool
+                .run(
+                    ctx.clone(),
+                    SearchToolInput {
+                        query: "think".into(),
+                        limit: Some(5),
+                    },
+                )
+                .await
+                .unwrap();
+            let ToolOutput::SearchTool(output) = output else {
+                panic!("expected search tool output");
+            };
+            let json: serde_json::Value = serde_json::from_str(&output.content).unwrap();
+            assert_eq!(
+                json["results"][0]["tools"].as_array().unwrap().len(),
+                1,
+                "C-9: call #{i} (within the cap) must search normally — one match for `think`"
+            );
+            assert_eq!(
+                state.search_call_count(),
+                i,
+                "C-9: the invocation counter must advance once per call"
+            );
+        }
+
+        // Call cap+1: over the cap — full hidden list + stop notice.
+        let output = SearchTool
+            .run(
+                ctx.clone(),
+                SearchToolInput {
+                    query: "think".into(),
+                    limit: Some(5),
+                },
+            )
+            .await
+            .unwrap();
+        let ToolOutput::SearchTool(output) = output else {
+            panic!("expected search tool output");
+        };
+        let json: serde_json::Value = serde_json::from_str(&output.content).unwrap();
+        assert_eq!(
+            json["search_only_terminated"],
+            serde_json::Value::Bool(true),
+            "C-9: exceeding the call cap must declare search-only mode terminated"
+        );
+        assert_eq!(
+            json["results"][0]["tools"].as_array().unwrap().len(),
+            2,
+            "C-9: over the cap the whole hidden list (2 tools) must be returned, not the one match"
+        );
+        let note = json["note"].as_str().unwrap();
+        assert!(
+            note.contains("call limit reached") && note.contains("C-9"),
+            "C-9: the over-cap response must carry a stop notice citing C-9, got: {note}"
+        );
+        assert_eq!(
+            state.search_call_count(),
+            C9_MAX_SEARCH_CALLS + 1,
+            "C-9: the capped invocation is still counted"
+        );
+    }
+
+    /// C-9 refine fallback: a query that matches no tool (here a 2-char,
+    /// non-exact query — below the ≥3-char token threshold, the
+    /// `match_builtin_tools` empty-result site) returns the **full** hidden
+    /// list (with schemas) as a same-turn escape hatch rather than an empty
+    /// result. The fallback is read-only — it does not unlock the pool.
+    #[tokio::test]
+    async fn c9_refine_miss_returns_full_hidden_list() {
+        use crate::types::resources::{
+            BuiltinToolEntry, BuiltinToolSearchSurface, DynamicToolState, Resources,
+        };
+
+        // Precondition: the weak query genuinely matches nothing.
+        let entries = vec![
+            BuiltinToolEntry {
+                client_name: "think".into(),
+                description: "Record internal reasoning".into(),
+                input_schema: serde_json::json!({"type": "object"}),
+            },
+            BuiltinToolEntry {
+                client_name: "video_gen".into(),
+                description: "Generate a video".into(),
+                input_schema: serde_json::json!({"type": "object"}),
+            },
+        ];
+        assert!(
+            match_builtin_tools(&entries, "zz", 5).is_empty(),
+            "precondition: a 2-char non-exact query must match no built-in tool"
+        );
+
+        let resources = Resources::default().into_shared();
+        let state = DynamicToolState::default();
+        {
+            let mut guard = resources.lock().await;
+            guard.insert(BuiltinToolSearchSurface(entries.clone()));
+            guard.insert(state.clone());
+        }
+        let mut ctx =
+            cf_tool_runtime::ToolCallContext::new(cf_tool_protocol::ToolCallId::new_v7());
+        ctx.extensions.insert(resources);
+
+        let output = SearchTool
+            .run(
+                ctx.clone(),
+                SearchToolInput {
+                    query: "zz".into(),
+                    limit: Some(5),
+                },
+            )
+            .await
+            .unwrap();
+        let ToolOutput::SearchTool(output) = output else {
+            panic!("expected search tool output");
+        };
+        let json: serde_json::Value = serde_json::from_str(&output.content).unwrap();
+        let tools = json["results"][0]["tools"].as_array().unwrap();
+        assert_eq!(
+            tools.len(),
+            2,
+            "C-9: a refine miss must return the full hidden list (2 tools)"
+        );
+        assert!(
+            tools
+                .iter()
+                .any(|t| t["callable_name"] == "think" && t["input_schema"].is_object()),
+            "C-9: the fallback list must carry each tool's input schema for same-turn relay"
+        );
+        let note = json["note"].as_str().unwrap();
+        assert!(
+            note.contains("No tool matched") && note.contains("C-9"),
+            "C-9: the refine-miss response must explain the fallback and cite C-9, got: {note}"
+        );
+        assert!(
+            state.unlocked().is_empty(),
+            "C-9: the fallback is a read-only listing — it must not unlock the whole pool"
+        );
     }
 
     // -- truncate_description tests --

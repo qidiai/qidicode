@@ -46,9 +46,13 @@ pub enum ToolSegment {
     /// land here or in the imported segment.
     ResidentTailSlot,
     /// 恒驻 meta 层 — the pipeline's own channels (`search_tool` /
-    /// `use_tool`). Not registered into `defs` in this build
-    /// (Phase B registers them); until then they behave as
-    /// "registered-if-present, never trimmed" (C-4 conditional form).
+    /// `use_tool`). **Correction (design-doc v3.5 errata ①)**: these are
+    /// registered into `defs` since the fork
+    /// (`cf-agent/src/config.rs:286-287`, `default_qidi_build_toolset()`);
+    /// the earlier "not registered in this build" claim is retracted. They
+    /// are never trimmed by any trim config (builder `SearchTool | UseTool`
+    /// keep-clause, `cf-agent/src/builder.rs`) and always ship at the resident
+    /// head (C-4, unconditional form under the default toolset).
     Meta,
     /// 按需段 — hidden from `defs` until unlocked via `search_tool`
     /// (Phase B). Until then (Phase A) everything ships full — this

@@ -317,7 +317,7 @@ impl cf_tool_runtime::Tool for UseTool {
         input: UseToolInput,
     ) -> Result<ToolOutput, cf_tool_runtime::ToolError> {
         use crate::types::resources::{
-            EnabledNativeToolNames, ManagedGatewayToolCatalog, Params,
+            DefsSnapshot, EnabledNativeToolNames, ManagedGatewayToolCatalog, Params,
         };
 
         let resources = crate::types::tool_metadata::shared_resources(&ctx).ok();
@@ -339,10 +339,28 @@ impl cf_tool_runtime::Tool for UseTool {
                 // projection. Fail-safe — when the per-turn snapshot is
                 // absent (flag off / subagent / nested relay) the tool is
                 // treated as NOT hidden, so the corrective default stands.
+                let snapshot = guard.get::<DefsSnapshot>();
                 let hidden = native
-                    && guard
-                        .get::<crate::types::resources::DefsSnapshot>()
-                        .is_some_and(|snap| !snap.contains_client_name(&input.tool_name));
+                    && snapshot.is_some_and(|snap| !snap.contains_client_name(&input.tool_name));
+                // Observability (S-3, R-004): a *relay-eligible* native tool
+                // with no snapshot in scope **while the pipeline is active** is
+                // the abnormal `flag=true`-but-snapshot-missing state (the C-8a
+                // data-flow break). The `DynamicToolState` guard distinguishes
+                // it from the healthy `flag=false` corrective path (which
+                // publishes no state) — without that guard this WARN would fire
+                // on every mis-routed native call in the production default and
+                // spam the logs. The model-facing behavior is unchanged
+                // (fail-safe corrective); only ops visibility is added. Higher
+                // severity than the corrective/relay info logs.
+                let pipeline_active = guard
+                    .get::<crate::types::resources::DynamicToolState>()
+                    .is_some();
+                if native && pipeline_active && snapshot.is_none() {
+                    tracing::warn!(
+                        tool_name = %input.tool_name,
+                        "B-12 gate: no DefsSnapshot in scope under relay-eligible conditions"
+                    );
+                }
                 let st = guard
                     .get::<crate::types::template_renderer::TemplateRenderer>()
                     .and_then(|r| r.tool_for_kind(ToolKind::SearchTool))
@@ -1578,6 +1596,20 @@ mod tests {
         resources.into_shared()
     }
 
+    /// Resources with native tools + an **active pipeline** (`DynamicToolState`
+    /// present, i.e. the `flag=true` shape) but **no** `DefsSnapshot` — the
+    /// C-8a data-flow-break state the S-3 WARN targets.
+    fn native_resources_pipeline_active_without_snapshot(
+        native: &[&str],
+    ) -> crate::types::resources::SharedResources {
+        use crate::types::resources::{DynamicToolState, EnabledNativeToolNames, Resources};
+        let mut resources = Resources::new();
+        let set: std::collections::HashSet<String> = native.iter().map(|s| s.to_string()).collect();
+        resources.insert(EnabledNativeToolNames(set));
+        resources.insert(DynamicToolState::default());
+        resources.into_shared()
+    }
+
     /// Resources with native-tool correction explicitly disabled.
     fn native_resources_correction_off(
         native: &[&str],
@@ -1865,6 +1897,105 @@ mod tests {
         assert!(
             captured_args.lock().unwrap().is_none(),
             "fail-safe: no snapshot => corrective, no relay dispatch"
+        );
+    }
+
+    /// S-3 (R-004 observability): the fail-safe path — a *relay-eligible*
+    /// native tool (`EnabledNativeToolNames` contains it) with **no**
+    /// `DefsSnapshot` in scope **while the pipeline is active**
+    /// (`DynamicToolState` present) — must emit a `tracing::WARN` carrying
+    /// `tool_name`, so the abnormal `flag=true`-but-snapshot-missing state is
+    /// distinguishable from a healthy `flag=false` no-snapshot path. Captured
+    /// via a scoped tracing subscriber.
+    #[tokio::test]
+    async fn no_snapshot_emits_warn_under_relay_eligible_conditions() {
+        use crate::implementations::qidi_build::task::types::test_capture;
+        let captured = test_capture::capture();
+
+        // Pipeline active (flag=true) but the DefsSnapshot was not published —
+        // the abnormal state the WARN targets.
+        let (ctx, captured_args) = ctx_capturing_with_resources(
+            native_resources_pipeline_active_without_snapshot(&["think"]),
+        );
+        let err = cf_tool_runtime::Tool::run(
+            &UseTool,
+            ctx,
+            UseToolInput {
+                tool_name: "think".into(),
+                tool_input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(err.detail.contains("native tool"), "got: {}", err.detail);
+        assert!(
+            captured_args.lock().unwrap().is_none(),
+            "S-3 fixture: relay-eligible native tool with no snapshot => no dispatch"
+        );
+
+        let mut events_rx = captured.events_rx;
+        let mut saw_warn = false;
+        while let Ok(event) = events_rx.try_recv() {
+            if event.level == tracing::Level::WARN
+                && event.fields.contains("no DefsSnapshot in scope")
+                && event.fields.contains("tool_name=")
+                && event.fields.contains("think")
+            {
+                saw_warn = true;
+                break;
+            }
+        }
+        assert!(
+            saw_warn,
+            "S-3: a pipeline-active session (DynamicToolState present) with a missing \
+             DefsSnapshot must emit a WARN carrying tool_name (got events: see capture)"
+        );
+    }
+
+    /// S-3 reverse (noise guard): with **no** `DynamicToolState` (the healthy
+    /// `flag=false` shape — the production default) a relay-eligible native
+    /// tool still keeps the corrective default, but must **NOT** emit the S-3
+    /// WARN — otherwise every mis-routed native call on the default path would
+    /// spam the logs.
+    #[tokio::test]
+    async fn no_pipeline_no_snapshot_does_not_emit_warn() {
+        use crate::implementations::qidi_build::task::types::test_capture;
+        let captured = test_capture::capture();
+
+        // flag=false shape: native names present, no DynamicToolState, no snapshot.
+        let (ctx, captured_args) = ctx_capturing_with_resources(native_resources(&["think"]));
+        let err = cf_tool_runtime::Tool::run(
+            &UseTool,
+            ctx,
+            UseToolInput {
+                tool_name: "think".into(),
+                tool_input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.detail.contains("native tool") && err.detail.contains("directly"),
+            "S-3 reverse: corrective behavior is unchanged with no pipeline, got: {}",
+            err.detail
+        );
+        assert!(
+            captured_args.lock().unwrap().is_none(),
+            "S-3 reverse: still no relay dispatch"
+        );
+
+        let mut events_rx = captured.events_rx;
+        let mut saw_warn = false;
+        while let Ok(event) = events_rx.try_recv() {
+            if event.level == tracing::Level::WARN {
+                saw_warn = true;
+                break;
+            }
+        }
+        assert!(
+            !saw_warn,
+            "S-3: the healthy flag=false corrective path (no DynamicToolState) must stay \
+             silent — no WARN may fire on the production default"
         );
     }
 
