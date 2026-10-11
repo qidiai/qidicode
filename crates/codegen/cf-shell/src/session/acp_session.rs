@@ -1641,6 +1641,12 @@ mod tool_definition_caliber_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/dynamic_tools_phase_a_tests.rs"]
 mod dynamic_tools_phase_a_tests;
+/// P0-2 第二步 Phase B 验收（设计稿 §6 Phase B：C-10/11/12
+/// + 金标准全链 + imported 生命周期）——三段投影分流、
+/// append-only、use_tool 中转端到端。
+#[cfg(test)]
+#[path = "acp_session_tests/dynamic_tools_phase_b_tests.rs"]
+mod dynamic_tools_phase_b_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/replay_buffer_send_update_tests.rs"]
 mod replay_buffer_send_update_tests;

@@ -141,6 +141,25 @@ impl ToolBridge {
         self.registry.tool_definitions_builtins_only()
     }
 
+    /// Registration-time (declared) kind of a tool by client-facing name —
+    /// the trust source for the Phase B resident-set projection (design doc
+    /// Q1 规则 2). `None` for unknown names.
+    pub fn declared_kind_of(&self, tool_name: &str) -> Option<ToolKind> {
+        self.registry.declared_kind_of(tool_name)
+    }
+
+    /// `LocalRegistry` key for a client-facing name, if registered (used to
+    /// build the per-turn defs snapshot's canonical domain, C-8a).
+    pub fn registry_id_of(&self, tool_name: &str) -> Option<String> {
+        self.registry.registry_id_of(tool_name)
+    }
+
+    /// Built-in tools as `(client_name, declared_kind, definition)` in
+    /// registration order — the Phase B segmentation input.
+    pub fn builtin_seg_entries(&self) -> Vec<(String, ToolKind, ToolDefinition)> {
+        self.registry.builtin_seg_entries()
+    }
+
     /// Render a prompt template through [`TemplateRenderer`] with extra
     /// agent-specific context fields.
     ///

@@ -1505,6 +1505,38 @@ impl FinalizedToolset {
             .map(|t| t.definition.clone())
             .collect()
     }
+    /// Registration-time (**declared**) kind of a tool by its client-facing
+    /// name — the trust source (design doc Q1 规则 2 / C-8b), not the runtime
+    /// `metadata.kind()`. `None` for unknown names.
+    pub fn declared_kind_of(&self, client_name: &str) -> Option<ToolKind> {
+        self.tools
+            .read()
+            .iter()
+            .find(|t| t.client_name == client_name)
+            .map(|t| t.declared_kind)
+    }
+    /// `LocalRegistry` key for a client-facing name, if registered. Used to
+    /// build the per-turn defs snapshot's canonical (registry_id) domain
+    /// (design doc Q2.1 B-12 / C-8a).
+    pub fn registry_id_of(&self, client_name: &str) -> Option<String> {
+        self.tools
+            .read()
+            .iter()
+            .find(|t| t.client_name == client_name)
+            .map(|t| t.registry_id.clone())
+    }
+    /// Built-in (non-MCP) tools as `(client_name, declared_kind, definition)`
+    /// in registration order — the segmentation input for the Phase B
+    /// projection (design doc Q1). Mirrors [`Self::tool_definitions_builtins_only`]'s
+    /// filter so the two views enumerate the same set in the same order.
+    pub fn builtin_seg_entries(&self) -> Vec<(String, ToolKind, ToolDefinition)> {
+        self.tools
+            .read()
+            .iter()
+            .filter(|t| !t.client_name.contains("__"))
+            .map(|t| (t.client_name.clone(), t.declared_kind, t.definition.clone()))
+            .collect()
+    }
     /// Get the resolved contract version for a tool by its client-facing name.
     ///
     /// Returns `None` if the tool is not found or is not version-managed.

@@ -2,16 +2,16 @@
 //! `docs/token-optimization/P0-2第二步-动态工具管线设计稿.md`
 //! §6 Phase A 验收标准 A-1~A-4 + 契约测试 C-4/C-7）。
 //!
-//! Phase A 语义锚点（设计稿 A-3 + Sonnet 2.12）：
-//! `dynamic_tools` 总开关骨架已就位，**默认 false**；
-//! Phase A 阶段 `true` = **no-op + warn**（切分实现属
-//! Phase B）——组装点 `prepare_tool_definitions_inner`
-//! 走单一代码路径，两种极性的 defs 输出字节级一致。
+//! Phase A 语义锚点（设计稿 A-3 + Sonnet 2.12；Phase B 起改口径）：
+//! `dynamic_tools` 总开关骨架已就位，**默认 false**——flag=false
+//! 走单一直通路径（现状全量 defs，= committed golden）。
+//! **Phase B 落地后** flag=true 不再是 no-op：组装点走常驻/按需
+//! 切分（见 `dynamic_tools_phase_b_tests.rs` 的 C-10/11/12 与金标准）。
 //!
 //! 这些测试钉住三件事：
-//! 1. **空操作定调（A-3）**：flag 两极性 defs 字节级一致，
-//!    且等于组装点直出（bridge 全量 builtins + plan 恒等
-//!    过滤）——即现状基线本身；
+//! 1. **现状基线锚（A-3）**：flag=false defs == 组装点直出 ==
+//!    committed golden（B-8 回退目标）；flag=true defs == 全量
+//!    defs 的确定性常驻段（C-10 前缀稳定性）；
 //! 2. **旗标纪律（A-4）**：flag 在会话启动时一次性读取并
 //!    快照，中途配置翻转不影响当次会话 defs；
 //! 3. **契约（C-4 条件版 / C-7）**：meta 二元（注册后）
@@ -30,9 +30,10 @@
 //! - **④ C-8b 全量注册面扫描变体**：in-crate 夹具只盖
 //!   5 工具，本文件扫 `default_qidi_build` 全量注册面；
 //! - **⑤ A-4 链路级钉子**：真实热刷新入口
-//!   `Config::re_resolve_runtime_fields` 不触 dynamic_tools；
-//! - **⑥ no-op warn 断言**：flag=true 的 warn! 分支必须
-//!   真实发射（tracing-capture），防静默失效。
+//!   `Config::re_resolve_runtime_fields` 不触 dynamic_tools。
+//!
+//! （⑥ no-op warn 断言随 Phase B 移除——flag=true 不再是 no-op，
+//! warn 分支已删，断言随之退役。）
 
 use super::support::*;
 use super::*;
@@ -122,17 +123,15 @@ async fn tool_names(agent: &cf_agent::Agent) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
-/// A-3（空操作定调，设计稿 §6 Phase A 验收 3）：
-/// `dynamic_tools` 两极性下组装链输出**字节级一致**。
+/// A-3（现状基线锚 + B-8 回退锚；设计稿 §6 Phase A 验收 3
+/// + Phase B）。
 ///
-/// Phase A 实现为单代码路径（设计稿 v3.1 K3 顺手 3 +
-/// v3.2 极性修正）：flag=false（缺省）短路直通现状全量
-/// defs；flag=true 视同 false 走同一条路径（切分分支
-/// Phase B 才实现），仅多一条 warn 日志——日志不进
-/// defs，故两极性 defs 字节级一致。同时锚定“与现状
-/// 一致”：组装点输出 == bridge 直出全量 builtins
-/// （plan 过滤器在现状 build 中是恒等 pass-through，
-/// 设计稿 §3.2.4）。
+/// Phase B 落地后（本文件随 C-10 起改口径）：flag=false（缺省）
+/// 仍是**单一直通路径**——输出 == bridge 直出全量 builtins ==
+/// committed golden（A-3 外部锚 + B-8 回退目标）。flag=true 不再
+/// 是 no-op：组装点走常驻/按需切分，输出 == 对同一全量 defs 施加
+/// 确定性分段函数得到的**常驻段**（C-10 append-only 前缀稳定性的
+/// 直接体现——常驻段是 flag=false 视图的一个字节级前缀函数）。
 #[tokio::test(flavor = "current_thread")]
 async fn a3_flag_polarities_defs_byte_identical() {
     let local = tokio::task::LocalSet::new();
@@ -152,11 +151,11 @@ async fn a3_flag_polarities_defs_byte_identical() {
             actor_off.agent.replace(test_agent_with_goal_tool().await);
             assert!(
                 !actor_off.dynamic_tools,
-                "test fixture must default the Phase A flag to false"
+                "test fixture must default the dynamic-tools flag to false"
             );
             let defs_off = actor_off.prepare_tool_definitions_inner().await;
 
-            // flag=true（Phase A：no-op + warn，切分未实现）。
+            // flag=true（Phase B：真实切分）。
             // 独立通道对：create_test_actor 接管 sender 所有权。
             let (gateway_tx_on, _) =
                 tokio::sync::mpsc::unbounded_channel::<cf_acp_lib::AcpClientMessage>();
@@ -168,34 +167,45 @@ async fn a3_flag_polarities_defs_byte_identical() {
             actor_on.dynamic_tools = true;
             let defs_on = actor_on.prepare_tool_definitions_inner().await;
 
-            // 两极性字节级一致（纯空操作）。
-            assert_eq!(
-                defs_fingerprint(&defs_off),
-                defs_fingerprint(&defs_on),
-                "A-3: flag=true must be a byte-level no-op over flag=false in Phase A"
-            );
-
-            // 与现状基线一致（双锚，审计后补 ①）：
-            // a) 内部一致锚：组装点输出 == bridge 直出全量
-            //    builtins（plan 恒等过滤 + 无 plan 激活时不改
-            //    变任何字节）——证明组装点单路径直通；
-            // b) 外部锚（committed golden）：defs == 仓库
-            //    committed 快照——bridge/工具定义漂移（与组装
-            //    点同源的自证锚检测不到的那种）红此灯，B-8
-            //    （Phase B 回退断言）以此为前置。
+            // 全量 defs（现状视图）——flag=false 的组装输出。
             let bridge = actor_off.agent.borrow().tool_bridge().clone();
             let raw_builtins = bridge.tool_definitions_builtins_only().await;
+
+            // a) 内部一致锚：flag=false 组装点输出 == bridge 直出全量
+            //    builtins（plan 恒等过滤，单路径直通）。
             assert_eq!(
                 defs_fingerprint(&defs_off),
                 defs_fingerprint(&raw_builtins),
-                "A-3: assembly point output must equal the raw full built-in defs \
-                 (the Phase A single path is the current behavior)"
+                "A-3: flag=false assembly output must equal the raw full built-in defs"
             );
             assert!(
                 !defs_off.is_empty(),
                 "fixture must expose a non-empty toolset for the identity to be meaningful"
             );
+
+            // b) 外部锚（committed golden）：flag=false defs == 仓库
+            //    committed 快照（bridge/工具定义漂移红此灯，B-8 前置）。
             assert_defs_match_committed_golden(&defs_off);
+
+            // c) Phase B（C-10）：flag=true defs == 对同一全量 defs 施加
+            //    确定性分段函数得到的常驻段（无解锁 → 只有常驻+meta）。
+            let seg_entries = bridge.builtin_seg_entries();
+            let partitioned =
+                cf_tools::registry::dynamic_tools::partition_builtin_defs(
+                    seg_entries.iter().map(|(name, kind, definition)| {
+                        cf_tools::registry::dynamic_tools::SegEntry {
+                            client_name: name.as_str(),
+                            kind: *kind,
+                            definition,
+                        }
+                    }),
+                );
+            assert_eq!(
+                defs_fingerprint(&defs_on),
+                defs_fingerprint(partitioned.resident()),
+                "C-10: flag=true resident segment must equal the deterministic \
+                 partition of the flag=false defs (append-only prefix stability)"
+            );
         })
         .await;
 }
@@ -616,161 +626,6 @@ async fn c8b_full_default_qidi_build_surface_declared_kind_scan() {
                     "C-8b drift: declared_kind != metadata.kind() for {client_name}"
                 );
             }
-        })
-        .await;
-}
-
-// ── ⑥ no-op warn 日志捕获基建（审计后补 ⑥） ─────────────────────
-//
-// **双保险安装**（首轮全量跑实测：单模块绿、全量并行红）：
-// 1. **全局一次性安装（尽力而为）**：tracing 的 callsite interest
-//    是**进程级缓存**，临时 subscriber（`set_default`/
-//    `with_default`）不参与缓存重建——本套件 A-1 测试（两极性
-//    循环）与本文件 ⑥ 断言的 warn 共用同一 callsite
-//    （`sampler_turn.rs` 组装点），若 A-1 先在无 subscriber
-//    状态下触发该 callsite，interest 被缓存为 Never，之后任何
-//    临时捕获都静默收不到事件（间歇性失效）。
-//    `set_global_default` 触发全量 interest 重建，根治该竞态；
-//    若套件内其它测试（test-helpers 链）先抢注了全局 dispatcher，
-//    该步退化为 no-op（兴趣缓存同样由抢注者的安装重建到
-//    非 Never）。
-// 2. **线程局部 `set_default` guard（每测试必装，测试持有）**：
-//    优先于任何全局 dispatcher，事件必定到达本线程 CAPTURE——
-//    全局位无论归谁，捕获都成立。
-// 捕获面 thread-local（current_thread runtime 下整测在单线程），
-// 并行测试互不串扰。
-#[cfg(test)]
-mod warn_capture {
-    use std::sync::Once;
-
-    thread_local! {
-        // RefCell（非 Mutex）：thread-local 本就单线程访问，
-        // 且 `with_borrow*` 便捷方法只对 LocalKey<RefCell> 存在。
-        static CAPTURE: std::cell::RefCell<Vec<String>> =
-            const { std::cell::RefCell::new(Vec::new()) };
-    }
-
-    /// 只收 "message" 字段（`warn!` 静态消息所在）。
-    struct MessageCollector;
-    impl tracing::field::Visit for MessageCollector {
-        fn record_debug(
-            &mut self,
-            field: &tracing::field::Field,
-            value: &dyn std::fmt::Debug,
-        ) {
-            if field.name() == "message" {
-                CAPTURE.with_borrow_mut(|buf| buf.push(format!("{value:?}")));
-            }
-        }
-    }
-
-    struct WarnCaptureSubscriber;
-    impl tracing::Subscriber for WarnCaptureSubscriber {
-        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
-            metadata.level() <= &tracing::Level::WARN
-        }
-        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
-            tracing::span::Id::from_u64(1)
-        }
-        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
-        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
-        fn event(&self, event: &tracing::Event<'_>) {
-            let mut collector = MessageCollector;
-            event.record(&mut collector);
-        }
-        fn enter(&self, _: &tracing::span::Id) {}
-        fn exit(&self, _: &tracing::span::Id) {}
-    }
-
-    static GLOBAL_INSTALL: Once = Once::new();
-
-    /// Install capture for the current test thread — **two layers**:
-    ///
-    /// 1. One-shot global install, **best effort**: its real job is
-    ///    defeating the callsite-interest `Never` cache (the
-    ///    interest-cache rebuild that `set_global_default`
-    ///    performs) — a temporary subscriber cannot rebuild it, and
-    ///    a sibling test may have first registered the shared warn
-    ///    callsite under `NoSubscriber` (parallel test scheduling).
-    ///    If another global subscriber won the race, this is a
-    ///    no-op — layer 2 still captures.
-    /// 2. A thread-local `set_default` **guard**, which takes
-    ///    priority over whatever the global dispatcher is — events
-    ///    always reach `CAPTURE` on this thread. The caller must
-    ///    hold the guard for the test's lifetime.
-    ///
-    /// Interest note: when the global slot is ours, interest is
-    /// rebuilt to `Always`; when a sibling won it, that subscriber
-    /// (fmt, INFO-max) also registers WARN as interested — either
-    /// way the callsite is never `Never`-cached while this test
-    /// runs, so the temporary guard reliably sees the event.
-    pub(super) fn install() -> tracing::subscriber::DefaultGuard {
-        GLOBAL_INSTALL.call_once(|| {
-            let _ = tracing::subscriber::set_global_default(WarnCaptureSubscriber);
-        });
-        tracing::subscriber::set_default(WarnCaptureSubscriber)
-    }
-
-    /// 清空本线程捕获缓冲（每个断言相位前调用）。
-    pub(super) fn clear() {
-        CAPTURE.with_borrow_mut(|buf| buf.clear());
-    }
-
-    /// 本线程迄今捕获的全部 WARN+ 消息。
-    pub(super) fn captured() -> Vec<String> {
-        CAPTURE.with_borrow(|buf| buf.clone())
-    }
-}
-
-/// ⑥（审计后补 6）no-op warn 断言：Phase A `flag=true` 的
-/// warn! 分支必须**真实发射**（`sampler_turn.rs` 组装点）——
-/// warn 被误删/降级时"no-op + warn"契约就剩无声 no-op，模型
-/// 侧无从得知 flag 未生效，此测防静默失效。反向相位：
-/// `flag=false`（缺省）不发射该 warn（零噪声）。
-#[tokio::test(flavor = "current_thread")]
-async fn a3_noop_warn_emitted_for_true_and_silent_for_false() {
-    // 捕获守卫持有到测试结束（线程局部捕获生效期）。
-    let _capture_guard = warn_capture::install();
-
-    async fn defs_under_flag(
-        dynamic_tools: bool,
-    ) -> Vec<cf_tools::types::definition::ToolDefinition> {
-        let (gateway_tx, _) =
-            tokio::sync::mpsc::unbounded_channel::<cf_acp_lib::AcpClientMessage>();
-        let (persistence_tx, _) =
-            tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-        let mut actor =
-            create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-        actor.agent.replace(test_agent_with_goal_tool().await);
-        actor.dynamic_tools = dynamic_tools;
-        actor.prepare_tool_definitions_inner().await
-    }
-
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            // 相位 1：flag=true → warn 发射。
-            warn_capture::clear();
-            let _ = defs_under_flag(true).await;
-            let warnings = warn_capture::captured();
-            assert!(
-                warnings.iter().any(|msg| msg.contains(
-                    "dynamic_tools=true is a no-op in Phase A"
-                )),
-                "A-3 no-op contract: flag=true must emit the Phase A warn; \
-                 captured: {warnings:?}"
-            );
-
-            // 相位 2：flag=false → 同组装点不发射该 warn。
-            warn_capture::clear();
-            let _ = defs_under_flag(false).await;
-            let quiet = warn_capture::captured();
-            assert!(
-                !quiet.iter().any(|msg| msg.contains(
-                    "dynamic_tools=true is a no-op in Phase A"
-                )),
-                "flag=false must not emit the no-op warn; captured: {quiet:?}"
-            );
         })
         .await;
 }

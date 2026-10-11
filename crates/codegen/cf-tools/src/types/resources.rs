@@ -698,6 +698,119 @@ impl EnabledNativeToolNames {
         self.0.contains(name)
     }
 }
+/// Registry of the client-facing tool names present in the **current
+/// turn's** `defs` projection (design doc Q2.1 B-12 / C-8a, v3.3).
+///
+/// Written once per turn by the defs assembly point
+/// (`prepare_tool_definitions_inner`, cf-shell) and read by `use_tool`'s
+/// corrective gate: a native tool name that is **not** in this snapshot was
+/// hidden by the resident/imported split, so `use_tool` relays to it
+/// instead of returning the "call it directly" corrective error.
+///
+/// **Ephemeral + fail-safe**: the resource is only written while the
+/// dynamic-tool pipeline is active (`dynamic_tools=true`). When it is
+/// absent (flag off / subagent dispatch / nested relay / any path where the
+/// assembly point did not run) the gate keeps the corrective default — it
+/// never defaults to *allowing* the relay (design doc v3.3 fail-safe,
+/// Sonnet 2.9).
+///
+/// Two domains are carried so the gate and the tests can speak either:
+/// `client_names` is the wire/defs domain (what the model writes and what
+/// `call_raw` looks up — the relay domain), while `registry_ids` mirrors
+/// the design doc's canonical gate domain (C-8a).
+#[derive(Debug, Clone, Default)]
+pub struct DefsSnapshot {
+    /// Wire names (`defs[].function.name`) shipped this turn — relay domain.
+    pub client_names: std::collections::HashSet<String>,
+    /// Registry ids of the same tools — canonical gate domain (C-8a).
+    pub registry_ids: std::collections::HashSet<String>,
+}
+
+impl DefsSnapshot {
+    /// Whether `client_name` (the wire name the model wrote) ships in this
+    /// turn's `defs`.
+    pub fn contains_client_name(&self, client_name: &str) -> bool {
+        self.client_names.contains(client_name)
+    }
+}
+/// Per-session **imported-segment unlock state** (design doc Q2.4 / C-11).
+///
+/// The ordered, append-only list of built-in tools the model unlocked via
+/// `search_tool` this session. The defs assembly point projects this list
+/// onto the tail of the resident segment every turn — **append-only**:
+/// entries are only ever pushed, never reordered or removed (KV-cache
+/// prefix stability, Q2.5 分段三律 #2).
+///
+/// Interior mutability (`Arc<Mutex<…>>`) so `search_tool` (which holds only
+/// a `Resources` handle) can record unlocks during dispatch without the
+/// session threading state back out.
+#[derive(Debug, Clone, Default)]
+pub struct DynamicToolState(pub std::sync::Arc<std::sync::Mutex<DynamicToolStateInner>>);
+/// Mutable interior of [`DynamicToolState`]. Not serialized (ephemeral).
+#[derive(Debug, Default)]
+pub struct DynamicToolStateInner {
+    unlocked: Vec<String>,
+    search_calls: usize,
+}
+impl DynamicToolState {
+    /// Record an unlock — no-op if already present (idempotent append).
+    pub fn record_unlock(&self, client_name: &str) {
+        let mut inner = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if !inner.unlocked.iter().any(|n| n == client_name) {
+            inner.unlocked.push(client_name.to_owned());
+        }
+    }
+    /// The unlock list in unlock order (append-only invariant, C-11).
+    pub fn unlocked(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .unlocked
+            .clone()
+    }
+    /// Count a `search_tool` invocation this session (C-9 cap telemetry);
+    /// returns the new count.
+    pub fn count_search_call(&self) -> usize {
+        let mut inner = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        inner.search_calls += 1;
+        inner.search_calls
+    }
+    /// Current `search_tool` invocation count (non-mutating read).
+    pub fn search_call_count(&self) -> usize {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .search_calls
+    }
+    /// Forget every unlock (design doc Q2.4 `/clear`: new task, new drawer).
+    pub fn reset(&self) {
+        let mut inner = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        inner.unlocked.clear();
+        inner.search_calls = 0;
+    }
+}
+/// A single built-in tool offered to `search_tool`.
+///
+/// Mirrors the fields of [`crate::types::tool_index::ToolSearchResult`] that
+/// the MVP relay path needs, without dragging MCP server/score concepts into
+/// the built-in surface: `client_name` is the exact `tool_name` the model
+/// must pass to `use_tool` (design doc C-5 relay domain).
+#[derive(Debug, Clone)]
+pub struct BuiltinToolEntry {
+    /// Client-facing wire name == `use_tool` relay lookup name (C-5).
+    pub client_name: String,
+    /// One-line description for the search document.
+    pub description: String,
+    /// Full JSON Schema for the tool input — included so the model can build
+    /// the `use_tool` call in the same turn (design doc B-0/B-1).
+    pub input_schema: serde_json::Value,
+}
+/// Built-in (non-MCP) tools hidden from the current `defs` projection,
+/// exposed to `search_tool` (design doc B-0/B-1: the search surface must be
+/// widened beyond MCP, which is all the index covered before Phase B). The
+/// host populates this from the session toolset once per session.
+#[derive(Debug, Clone, Default)]
+pub struct BuiltinToolSearchSurface(pub Vec<BuiltinToolEntry>);
 /// Map of canonical tool name → {canonical param name → model-facing param name}.
 #[derive(Debug, Clone, Default)]
 pub struct ParamNameMapping(pub HashMap<String, HashMap<String, String>>);

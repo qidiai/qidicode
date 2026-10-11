@@ -316,10 +316,12 @@ impl cf_tool_runtime::Tool for UseTool {
         ctx: cf_tool_runtime::ToolCallContext,
         input: UseToolInput,
     ) -> Result<ToolOutput, cf_tool_runtime::ToolError> {
-        use crate::types::resources::{EnabledNativeToolNames, ManagedGatewayToolCatalog, Params};
+        use crate::types::resources::{
+            EnabledNativeToolNames, ManagedGatewayToolCatalog, Params,
+        };
 
         let resources = crate::types::tool_metadata::shared_resources(&ctx).ok();
-        let (gateway_source, is_native, search_tool_name) =
+        let (gateway_source, is_native, hidden_native, search_tool_name) =
             if let Some(resources) = resources.as_ref() {
                 let guard = resources.lock().await;
                 let gateway_source = guard
@@ -332,17 +334,26 @@ impl cf_tool_runtime::Tool for UseTool {
                     && guard
                         .get::<EnabledNativeToolNames>()
                         .is_some_and(|set| set.contains(&input.tool_name));
+                // B-12 corrective gate (design doc Q2.1, v3.3): a *hidden*
+                // native tool is one whose defs are NOT in this turn's
+                // projection. Fail-safe — when the per-turn snapshot is
+                // absent (flag off / subagent / nested relay) the tool is
+                // treated as NOT hidden, so the corrective default stands.
+                let hidden = native
+                    && guard
+                        .get::<crate::types::resources::DefsSnapshot>()
+                        .is_some_and(|snap| !snap.contains_client_name(&input.tool_name));
                 let st = guard
                     .get::<crate::types::template_renderer::TemplateRenderer>()
                     .and_then(|r| r.tool_for_kind(ToolKind::SearchTool))
                     .map(str::to_string)
                     .unwrap_or_else(|| "search_tool".to_string());
-                (gateway_source, native, st)
+                (gateway_source, native, hidden, st)
             } else {
-                (None, false, "search_tool".to_string())
+                (None, false, false, "search_tool".to_string())
             };
 
-        if !input.tool_name.contains("__") && gateway_source.is_none() {
+        if !input.tool_name.contains("__") && gateway_source.is_none() && !hidden_native {
             return Err(if is_native {
                 // Native tool wrongly routed through use_tool. Tell the model
                 // to call it directly. Strategy chosen via offline eval over
@@ -370,9 +381,39 @@ impl cf_tool_runtime::Tool for UseTool {
                 ))
             });
         }
+        if hidden_native {
+            // B-12 relay: the native tool was hidden by the resident/imported
+            // split, so route it through the inner dispatch instead of the
+            // corrective error (MVP path, design doc Q2.1).
+            tracing::info!(
+                tool_name = %input.tool_name,
+                "use_tool: hidden native tool relayed through inner dispatch"
+            );
+        }
 
-        let output =
-            dispatch_mcp_tool(&ctx, &input.tool_name, input.tool_input, "use_tool").await?;
+        let output = match dispatch_mcp_tool(
+            &ctx,
+            &input.tool_name,
+            input.tool_input,
+            "use_tool",
+        )
+        .await
+        {
+            Ok(output) => output,
+            Err(err) if hidden_native => {
+                // Inner-failure feedback (design doc C-6/B-7): the relayed
+                // native tool failed — point the model back at search_tool.
+                return Err(cf_tool_runtime::ToolError::new(
+                    err.kind,
+                    format!(
+                        "{} (relayed native tool failed; re-run `{}` to \
+                         re-discover the tool and its schema)",
+                        err.detail, search_tool_name
+                    ),
+                ));
+            }
+            Err(err) => return Err(err),
+        };
 
         let trunc_ctx = McpTruncateContext::from_tool_ctx(&ctx, "use_tool").await;
         Ok(truncate_tool_output(output, &trunc_ctx).await)
@@ -1551,6 +1592,24 @@ mod tests {
         resources.into_shared()
     }
 
+    /// Resources with native tools + a per-turn defs snapshot (B-12 gate).
+    fn native_resources_with_snapshot(
+        native: &[&str],
+        defs_client_names: &[&str],
+    ) -> crate::types::resources::SharedResources {
+        use crate::types::resources::{DefsSnapshot, EnabledNativeToolNames, Resources};
+        let mut resources = Resources::new();
+        resources.insert(EnabledNativeToolNames(
+            native.iter().map(|s| s.to_string()).collect(),
+        ));
+        let mut snap = DefsSnapshot::default();
+        for n in defs_client_names {
+            snap.client_names.insert((*n).to_string());
+        }
+        resources.insert(snap);
+        resources.into_shared()
+    }
+
     fn ctx_capturing_with_resources(
         resources: crate::types::resources::SharedResources,
     ) -> (cf_tool_runtime::ToolCallContext, SharedArgs) {
@@ -1648,5 +1707,236 @@ mod tests {
             "should NOT contain the corrective error text"
         );
         assert!(captured_args.lock().unwrap().is_none());
+    }
+
+    // ── B-12 three-state gate (Phase B) ──────────────────────
+
+    /// Hidden native tool (registered, but **not** in this turn's defs
+    /// snapshot) relays through inner dispatch instead of the corrective
+    /// error — the MVP path (design doc Q2.1).
+    #[tokio::test]
+    async fn hidden_native_tool_relays_through_inner_dispatch() {
+        let resources =
+            native_resources_with_snapshot(&["think"], &["search_tool", "use_tool"]);
+        let mut ctx = ctx_with_dispatch(MockToolDispatch {
+            expected_tool_name: "think".into(),
+            return_output: ToolOutput::Text("relayed".into()),
+        });
+        ctx.extensions.insert(resources);
+
+        let result = cf_tool_runtime::Tool::run(
+            &UseTool,
+            ctx,
+            UseToolInput {
+                tool_name: "think".into(),
+                tool_input: serde_json::json!({"thought": "ping"}),
+            },
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "B-12: a hidden native tool must relay to inner dispatch, got {result:?}"
+        );
+    }
+
+    /// A native tool that **is** in this turn's defs keeps the corrective
+    /// error (state ②/③ of the gate) and must not dispatch.
+    #[tokio::test]
+    async fn native_tool_in_defs_keeps_corrective_error() {
+        let resources = native_resources_with_snapshot(
+            &["think"],
+            &["search_tool", "use_tool", "think"],
+        );
+        let mut ctx = ctx_with_dispatch(MockToolDispatch {
+            expected_tool_name: "think".into(),
+            return_output: ToolOutput::Text("should not happen".into()),
+        });
+        ctx.extensions.insert(resources);
+
+        let err = cf_tool_runtime::Tool::run(
+            &UseTool,
+            ctx,
+            UseToolInput {
+                tool_name: "think".into(),
+                tool_input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(err.detail.contains("native tool"), "got: {}", err.detail);
+        assert!(err.detail.contains("directly"));
+    }
+
+    /// Fail-safe: with **no** defs snapshot (flag off / subagent / nested
+    /// relay), a native tool keeps the corrective default — never defaults
+    /// to allowing the relay (design doc v3.3, Sonnet 2.9).
+    #[tokio::test]
+    async fn native_tool_without_snapshot_keeps_corrective_fail_safe() {
+        let (ctx, captured_args) =
+            ctx_capturing_with_resources(native_resources(&["think"]));
+
+        let err = cf_tool_runtime::Tool::run(
+            &UseTool,
+            ctx,
+            UseToolInput {
+                tool_name: "think".into(),
+                tool_input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(err.detail.contains("native tool"), "got: {}", err.detail);
+        assert!(
+            captured_args.lock().unwrap().is_none(),
+            "fail-safe: no snapshot => corrective, no dispatch"
+        );
+    }
+
+    /// Relay failure surfaces search_tool guidance (inner-failure feedback,
+    /// design doc C-6/B-7) rather than a bare "Tool not found".
+    #[tokio::test]
+    async fn hidden_native_relay_failure_carries_search_guidance() {
+        let resources =
+            native_resources_with_snapshot(&["think"], &["search_tool", "use_tool"]);
+        let mut ctx = ctx_with_dispatch(ErrorToolDispatch {
+            error: "think".into(),
+        });
+        ctx.extensions.insert(resources);
+
+        let err = cf_tool_runtime::Tool::run(
+            &UseTool,
+            ctx,
+            UseToolInput {
+                tool_name: "think".into(),
+                tool_input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.detail.contains("search_tool"),
+            "relay failure must steer back to search_tool, got: {}",
+            err.detail
+        );
+    }
+
+    /// Fail-safe **positive** assertion (R-009 对称补件): the gate-side
+    /// counterpart to the B-8 reverse evidence (flag=false publishes no
+    /// snapshot). When no `DefsSnapshot` resource is in scope the hidden
+    /// predicate cannot fire, so a native tool keeps the corrective default —
+    /// the model is told to call it **directly**, never silently let through
+    /// the relay. The precondition (resources genuinely carry no snapshot) is
+    /// asserted positively so a future fixture change cannot hollow the test
+    /// out into a tautology.
+    #[tokio::test]
+    async fn no_snapshot_keeps_corrective_positive_assertion() {
+        let resources = native_resources(&["think"]);
+        assert!(
+            resources
+                .lock()
+                .await
+                .get::<crate::types::resources::DefsSnapshot>()
+                .is_none(),
+            "fixture precondition: native_resources must carry no DefsSnapshot"
+        );
+        let (ctx, captured_args) = ctx_capturing_with_resources(resources);
+
+        let err = cf_tool_runtime::Tool::run(
+            &UseTool,
+            ctx,
+            UseToolInput {
+                tool_name: "think".into(),
+                tool_input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, cf_tool_runtime::ToolErrorKind::InvalidArguments);
+        assert!(
+            err.detail.contains("native tool") && err.detail.contains("directly"),
+            "fail-safe: no snapshot => corrective 'call it directly', got: {}",
+            err.detail
+        );
+        assert!(
+            !err.detail.contains("not a valid MCP tool name"),
+            "fail-safe must be the corrective, not the generic steer: {}",
+            err.detail
+        );
+        assert!(
+            captured_args.lock().unwrap().is_none(),
+            "fail-safe: no snapshot => corrective, no relay dispatch"
+        );
+    }
+
+    /// B-12 gate three-state ① (design doc Q2.1): a name absent from the
+    /// **registration surface** (`EnabledNativeToolNames`) is *not* a hidden
+    /// native tool — it keeps the pre-existing generic error and is never
+    /// relayed. A non-MCP name falls to the "not a valid MCP tool name" steer;
+    /// an MCP-qualified name falls through to dispatch's "Tool not found".
+    /// Pins the `native &&` guard on the hidden predicate so a future change
+    /// cannot route an unregistered name through the relay (which would
+    /// dispatch and then wrap the failure with search_tool guidance).
+    #[tokio::test]
+    async fn unregistered_name_is_not_treated_as_hidden() {
+        // ── non-MCP unregistered name → generic steer, no relay. ──
+        let (ctx, captured_args) = ctx_capturing_with_resources(
+            native_resources_with_snapshot(&["think"], &["search_tool", "use_tool"]),
+        );
+        let err = cf_tool_runtime::Tool::run(
+            &UseTool,
+            ctx,
+            UseToolInput {
+                tool_name: "ghost_tool".into(),
+                tool_input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, cf_tool_runtime::ToolErrorKind::InvalidArguments);
+        assert!(
+            err.detail.contains("not a valid MCP tool name"),
+            "three-state ①: an unregistered non-MCP name keeps the generic steer, got: {}",
+            err.detail
+        );
+        assert!(
+            !err.detail.contains("relayed native tool failed"),
+            "three-state ①: it must NOT take the hidden/relay path, got: {}",
+            err.detail
+        );
+        assert!(
+            captured_args.lock().unwrap().is_none(),
+            "three-state ①: an unregistered name must never dispatch"
+        );
+
+        // ── MCP-qualified unregistered name → dispatch's generic
+        //    "Tool not found" (semantics unchanged), still not relayed. ──
+        let (ctx2, captured_args2) = ctx_capturing_with_resources(
+            native_resources_with_snapshot(&["think"], &["search_tool", "use_tool"]),
+        );
+        let err2 = cf_tool_runtime::Tool::run(
+            &UseTool,
+            ctx2,
+            UseToolInput {
+                tool_name: "ghost__tool".into(),
+                tool_input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err2.kind, cf_tool_runtime::ToolErrorKind::NotFound);
+        assert!(
+            err2.detail.contains("Tool not found"),
+            "three-state ①: an unregistered MCP-qualified name keeps 'Tool not found', got: {}",
+            err2.detail
+        );
+        assert!(
+            !err2.detail.contains("relayed native tool failed"),
+            "three-state ①: it must NOT be wrapped as a relay failure, got: {}",
+            err2.detail
+        );
+        assert!(
+            captured_args2.lock().unwrap().is_none(),
+            "three-state ①: an unregistered MCP-qualified name captures no args"
+        );
     }
 }
