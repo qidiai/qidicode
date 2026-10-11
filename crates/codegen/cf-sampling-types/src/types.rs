@@ -473,7 +473,11 @@ pub struct ChatCompletionResponse {
 pub struct ChatChoice {
     pub index: u32,
     pub message: ChatResponseMessage,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::serde_helpers::empty_finish_reason_as_none"
+    )]
     pub finish_reason: Option<FinishReason>,
 }
 
@@ -590,7 +594,11 @@ pub struct ChatCompletionChunk {
 pub struct ChatChunkChoice {
     pub index: u32,
     pub delta: ChatChunkDelta,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::serde_helpers::empty_finish_reason_as_none"
+    )]
     pub finish_reason: Option<FinishReason>,
 }
 
@@ -1224,6 +1232,129 @@ impl From<crate::messages::MessagesRequest> for MessagesRequestWrapper {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // ── FinishReason serde: relay empty-string finish_reason normalization ──
+
+    /// luyou.qidiai.ltd → kimi-k3 streaming relays emit `"finish_reason": ""`
+    /// on some chunks (observed live 2026-10-11: spawn sessions died with
+    /// `serialization error: unknown variant ''`). The empty string must
+    /// normalize to `None`, not hard-fail the whole session.
+    #[test]
+    fn chat_chunk_choice_empty_finish_reason_normalizes_to_none() {
+        let chunk: ChatCompletionChunk = serde_json::from_value(json!({
+            "id": "chunk-1",
+            "object": "chat.completion.chunk",
+            "created": 1791724858,
+            "model": "kimi-k3",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "hi"},
+                "finish_reason": ""
+            }]
+        }))
+        .expect("empty-string finish_reason must deserialize, not hard-fail");
+        assert_eq!(
+            chunk.choices[0].finish_reason,
+            None,
+            "empty finish_reason must normalize to None (observed live on luyou->kimi-k3)"
+        );
+    }
+
+    /// Valid variants must keep parsing exactly as before (no regression).
+    #[test]
+    fn chat_chunk_choice_valid_finish_reason_still_parses() {
+        let chunk: ChatCompletionChunk = serde_json::from_value(json!({
+            "id": "chunk-2",
+            "object": "chat.completion.chunk",
+            "created": 1791724858,
+            "model": "kimi-k3",
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "hi"},
+                "finish_reason": "tool_calls"
+            }]
+        }))
+        .expect("valid finish_reason must parse");
+        assert_eq!(
+            chunk.choices[0].finish_reason,
+            Some(FinishReason::ToolCalls),
+            "finish_reason=tool_calls must parse to ToolCalls"
+        );
+    }
+
+    /// `null` and *missing* finish_reason must stay `None`. The `default` +
+    /// `deserialize_with` pairing is load-bearing: without `default`,
+    /// serde_derive turns a missing field into a hard "missing field" error
+    /// (see the ToolCallDelta tests below for the same trap).
+    #[test]
+    fn chat_chunk_choice_null_and_missing_finish_reason_deserialize_cleanly() {
+        let with_null: ChatCompletionChunk = serde_json::from_value(json!({
+            "id": "chunk-3",
+            "object": "chat.completion.chunk",
+            "created": 1791724858,
+            "model": "kimi-k3",
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": null
+            }]
+        }))
+        .expect("null finish_reason must deserialize");
+        assert_eq!(with_null.choices[0].finish_reason, None, "null must be None");
+
+        let missing: ChatCompletionChunk = serde_json::from_value(json!({
+            "id": "chunk-4",
+            "object": "chat.completion.chunk",
+            "created": 1791724858,
+            "model": "kimi-k3",
+            "choices": [{
+                "index": 0,
+                "delta": {}
+            }]
+        }))
+        .expect("missing finish_reason must deserialize (default pairing)");
+        assert_eq!(
+            missing.choices[0].finish_reason,
+            None,
+            "missing finish_reason field must fall back to default None"
+        );
+    }
+
+    /// The non-streaming `ChatChoice` path carries the same normalization.
+    #[test]
+    fn chat_choice_non_streaming_empty_finish_reason_normalizes_to_none() {
+        let choice: ChatChoice = serde_json::from_value(json!({
+            "index": 0,
+            "message": {"role": "assistant", "content": "hi"},
+            "finish_reason": ""
+        }))
+        .expect("empty-string finish_reason must deserialize on non-streaming path too");
+        assert_eq!(
+            choice.finish_reason, None,
+            "non-streaming empty finish_reason must normalize to None"
+        );
+    }
+
+    /// Unknown *non-empty* values must remain a hard error — the helper only
+    /// forgives the empty string, never silently swallows real anomalies.
+    #[test]
+    fn chat_chunk_choice_unknown_finish_reason_still_hard_errors() {
+        let result = serde_json::from_value::<ChatCompletionChunk>(json!({
+            "id": "chunk-5",
+            "object": "chat.completion.chunk",
+            "created": 1791724858,
+            "model": "kimi-k3",
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "bogus_variant"
+            }]
+        }));
+        assert!(
+            result.is_err(),
+            "unknown non-empty finish_reason must stay a hard error"
+        );
+    }
 
     // ── ToolCallDelta serde: empty-string / missing / null normalization ──
 
