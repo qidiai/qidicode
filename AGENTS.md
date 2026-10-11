@@ -121,6 +121,12 @@
 
 铁律：指挥官不写码（写规格/审计/质检/提交）；编码手与子代理**禁止 commit**；每项修复必须有对应测试；审计规格须按 **audit-rubrics 技能**执行（先自由审查、后对照清单，适用条目注入 ≤5，报告落 `qidiwork-docs/审计评审/`），返工闭环后教训合入 `docs/audit-rubrics/RUBRICS.md`。
 
+**spawn 路由实测注意（2026-10-11 深挖）**：
+- spawn 子代理的模型调用**与本机 config.toml / auth.json 解耦**（走平台内置目录+独立凭据，细节未全还原）：同模型手动直连 200 而 spawn 可能 401/503（实测：kimi-k2.6 手动 200 / spawn 503 `no usable credential for provider 'intern'`；kimi-k2.7-code 手动 200 / spawn 401 `Invalid token` from api.openai-next.com）——**派活前先 spawn 小任务验连通，勿以手动直连结果为准**
+- luyou/codely 池为**每日共享额度制**（用户口径）：429 = 当日配额被共享用户挤占/用尽，波动型限流（同分钟内小请求与大请求成败可并存），等窗口或次日；KIMI-K3-222 命运取决于此
+- luyou→kimi-k3 流的 `finish_reason:""` 空串坑已修（commit `b333b253`：`empty_finish_reason_as_none` 双路径归一化+5 回归测试）——**旧 qidi.exe 进程 spawn K3 必炸**（unknown variant ''），换新版 exe 后消除
+- K 系 spawn 实测可用位：`kimi-k2.7-code-highspeed-222`（apigoto 直连带独立 key）；`KIMI-K3-222` 需新版 exe+额度窗口双就绪
+
 ## 10. Git 提交与推送（生产纪律）
 
 | 项 | 约定 |

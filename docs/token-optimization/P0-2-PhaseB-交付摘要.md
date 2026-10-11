@@ -27,7 +27,7 @@
 
 > **口径降级说明**：下列四项断言建立在 `DynamicToolState` 是 `Arc<Mutex<…>>`
 > 克隆共享（`session.clone()`）这一**结构性事实**之上，属**语义声明 + 结构性推断**，
-> **不是**已接线的生产行为；对应测试 `imported_lifecycle_four_scenarios`
+> **不是**已接线的生产行为；对应测试 `imported_lifecycle_state_semantics`
 > (`dynamic_tools_phase_b_tests.rs`) 仅钉住状态类型的 clone/reset 语义。
 
 | 场景 | 声明 | 性质 |
@@ -47,8 +47,20 @@
 - **`/clear` 生产接线**：`DynamicToolState::reset()` 已就绪并有单测，但从真实 `/clear`
   命令到该调用的**生产路径尚未接线**。
 
+## 3.5 指挥官裁决记录（2026-10-11 K2.7 独立审计 → 返工闭环）
+
+审计报告：`qidiwork-docs/审计评审/2026-10-11-P0-2-PhaseB-K2.7code独立审计.md`（阻塞 1 + 建议 6，返工后复核 7/7 过）。以下契约定夺生效：
+
+- **C-9 已兑现（返工 B-1 关闭）**：cap-3 执法（第 4 次起跳过全部检索，返回全量隐藏列表 + 停止提示 + `search_only_terminated` 声明）+ refine 未命中兜底（双分支：无 MCP 索引 / 两源皆空）落地，配 2 个契约测试。
+- **C-9 触发口径**：实现取「首次未命中即兜底」＝设计稿「refine ≥2 次」的**超集**——裁决接受（更早触发只增信息不减安全，防死循环目的更强）。
+- **C-9 兜底不解锁**：fallback 返回全量列表但**不**记 unlock（保持隐藏投影的词元优化语义；模型经 use_tool relay 消费选中项）——裁决接受，测试已钉。
+- **C-9 预算截断子句（v3.2「按 kind 聚簇截断」）**：本轮不实现，兜底场景罕见、全量体积可接受——裁决记录在案，后续如见实测体积问题再补。
+- **C-6 字面收窄**：`re-run search_tool` 指引适用于 **relay 失败形态**与 **C-9 兜底文案**；unregistered 名（`ghost__tool` 类）维持裸 `Tool not found` 不包裹（既有测试钉住的行为）。C-6 原文「三形态均带指引」字面由后续设计稿勘误收窄至此口径。
+- **S-3 warn 收紧**：B-12 fail-safe 的 warn 仅在「管线激活（`DynamicToolState` 在场）但快照缺失」的真异常态发射；flag=false 健康路径不打 warn（防生产默认态日志噪声），正反向测试各一。
+
 ## 4. 验证
 
 - `cargo check --workspace --locked`：0 errors（Windows）
 - WSL `cargo check --workspace --locked --all-targets`：0 errors
 - `cargo test -p cf-tools --lib`：全绿（含 B-12 返工新增 2 测）/ `cargo test -p cf-shell --lib`：全绿（含返工 1 新增交互断言）
+- **K2.7 审计返工验证（2026-10-12，commit `2b2d717e`）**：`cargo test -p cf-tools --lib` 2629 passed / 0 failed（含 C-9×2、S-3 warn×2 新测实跑确认）；cf-shell C 盘方案 5566 passed / 0 failed（S-1 registry_ids 断言与两处改名测试实跑确认）；K2.7 独立复核 7/7 过、S-3 观察项收紧后 0 残留阻塞
