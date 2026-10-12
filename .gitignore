@@ -121,3 +121,19 @@ tools/media-gen-agent/agnes_config.json.*
 *.bak-*
 *_backup_*.py
 _trash/
+
+# ---- 2026-10-12 ArtCraft 接入工程:方案/审计/W2评估harness 白名单 ----
+!_craft_eval/
+!_craft_eval/**
+!artcraft-集成方案.md
+!craft-迭代方案-20261012.md
+!craft-迭代方案-v2-20261012.md
+!audit-step5-20261012.md
+!audit-glm53-20261012.md
+
+# ---- 2026-10-12 双路审计补刀：防同型泄漏（C4 姊妹风险） ----
+_craft_eval/probe_out/
+_craft_eval/__pycache__/
+.qidi/skills/bid-review/scripts/*.txt
+.qidi/skills/bid-review/scripts/coherence_report.md
+**/__pycache__/

@@ -1,0 +1,58 @@
+{
+  "apps": {
+    "wordcraft": {
+      "version": "0.5.0",
+      "download": "OK via https://github.com/storytold/wordcraft/releases/download/v0.5.0/wordcraft-0.5.0-windows-x64-portable.zip (85.1MB)",
+      "sums_download": "OK",
+      "sha256_actual": "caf202e3e3604cf1083f283cbf8b69e4e8df822e86ba9f6f6e8c2db65d483bdf",
+      "sha256_expected": "caf202e3e3604cf1083f283cbf8b69e4e8df822e86ba9f6f6e8c2db65d483bdf",
+      "sha256_match": true,
+      "zip_entries": 10,
+      "extract": "OK",
+      "exes": [],
+      "font_files": [],
+      "font_count": 0
+    },
+    "gridcraft": {
+      "version": "0.5.0",
+      "download": "OK via https://github.com/storytold/gridcraft/releases/download/v0.5.0/gridcraft-0.5.0-windows-x64-portable.zip (15.4MB)",
+      "sums_download": "OK",
+      "sha256_actual": "0d34cdd117c3a96ce8467de0f90b5ea64ca0bbe497f9b0116c95685c4251d3fd",
+      "sha256_expected": "0d34cdd117c3a96ce8467de0f90b5ea64ca0bbe497f9b0116c95685c4251d3fd",
+      "sha256_match": true,
+      "zip_entries": 8,
+      "extract": "OK",
+      "exes": [],
+      "font_files": [],
+      "font_count": 0
+    },
+    "pdfcraft": {
+      "version": "0.6.0",
+      "download": "OK via https://github.com/storytold/pdfcraft/releases/download/v0.6.0/pdfcraft-0.6.0-windows-x64-portable.zip (77.9MB)",
+      "sums_download": "OK",
+      "sha256_actual": "72cb8da8af0bb8004a75e629257e4990df2ebe254798f9a5d85fdc24a8946c8f",
+      "sha256_expected": "72cb8da8af0bb8004a75e629257e4990df2ebe254798f9a5d85fdc24a8946c8f",
+      "sha256_match": true,
+      "zip_entries": 18,
+      "extract": "OK",
+      "exes": [],
+      "font_files": [],
+      "font_count": 0
+    },
+    "cadcraft": {
+      "version": "0.5.0",
+      "download": "OK via https://github.com/storytold/cadcraft/releases/download/v0.5.0/cadcraft-0.5.0-windows-x64-portable.zip (20.6MB)",
+      "sums_download": "OK",
+      "sha256_actual": "ce849d6ad1145a492b9b04bdab0ff36ee0e1cf72410d5e3a491ad006ff125614",
+      "sha256_expected": "ce849d6ad1145a492b9b04bdab0ff36ee0e1cf72410d5e3a491ad006ff125614",
+      "sha256_match": true,
+      "zip_entries": 5,
+      "extract": "OK",
+      "exes": [],
+      "font_files": [],
+      "font_count": 0
+    }
+  },
+  "started": "2026-10-12 14:29:21",
+  "finished": "2026-10-12 14:31:02"
+}
