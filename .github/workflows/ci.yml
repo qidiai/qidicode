@@ -247,3 +247,57 @@ jobs:
       # rsproxy mirror comes from the committed .cargo/config.toml.
       - name: Run install.sh blitz
         run: cargo test -p cf-update --test test_install_sh
+
+  macos-build:
+    # Standalone macOS (aarch64-apple-darwin) build verification. Kept as an
+    # independent job rather than folded into the windows/ubuntu `check` matrix
+    # so a macOS toolchain quirk or a slow macos runner can never block the
+    # existing all-green baseline. Scope: type-check the whole workspace (which
+    # exercises every crate's cfg(target_os = "macos") branch, e.g.
+    # cf-config/src/macos_managed.rs, cf-system-power/src/macos.rs, paths.rs
+    # macos branches), link the production `qidi` binary, then smoke-test the
+    # two core type/logic crates with the smallest environment-sensitive
+    # surface. Deliberately no full `cargo test --workspace`: PTY/glyph
+    # integration tests are the known macOS flake risk (same class as the
+    # Windows CI triage), and are out of scope for a build gate.
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache target
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-macos-${{ hashFiles('**/Cargo.lock') }}
+
+      # rsproxy mirror + aarch64-apple-darwin rustflags (-undefined
+      # dynamic_lookup / -ObjC) + the Apple Silicon jemalloc LG_PAGE=14 env all
+      # come from the committed .cargo/config.toml; no extra setup step needed.
+
+      - name: Check workspace (macos)
+        run: cargo check --workspace --locked
+
+      - name: Build pager binary (release)
+        run: cargo build --release -p cf-pager-bin --bin qidi --locked
+
+      - name: Test core types (cf-sampling-types)
+        run: cargo test -p cf-sampling-types --lib --locked
+
+      - name: Test core memory (cf-memory)
+        run: cargo test -p cf-memory --lib --locked
