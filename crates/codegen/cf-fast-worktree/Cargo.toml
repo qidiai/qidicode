@@ -56,12 +56,23 @@ cf-test-utils = { workspace = true }
 # Only used by tests behind #[cfg(feature = "metadata")] in db/tests.rs.
 rusqlite = { version = "0.37", features = ["bundled"] }
 
-[target.'cfg(target_os = "linux")'.dev-dependencies]
+# libc backs the `#[cfg(unix)]` pid helpers (api/gc/process_scan.rs,
+# git/probe.rs) and the `#[cfg(target_os = "macos")]` CWD scanner, so it must be
+# available on every unix target, not just Linux — declaring it Linux-only made
+# every macOS `cargo check --workspace` fail with E0433 (`cannot find crate
+# libc`) in those two files. nix stays Linux-only (it backs the cfg(linux)
+# btrfs/statfs path); serde/serde_json below feed the Linux overlay-metadata
+# path and are otherwise pulled in through the `metadata` feature.
+[target.'cfg(unix)'.dev-dependencies]
 libc = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 nix = { version = "0.30", features = ["fs"] }
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.30", features = ["fs"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
