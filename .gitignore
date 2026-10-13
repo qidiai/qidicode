@@ -137,3 +137,6 @@ _craft_eval/__pycache__/
 .qidi/skills/bid-review/scripts/*.txt
 .qidi/skills/bid-review/scripts/coherence_report.md
 **/__pycache__/
+!audit-glm53-phase0-20261012.md
+!audit-glm53-t4-20261013.md
+!audit-glm53-remediation-20261013.md
