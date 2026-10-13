@@ -296,6 +296,16 @@ jobs:
       - name: Build pager binary (release)
         run: cargo build --release -p cf-pager-bin --bin qidi --locked
 
+      - name: Upload macOS binary (arm64)
+        # if: always() keeps the binary downloadable even when the smoke tests
+        # below fail — the artifact is the deliverable under validation.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qidi-macos-arm64
+          path: target/release/qidi
+          if-no-files-found: error
+
       - name: Test core types (cf-sampling-types)
         run: cargo test -p cf-sampling-types --lib --locked
 
