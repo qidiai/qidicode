@@ -45,13 +45,14 @@ def completeness(craft_text, truth_norm_chars):
 
     规格书 §4: `completeness(craft_text, truth_norm_chars) -> {"ratio","craft_norm"}`
     （norm(craft)/truth，>1.0 记录原值）。
+    T2 Part C: truth==0 且 craft 空 → ratio=None（空对空 N/A）；truth==0 且 craft 非空 → inf。
     """
     craft_norm = len(norm(craft_text or ""))
     if truth_norm_chars:
         ratio = craft_norm / truth_norm_chars
     else:
-        # truth 为空：craft 也为空记为 0.0，否则比值无意义记 inf（原值不裁剪）
-        ratio = 0.0 if craft_norm == 0 else float("inf")
+        # truth 为空：T2 Part C 空对空 → None（N/A，不计入均值）；craft 非空 → inf
+        ratio = None if craft_norm == 0 else float("inf")
     return {"ratio": ratio, "craft_norm": craft_norm}
 
 

@@ -112,6 +112,7 @@ def run_one(cli, entry, idx, d_smoke=False):
         "rc_info": None, "rc_text": None, "rc_render": None, "pages": None,
         "ms_info": None, "ms_text": None, "ms_render": None,
         "truth_norm": None, "craft_norm": None, "completeness": None,
+        "del_chars": None, "sym_count": None,
         "u_fffd": None, "cjk_truth": None, "cjk_craft": None, "verdict": None,
         "text": None,
     }
@@ -143,6 +144,8 @@ def run_one(cli, entry, idx, d_smoke=False):
     tr = truth.extract_truth(entry["path"])
     truth_error = tr["error"] is not None
     rec["truth_norm"] = tr["norm_chars"]
+    rec["del_chars"] = tr["del_chars"]
+    rec["sym_count"] = tr["sym_count"]
     rec["cjk_truth"] = metrics.cjk_ratio(tr["raw"])
 
     # metrics

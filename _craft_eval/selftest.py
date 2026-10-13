@@ -7,6 +7,7 @@
 全过打印 SELFTEST OK 退出码 0，任何断言失败退出码 1。
 """
 import io
+import math
 import os
 import sys
 import zipfile
@@ -105,6 +106,48 @@ def _make_del_fixture(path):
     return path
 
 
+def _inject_xml(path, fragment):
+    """在 word/document.xml 的 </w:body> 前注入任意 XML 片段（T2 Part C 用）。"""
+    tmp = path + ".tmp"
+    with zipfile.ZipFile(path) as zin, \
+            zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename == "word/document.xml":
+                s = data.decode("utf-8")
+                idx = s.find("</w:body>")
+                if idx < 0:
+                    raise AssertionError("document.xml 无 </w:body>")
+                s = s[:idx] + fragment + s[idx:]
+                data = s.encode("utf-8")
+            zout.writestr(item, data)
+    os.replace(tmp, path)
+    return path
+
+
+def _make_deltext_fixture(path):
+    """新式修订删除 fixture：<w:del><w:r><w:delText>..</w:delText></w:r></w:del>。"""
+    from docx import Document
+    doc = Document()
+    doc.add_paragraph("保留正文")
+    doc.save(path)
+    frag = ('<w:del><w:r><w:delText xml:space="preserve">新式删除文本</w:delText>'
+            '</w:r></w:del>')
+    _inject_xml(path, frag)
+    return path
+
+
+def _make_sym_fixture(path):
+    """w:sym fixture：<w:r><w:sym w:font="Wingdings" w:char="F0FC"/></w:r>。"""
+    from docx import Document
+    doc = Document()
+    doc.add_paragraph("带符号段落")
+    doc.save(path)
+    frag = '<w:r><w:sym w:font="Wingdings" w:char="F0FC"/></w:r>'
+    _inject_xml(path, frag)
+    return path
+
+
 def _para_full_text(path):
     from docx import Document
     return "".join(p.text for p in Document(path).paragraphs)
@@ -142,6 +185,24 @@ def test_del(p4):
     check(t["del_chars"] > 0, "del_chars > 0")
 
 
+def test_deltext(p5):
+    print("[3b] w:delText 新式修订删除计入 del_chars (T2 Part C)")
+    t = truth.extract_truth(p5)
+    check(t["error"] is None, "error is None")
+    check(t["del_chars"] >= len("新式删除文本"),
+          "del_chars >= %d (got %d)" % (len("新式删除文本"), t["del_chars"]))
+    check(t["del_chars"] > 0, "del_chars > 0")
+    check("新式删除文本" not in t["raw"], "w:delText 内容不进 raw")
+
+
+def test_sym(p6):
+    print("[3c] w:sym 计数计入 sym_count (T2 Part C)")
+    t = truth.extract_truth(p6)
+    check(t["error"] is None, "error is None")
+    check(t["sym_count"] > 0, "sym_count > 0 (got %d)" % t["sym_count"])
+    check(t["sym_count"] == 1, "sym_count == 1 (got %d)" % t["sym_count"])
+
+
 def test_norm(p3):
     print("[4] norm 计数（含全角空格清除）")
     t = truth.extract_truth(p3)
@@ -162,6 +223,19 @@ def test_metrics():
     miss = metrics.completeness("abd", 6)
     check(miss["ratio"] < 1.0, "缺字 completeness < 1.0 (%s)" % miss["ratio"])
     check(0.0 <= metrics.cjk_ratio("中文abc") <= 1.0, "cjk_ratio 在 [0,1]")
+
+
+def test_metrics_empty_semantics():
+    print("[5b] metrics 空文档语义：空对空 None / truth空 craft非空 inf (T2 Part C)")
+    a = metrics.completeness("", 0)
+    check(a["ratio"] is None, "truth=0 & craft='' → ratio is None (got %r)" % a["ratio"])
+    b = metrics.completeness("   ", 0)
+    check(b["ratio"] is None, "truth=0 & craft=空白 → ratio is None (got %r)" % b["ratio"])
+    c = metrics.completeness("x", 0)
+    check(c["ratio"] == float("inf") and math.isinf(c["ratio"]),
+          "truth=0 & craft='x' → ratio is inf (got %r)" % c["ratio"])
+    d = metrics.completeness("abc", 6)
+    check(d["ratio"] == 0.5, "truth=6 & craft='abc' → 0.5 (got %r)" % d["ratio"])
 
 
 def test_sampling():
@@ -242,12 +316,17 @@ def main():
         p2 = _make_table(os.path.join(FIX_DIR, "f2_table.docx"))
         p3 = _make_fullwidth(os.path.join(FIX_DIR, "f3_fullwidth.docx"))
         p4 = _make_del_fixture(os.path.join(FIX_DIR, "f4_del.docx"))
+        p5 = _make_deltext_fixture(os.path.join(FIX_DIR, "f5_deltext.docx"))
+        p6 = _make_sym_fixture(os.path.join(FIX_DIR, "f6_sym.docx"))
 
         test_truth_plain(p1)
         test_truth_table(p2)
         test_del(p4)
+        test_deltext(p5)
+        test_sym(p6)
         test_norm(p3)
         test_metrics()
+        test_metrics_empty_semantics()
         a, b, c, d = test_sampling()
         test_pool_counts(a, b, c, d)
         test_write_guard()
