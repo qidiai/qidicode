@@ -144,3 +144,7 @@ _craft_eval/__pycache__/
 # ---- 2026-10-14 手机端瘦客户端（ACP over WebSocket，T1 乐团交付）----
 !mobile/
 !mobile/**
+
+# ---- 2026-10-14 Android WebView 壳工程 + CI（T2 乐团交付）----
+!android/
+!android/**
