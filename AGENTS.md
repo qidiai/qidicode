@@ -132,6 +132,7 @@
 | 项 | 约定 |
 |---|---|
 | 远程 | `origin`（github）、`gitee`、`upstream`（**SMB 共享基线** `\\192.168.1.222\程序开发\grok-build-upstream`，2026-10-05 起；原本地路径 `C:\Users\ASUS\grok-build` 已不存在） |
+| GitHub 网络分流 | **origin 推送走首尔 SSH 隧道**（2026-10-14 起）：git 已配域名级代理 `http.https://github.com.proxy = socks5://127.0.0.1:1080`——**仅 github.com 走首尔出口，gitee 等其他全部原网络直连**。隧道=`C:\qidi-proxy\seoul_socks5.py`（SSH 动态转发→首尔 VPS，源自 `\\192.168.1.222\程序开发\clash` 归档），**计划任务 `QidiSeoulProxy` 常驻**（登录自启+无执行时限；勿用 shell Start-Process 拉起——Job Object 会杀）。SOCKS5 1080 / PAC 1081 |
 | 默认推送 | **双推 `origin` + `gitee`**；worktree 分支用 `git push <remote> feat/xxx:main` 直推 main |
 | 提交权 | 编码手/子代理禁止 commit；指挥官质检通过后统一提交 |
 | 提交信息 | `<类型>: <摘要>` + 正文列要点（orchestra 战报格式，见 git log） |
@@ -162,6 +163,8 @@
 | cf-chat-state 测试 | `cargo test -p cf-chat-state --lib`（G 盘直跑）；历史注记：2026-10-04 曾报 G 盘链接确定性挂起（link.exe ~369MB 零 I/O 冻结，两次复现），**2026-10-09 复测未复现**——冷编 21m22s + link.exe 活跃推进（工作集 5.4GB，非冻结特征）+ 链接正常完成 + 测试 0.53s；若再现挂起，改用 C 盘热 target 方案（同 cf-shell 行） | G 盘冷编（禁 sccache）~21 分钟；基线 345 passed / 0 failed（2026-10-09，较 2026-10-04 基线 343 +2 = B1-6 新增 cache_read_ratio 两测试，数目自洽） |
 | **cf-pager 测试** | ⚠️ G 盘冷链**严重偏离旧记载**（2026-10-04 实测 >90 分钟未完成，pdb 1.6GB 链接为瓶颈）→ **一律用 C 盘热 target 方案**（同 cf-shell 行） | C 盘 ~15 分钟；基线 6968 passed + 53 预先存在字形失败（字体/终端环境类，失败集与业务改动零交集，2026-10-04 实测记录） |
 | 快速全局校验 | `cargo check --workspace` | 0 errors 为过 |
+| **macOS 构建** | `.github/workflows/ci.yml` 的 macos-build job（直推 main 自动触发，`git push origin feat/xxx:main`） | aarch64-apple-darwin 产物挂 artifact `qidi-macos-arm64`（~59MB）可下载；libc 依赖门教训（b507ae61）：依赖 cfg 不得比代码使用面窄（`cfg(unix)` ⊃ macos） |
+| **ai-bridge 多工具桥** | Hub `http://127.0.0.1:9800`（`/api/dispatch` 等，鉴权 token=用户级环境变量 `AI_BRIDGE_TOKEN`） | claude-code 与 opencode 适配器已改 **stdin 传参**（2026-10-14——arg 模式多行长文本丢失实锤）；opencode 已注册免费模型 `opencode-go/deepseek-v4-flash`；开关状态在 switches.json（`/api/toggle`）；Hub 挂了用 WMI 拉起（`Win32_Process.Create`，脱离 Job Object） |
 | 清理 | `cargo clean` | 先备份 `target/release/qidi.exe` 到 `G:\qidi-exe-backup\`；**注意 §6 target/debug 历史文件雷** |
 
 ⚠️ **磁盘清理硬性规则（2026-10-10 事故后强制，对所有编码手通用）**：target/debug 下混有大量历史用户文件（`_archive/`、`staging/`、`sagent/`、`少儿英语小程序/`、`quant_deploy_*.zip` 等——2026-10-10 被 DeepSeek 按"清 debug"指令**整目录删除后丢失**，无备份，仅部分有外部副本）。**规则**：
