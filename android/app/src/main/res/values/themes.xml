@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 无 ActionBar 主题，深色窗口背景 #1e1f24 -->
+    <style name="Theme.QidiRemote" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#1e1f24</item>
+    </style>
+</resources>

@@ -1,4 +1,4 @@
-﻿target/
+target/
 *.lock
 !Cargo.lock
 bin/protoc*.exe
@@ -42,7 +42,6 @@ tools/media-gen-agent/agnes_config.json.*
 .worktree-backups-*/
 *.snap.new
 
-<<<<<<< HEAD
 # ---- manhua pipeline media (2026-10-02) ----
 qidiwork-docs/manhua/**/*.png
 qidiwork-docs/manhua/**/*.jpg
@@ -54,7 +53,6 @@ qidiwork-docs/manhua/**/*.mp4
 !qidiwork-docs/manhua/**/*.md
 __pycache__/
 *.py[cod]
-=======
 # local backups & trash (2026-09-25: keep history clean, never commit)
 *.bak
 *.bak-*
@@ -83,4 +81,7 @@ _craft_eval/__pycache__/
 # ---- 2026-10-14 手机端瘦客户端（ACP over WebSocket，T1 乐团交付）----
 !mobile/
 !mobile/**
->>>>>>> e8f3651 (orchestra: T1 手机端 ACP WebSocket 瘦客户端 [coder: DeepSeek-V4.1-Flash, commander: kimi-k3, audit: kimi-k3/K3-audit + commander-e2e])
+
+# ---- 2026-10-14 Android WebView 壳工程 + CI（T2 乐团交付）----
+!android/
+!android/**
