@@ -23,6 +23,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # 注：旧 'tools' 包已从 Google SDK 仓库下架，默认值会失败；platform-tools 仍存在
+          packages: platform-tools
 
       - name: Set up Gradle 8.10.2
         uses: gradle/actions/setup-gradle@v4
