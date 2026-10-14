@@ -140,3 +140,7 @@ _craft_eval/__pycache__/
 !audit-glm53-phase0-20261012.md
 !audit-glm53-t4-20261013.md
 !audit-glm53-remediation-20261013.md
+
+# ---- 2026-10-14 手机端瘦客户端（ACP over WebSocket，T1 乐团交付）----
+!mobile/
+!mobile/**
