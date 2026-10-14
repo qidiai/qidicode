@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#1e1f24">
+<title>qidicode 手机遥控</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 顶部 toast（错误/提示，3s 自动消失） -->
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+<!-- ===================== 视图 1：连接页 ===================== -->
+<section id="view-connect" class="view">
+  <header class="connect-head">
+    <h1>qidicode 手机遥控</h1>
+    <p class="sub">通过 WebSocket 连接电脑上正在运行的 qidicode 会话（ACP v1）</p>
+  </header>
+
+  <div class="form">
+    <label for="in-url">服务器地址</label>
+    <input id="in-url" type="text" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="ws://192.168.1.10:2419/ws">
+
+    <label for="in-secret">访问密钥（Secret）</label>
+    <input id="in-secret" type="password" autocomplete="off" placeholder="服务端 --secret 设置的值">
+
+    <label for="in-cwd">项目路径（cwd）</label>
+    <input id="in-cwd" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="G:\work\proj 或 /home/u/proj">
+
+    <div id="connect-error" class="connect-error hidden" role="alert"></div>
+
+    <button id="btn-connect" class="btn primary" type="button">连接</button>
+  </div>
+</section>
+
+<!-- ===================== 视图 2：会话页 ===================== -->
+<section id="view-session" class="view hidden">
+  <div id="banner" class="banner hidden">
+    <span id="banner-text" class="banner-text"></span>
+    <button id="btn-retry" class="btn tiny hidden" type="button">重试</button>
+  </div>
+
+  <header class="session-head">
+    <div class="head-info">
+      <div id="head-cwd" class="head-cwd">会话</div>
+      <div id="head-sid" class="head-sid">—</div>
+      <div id="head-title" class="head-title hidden"></div>
+    </div>
+    <button id="btn-menu" class="icon-btn" type="button" aria-label="菜单">⋮</button>
+    <div id="menu" class="menu hidden">
+      <button id="menu-new" class="menu-item" type="button">新会话</button>
+      <button id="menu-disconnect" class="menu-item" type="button">断开连接</button>
+    </div>
+  </header>
+
+  <main id="messages" class="messages" aria-live="polite"></main>
+
+  <footer class="composer">
+    <textarea id="input" rows="1" placeholder="输入消息…（Ctrl/⌘+Enter 发送）"></textarea>
+    <button id="btn-send" class="btn send" type="button">发送</button>
+  </footer>
+</section>
+
+<!-- ===================== 权限 bottom sheet ===================== -->
+<div id="perm-sheet" class="sheet hidden">
+  <div id="perm-backdrop" class="sheet-backdrop"></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="权限请求">
+    <div class="sheet-head">
+      <span class="sheet-title">权限请求</span>
+      <button id="perm-close" class="icon-btn" type="button" aria-label="取消">✕</button>
+    </div>
+    <div class="sheet-body">
+      <div id="perm-tool" class="perm-tool"></div>
+      <pre id="perm-input" class="perm-input"></pre>
+      <div id="perm-options" class="perm-options"></div>
+    </div>
+    <div class="sheet-foot">
+      <button id="perm-cancel" class="btn ghost" type="button">取消</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
