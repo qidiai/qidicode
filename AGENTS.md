@@ -108,6 +108,7 @@
 - 触发：`/<技能名>` 或自然语言触发词（`SkillInfo.when_to_use`）；技能库 `C:\Users\ASUS\.qidi\skills\`
 - 技能 frontmatter 可带 `effort:`（枚举含独立 `Max`，见 §7 分层）与 `model:` 覆盖
 - 创建/修改技能用内置 `/create-skill`
+- **子代理技能面实测（2026-10-16，DeepSeek 子代理 72 次调用深挖）**：**子代理不能调用技能——差两层**。①可见层：子代理技能清单注入 = **0**（announcement_state 411 条全"已宣告"为继承态 → SkillDiscoveryReminder 无新可发；主会话有全量清单注入）；②激活层：子代理工具面（`default_qidi_build_toolset()`）只有安装型 `deploy_skill`（staging→拷贝安装，**非激活通道**），技能调用工具 `OpenCodeSkillTool`（id=`"skill"`，ToolKind::Skill）只存在于 `opencode_toolset()` 未接入——而 `SubagentCapabilityMode::allowed_tool_kinds()` 各模式与 `capability.rs` 均放行 Skill kind：**设计应支持、实现未接通（产品缺口，待修）**。③内容层兜底 ✅：`read_file` 出 workspace 边界被拒，但 `run_terminal_command`+`Get-Content -Encoding UTF8` 可读任意 SKILL.md。子代理需技能时由指挥官把 SKILL.md 要点写进任务书，或待缺口修复
 - 常用：办公全家桶（office-tools / bid-* / seal-extractor / pdf-to-word-ocr）、编程流程（check-work / auto-bug-fixer / python-refactoring）、编排（dev-orchestra / find-skills）、安全（pre-commit-secret-check / secret-scan / check-secrets）、本地AI生图（qwen-image-lowvram：1660 Ti 低显存 Qwen-Image-2.1 + 标书效果图流水线，含 ComfyUI 部署/踩坑/PIL 叠字/元数据清零全套）
 
 ## 9. 子代理编排（乐团模式，实测有效）
