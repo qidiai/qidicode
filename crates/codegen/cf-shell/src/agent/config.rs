@@ -5877,6 +5877,58 @@ reasoning_effort = "low"
             );
         }
     }
+    /// Built-in catalog must carry the Kimi K3 direct-Moonshot (BYOK) entry.
+    ///
+    /// Semantics note (behavior not exercised here): the session-auth platform
+    /// prefetch replaces the embedded defaults wholesale, so this entry is
+    /// visible when there is no prefetch (API-key / offline / fetch failure).
+    /// Day-to-day usage is carried by the user-level config.toml entry
+    /// `[model.kimi-k3-moonshot]`, keyed identically to `id` below.
+    #[test]
+    fn default_models_contains_kimi_k3_moonshot_direct_entry() {
+        let endpoints = EndpointsConfig::default();
+        let entries = default_model_entries(&endpoints);
+        let entry = entries.get("kimi-k3-moonshot").unwrap_or_else(|| {
+            panic!(
+                "built-in catalog must contain 'kimi-k3-moonshot'; keys: {:?}",
+                entries.keys().collect::<Vec<_>>()
+            )
+        });
+        assert_eq!(
+            entry.info.model, "kimi-k3",
+            "catalog key 'kimi-k3-moonshot' must route to slug 'kimi-k3'"
+        );
+        assert_eq!(
+            entry.info.base_url, "https://api.moonshot.cn/v1",
+            "Moonshot direct entry must use the official api.moonshot.cn endpoint"
+        );
+        assert_eq!(
+            entry.api_base_url, None,
+            "BYOK third-party entry must not get an xAI api_base_url"
+        );
+        let env_key = entry
+            .env_key
+            .as_ref()
+            .expect("Moonshot direct entry must declare env_key");
+        assert_eq!(
+            env_key.names(),
+            vec!["MOONSHOT_API_KEY"],
+            "env_key must resolve to MOONSHOT_API_KEY"
+        );
+        assert_eq!(
+            entry.api_key, None,
+            "API key must never be embedded in the built-in catalog (env_key only)"
+        );
+        assert!(
+            entry.info.supported_in_api,
+            "Moonshot direct entry must be selectable for API-key (BYOK) users"
+        );
+        assert_eq!(
+            entry.info.api_backend,
+            ApiBackend::ChatCompletions,
+            "Moonshot uses the Chat Completions backend"
+        );
+    }
     #[test]
     fn env_keys_deser_string_or_array() {
         let one: EnvKeys = serde_json::from_str(r#""ANTHROPIC_AUTH_TOKEN""#).unwrap();

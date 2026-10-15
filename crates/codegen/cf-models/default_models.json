@@ -238,6 +238,18 @@
       "api_backend": "chat_completions",
       "auth_scheme": "bearer",
       "supported_in_api": false
+    },
+    {
+      "id": "kimi-k3-moonshot",
+      "model": "kimi-k3",
+      "name": "Kimi K3 (Direct Moonshot)",
+      "description": "Moonshot Kimi K3 via the official api.moonshot.cn endpoint — BYOK via MOONSHOT_API_KEY",
+      "base_url": "https://api.moonshot.cn/v1",
+      "context_window": 1048576,
+      "api_backend": "chat_completions",
+      "env_key": "MOONSHOT_API_KEY",
+      "auth_scheme": "bearer",
+      "supported_in_api": true
     }
   ]
 }
