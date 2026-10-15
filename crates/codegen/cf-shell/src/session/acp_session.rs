@@ -136,6 +136,9 @@ use reasoning_pregenerate::*;
 #[path = "acp_session_impl/tool_dispatch.rs"]
 mod tool_dispatch;
 use tool_dispatch::*;
+#[path = "acp_session_impl/tool_args_repair.rs"]
+mod tool_args_repair;
+use tool_args_repair::*;
 #[path = "acp_session_impl/mcp_snapshot.rs"]
 mod mcp_snapshot;
 use mcp_snapshot::*;
@@ -1857,6 +1860,9 @@ mod between_turn_completion_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/build_tool_parse_error_message_tests.rs"]
 mod build_tool_parse_error_message_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/tool_args_repair_tests.rs"]
+mod tool_args_repair_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/cancel_running_task_tests.rs"]
 mod cancel_running_task_tests;

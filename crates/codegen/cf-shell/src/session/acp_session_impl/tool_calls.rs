@@ -823,10 +823,25 @@ impl SessionActor {
         );
         let parse_result = serde_json::from_str::<serde_json::Value>(args_str);
         let mut concatenated_json_count: usize = 0;
+        // Conservative repair pass: some providers deterministically drop the
+        // quotes around a bare token value or key, producing JSON that never
+        // parses (see `tool_args_repair`). Try a single repair and adopt it
+        // only when the repaired text parses; otherwise fall through to the
+        // legacy recovery / error paths unchanged. Only consulted after the
+        // ordinary parse above has already failed, so valid arguments are
+        // untouched. `repair_tool_arguments` emits a WARN on success.
+        let repaired_value = if parse_result.is_err() {
+            repair_tool_arguments(&call.function.arguments)
+                .and_then(|repaired| serde_json::from_str::<serde_json::Value>(&repaired).ok())
+        } else {
+            None
+        };
         let raw_input = match &parse_result {
             Ok(value) => value.clone(),
             Err(e) => {
-                if let Some(objects) = crate::session::helpers::tool_input_parsing::try_extract_concatenated_json_objects(
+                if let Some(value) = repaired_value {
+                    value
+                } else if let Some(objects) = crate::session::helpers::tool_input_parsing::try_extract_concatenated_json_objects(
                     &call.function.arguments,
                 ) {
                     let total_count = objects.len();
