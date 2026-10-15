@@ -127,7 +127,12 @@
 - luyou/codely 池为**每日共享额度制**（用户口径）：429 = 当日配额被共享用户挤占/用尽，波动型限流（同分钟内小请求与大请求成败可并存），等窗口或次日；KIMI-K3-222 命运取决于此
 - luyou→kimi-k3 流的 `finish_reason:""` 空串坑已修（commit `b333b253`：`empty_finish_reason_as_none` 双路径归一化+5 回归测试）——**旧 qidi.exe 进程 spawn K3 必炸**（unknown variant ''），换新版 exe 后消除
 - K 系 spawn 实测可用位：`kimi-k2.7-code-highspeed-222`（apigoto 直连带独立 key）；`KIMI-K3-222` 需新版 exe+额度窗口双就绪；**K3 审计可靠位 = qidi CLI headless 通道**（2026-10-15 实测）
-- **headless 登录态平台路由实测（2026-10-16 深挖，K3 撞 x.ai 配额根源）**：本机 auth.json 为 qidiai 平台 OIDC session（`https://api.qidiai.ltd::qidi-code`）——登录态下 `-m` 请求走**平台模型目录+平台推理端点**（config.rs:4116：目录条目 base_url 空时兜底 `resolve_inference_base_url()`），**本地 config.toml `[model.*]` 条目被旁路**（连内嵌 api_key 的 sensenova 直连 `kimi-k3-sn-222` 实测也未走，与 spawn 解耦同源）。kimi 系全部由平台 kimi 池供数，该池上游 = **x.ai 团队账号**（配额尽时原文 429 透传；`docs.x.ai` 报错字样在仓库零命中=透传铁证）；GLM 线上游有额度正常。另 rebrand 漏网默认端点常量仍在：`XAI_API_BASE_URL_DEFAULT="https://api.x.ai/v1"`（cf-shell config.rs:48，ApiKey 模式推理底座+/models 源+拉取条目 base_url 强改目标）与 `CLI_CHAT_PROXY_BASE_URL_DEFAULT="https://cli-chat-proxy.grok.com/v1"`（config.rs:46，会话态代理底座；本机实际由平台侧覆为 api.qidiai.ltd）。改这两个默认值涉 BYOK 行为变更，动前需用户确认
+- **headless 路由与"429=x.ai"假象实测（2026-10-16 深挖+两次勘误，RUST_LOG=debug 探针铁证）**：
+  - **chat 路由遵守 config.toml `[model.*]`**——探针实测 `-m kimi-k3-sn-222` 实打实 POST `https://token.sensenova.cn/v1/chat/completions`（config.rs:3234 debug 行 base_url/has_api_key 可证）；早版"登录态平台旁路"结论**错误已勘误**（config.rs:4116 兜底仅对目录条目缺 base_url 时生效）
+  - **"x.ai 配额"假象根源=自家 429 文案模板**：任何上游 429 经 `RATE_LIMITED_ERROR_CODE(-32003)` 契约抑制真实详情后显示硬编码 `RATE_LIMITED_USER_MESSAGE_API_KEY`（cf-shell/src/sampling/error.rs:27，grok 遗产，自称 "team's API rate limit...docs.x.ai"）——**sensenova 的 tpm/rpm 限流、luyou 池日配额尽都被渲染成"x.ai 配额耗尽"**；历史会话一切"x.ai 配额"定性须按此重解读（文案中性化+默认端点修复 2026-10-16 当日落地）
+  - **真实配额事件（均非 x.ai）**：luyou/CodeLy 池 kimi 线日配额尽（K3#1 有输出后死、K3#2 一响应即死=波动型）；sensenova 直连线受账号自身 tpm/rpm 滑动窗限流，且大 prompt 触发 400 invalid_request（K3-sn 审计任务书被拒——该线暂不宜跑长审计）
+  - **rebrand 漏网默认端点**：`CLI_CHAT_PROXY_BASE_URL_DEFAULT="https://cli-chat-proxy.grok.com/v1"`（config.rs:46）与 `XAI_API_BASE_URL_DEFAULT="https://api.x.ai/v1"`（config.rs:48）——无覆盖时启动期 aux（models fetch 等）真打 grok.com（缓存 origin mismatch 行铁证），非致命但方向错误；已改 `https://api.qidiai.ltd/v1`
+  - 其他 rebrand 漏网（L1.5 候选待用户拍板）：`ASSET_SERVER_URL_DEFAULT="https://assets.grok.com"`（config.rs:50）、billing UPSELL_URL（grok.com/supergrok，billing.rs:41/44，FREE_USAGE 文案混用 QIDI/Grok 品牌 billing.rs:123）、`MANAGED_SECTION_CONNECTORS_URL`（grok.com/connectors）、`QIDI_COM_METHOD_ID="grok.com"`（auth_method.rs:882，**改涉存量会话鉴权迁移，高危**）、app.rs "requires a grok.com session" 文案、B5 拒启消息前缀自称 "grok:"、cf-pager-bin console.x.ai 文案
 
 ## 10. Git 提交与推送（生产纪律）
 
