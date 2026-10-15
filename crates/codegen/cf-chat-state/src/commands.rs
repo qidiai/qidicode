@@ -96,6 +96,12 @@ pub enum ChatStateCommand {
     /// Update the sampling config (e.g., model switch).
     UpdateSamplingConfig { config: SamplingConfig },
 
+    /// Phase C Reasoning-summary pre-generation write (C-1): replace the
+    /// whole block-fingerprint → summary table with the session layer's
+    /// freshly generated batch. The batched prune reads this table when a
+    /// batch-clear window fires (table hit → synthetic sibling, miss → skip).
+    SetReasoningSummaries { summaries: crate::types::ReasoningSummaries },
+
     /// Track that the agent edited a file path.
     RecordAgentEditedPath { path: String },
 
@@ -206,6 +212,29 @@ pub enum ChatStateCommand {
 
     /// Get total accumulated tokens.
     GetTotalTokens { reply: oneshot::Sender<u64> },
+
+    /// Context-window utilization as a floored percentage (0–100+). Computed
+    /// by the state layer via `request_builder::context_utilization_percent`
+    /// so the session-layer pre-generation trigger (35%) uses the same measure
+    /// as the batched-clear trigger (40%).
+    GetContextUtilizationPercent {
+        reply: oneshot::Sender<u64>,
+    },
+
+    /// Whether the Phase C batched pruning mode is active
+    /// (`batched_pruning && low_watermark_percent.is_some()`). Gates the
+    /// session-layer Reasoning-summary pre-generation hook (C-6 flag-off
+    /// anchor: off → zero action).
+    GetBatchedPruningEnabled {
+        reply: oneshot::Sender<bool>,
+    },
+
+    /// The current Phase C Reasoning-summary table (block fingerprint →
+    /// summary). Read by the session layer before a pre-generation run so it
+    /// skips blocks already summarized (R2).
+    GetReasoningSummaries {
+        reply: oneshot::Sender<crate::types::ReasoningSummaries>,
+    },
 
     /// Retrieve the most recent stashed per-turn `TokenUsage`. Returns
     /// `None` until at least one `RecordLastTurnUsage` has been processed.
@@ -393,6 +422,9 @@ mod tests {
             text: "prompt".to_string(),
         };
         let _ = ChatStateCommand::RecordCompactionAt { prompt_index: 0 };
+        let _ = ChatStateCommand::SetReasoningSummaries {
+            summaries: crate::types::ReasoningSummaries::new(),
+        };
         let _ = ChatStateCommand::Flush;
 
         // Queries
@@ -407,6 +439,15 @@ mod tests {
 
         let (tx, _rx) = oneshot::channel();
         let _ = ChatStateCommand::GetTotalTokens { reply: tx };
+
+        let (tx, _rx) = oneshot::channel();
+        let _ = ChatStateCommand::GetContextUtilizationPercent { reply: tx };
+
+        let (tx, _rx) = oneshot::channel();
+        let _ = ChatStateCommand::GetBatchedPruningEnabled { reply: tx };
+
+        let (tx, _rx) = oneshot::channel();
+        let _ = ChatStateCommand::GetReasoningSummaries { reply: tx };
 
         let (tx, _rx) = oneshot::channel();
         let _ = ChatStateCommand::GetEstimatedTotalTokens { reply: tx };

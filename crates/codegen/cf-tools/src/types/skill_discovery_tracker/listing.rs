@@ -640,6 +640,13 @@ pub(super) fn format_announcement(
 /// startup `<system-reminder>` byte-for-byte (standard header, `Use when:`
 /// triggers, `Absolute path:`) instead of a hand-rolled divergent format.
 /// Lists every enabled, model-invocable skill with no carried-over dedup state.
+///
+/// TODO(P0-3 phase 2 / compaction decision): this path renders the *full* set
+/// and is therefore NOT projected by the essential-skill allowlist yet — a
+/// compacted session re-lists every skill regardless of `[skills].mode`. The
+/// design flags compaction re-announcement as an open decision (RISK-4);
+/// phase 1 leaves it byte-identical. To project it, thread the resolved
+/// allowlist here and filter `skills` before rendering.
 pub fn format_compaction_skill_listing(skills: &[SkillInfo]) -> Option<String> {
     let mut announced = HashSet::new();
     format_announcement(

@@ -303,6 +303,10 @@ impl ToolBridge {
     /// `display_cwd`: If set (forked sessions), skill paths in
     /// model-visible announcements are rewritten from real cwd to this
     /// value. Runtime invocation uses the real path.
+    ///
+    /// `mode` / `essential_allow`: essential-skill listing projection
+    /// (P0-3 phase 1). `Full` lists everything; `Essential` lists only the
+    /// resolved allowlist. See `SkillManager::set_skills_mode`.
     pub async fn seed_skill_discovery(
         &self,
         cwd: Option<std::path::PathBuf>,
@@ -312,6 +316,8 @@ impl ToolBridge {
         context_window_tokens: Option<u64>,
         skill_budget_percent: Option<f64>,
         compat: crate::types::compat::CompatConfig,
+        mode: crate::types::skill_discovery_tracker::SkillsMode,
+        essential_allow: Option<Vec<String>>,
     ) {
         let registry = &*self.registry;
         let mut res = registry.resources.lock().await;
@@ -328,6 +334,7 @@ impl ToolBridge {
             tracker.set_read_tool_name(name);
         }
         tracker.set_compat(compat);
+        tracker.set_skills_mode(mode, essential_allow);
         tracker.seed(
             cwd,
             git_root,

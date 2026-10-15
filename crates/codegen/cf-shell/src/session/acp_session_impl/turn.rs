@@ -2179,6 +2179,7 @@ impl SessionActor {
                         model_fingerprint.clone(),
                     )
                     .await;
+                self.maybe_pregenerate_reasoning_summaries().await;
                 if self.drain_pending_interjections().await {
                     tracing::info!(
                         "Drained late interjection(s) during turn-end bookkeeping — continuing"
@@ -2221,6 +2222,7 @@ impl SessionActor {
                                 model_fingerprint.clone(),
                             )
                             .await;
+                        self.maybe_pregenerate_reasoning_summaries().await;
                         return Ok(TurnOutcome::Completed {
                             snapshot: Box::new(snapshot),
                             tools_called: turn_tools_called,

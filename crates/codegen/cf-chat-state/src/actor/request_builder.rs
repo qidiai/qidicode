@@ -6,7 +6,7 @@ use cf_sampling_types::{
 
 use super::ChatStateActor;
 use crate::events::ChatStateEvent;
-use crate::types::PruningConfig;
+use crate::types::{PruningConfig, PRUNE_WATERMARK_PERCENT};
 
 /// Placeholder inserted when a tool result is hard-cleared.
 ///
@@ -33,17 +33,24 @@ const OUTPUT_POINTER_MARKER: &str = "full output at: ";
 /// soft-trimmed tail), the replacement keeps the whole pointer line so the
 /// model can still re-read the full output with `read_file`.
 pub(super) fn hard_clear_replacement(content: &str) -> std::sync::Arc<str> {
+    pointer_preserving_replacement(HARD_CLEAR_PLACEHOLDER, content)
+}
+
+/// Replace `content` with `placeholder`, keeping the trailing
+/// `full output at: <path>` retrieval pointer line when the original carried
+/// one, so the spilled file stays reachable for the model. Shared by the
+/// per-turn hard-clear and the batched soft-guidance variants (R4/GLM 证据 3:
+/// the batched clear must preserve the pointer exactly like the legacy path).
+fn pointer_preserving_replacement(placeholder: &str, content: &str) -> std::sync::Arc<str> {
     if let Some(idx) = content.rfind(OUTPUT_POINTER_MARKER) {
         let line_end = content[idx..]
             .find('\n')
             .map(|e| idx + e)
             .unwrap_or(content.len());
         let pointer_line = content[idx..line_end].trim_end();
-        return std::sync::Arc::from(format!(
-            "{HARD_CLEAR_PLACEHOLDER}. {pointer_line}"
-        ));
+        return std::sync::Arc::from(format!("{placeholder}. {pointer_line}"));
     }
-    std::sync::Arc::from(HARD_CLEAR_PLACEHOLDER)
+    std::sync::Arc::from(placeholder)
 }
 
 /// Whether this tool-result content is already a hard-clear replacement
@@ -51,6 +58,50 @@ pub(super) fn hard_clear_replacement(content: &str) -> std::sync::Arc<str> {
 /// clearing.
 pub(super) fn is_hard_cleared(content: &str) -> bool {
     content.starts_with(HARD_CLEAR_PREFIX)
+}
+
+/// Placeholder inserted when a tool result is batch-cleared in the batched
+/// pruning mode (Phase C, C-4).
+///
+/// Unlike [`HARD_CLEAR_PLACEHOLDER`] (per-turn mode), this is a **soft
+/// guidance** placeholder: it points the model at the session's compaction
+/// archive — the `segment_*.md` segment store (see
+/// [`crate::compaction_mode::CompactionMode::transcript_hint`]) or the raw
+/// `updates.jsonl` transcript — so it can read the aged output back, without
+/// echoing the original tool-call arguments (C-4 定案: never echo args; the
+/// compact rebuild drops `tool_use` raw_input, so echoing them would be
+/// unrecoverable). The `full output at:` retrieval pointer, when the original
+/// carried one, is preserved by [`batch_clear_replacement`].
+pub(super) const BATCH_CLEAR_PLACEHOLDER: &str =
+    "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]";
+
+/// Debounce variant of [`BATCH_CLEAR_PLACEHOLDER`] (C-4): once the same
+/// tool-call args fingerprint has been batch-cleared
+/// [`REPLAY_PROMPT_MAX_COUNT`](crate::actor::state::REPLAY_PROMPT_MAX_COUNT)
+/// times, the recovery guidance is suppressed (kept terse) so a repeated
+/// re-run does not keep re-injecting the pointer. Shares the
+/// [`BATCH_CLEAR_PREFIX`] so the idempotency check is unchanged.
+pub(super) const BATCH_CLEAR_SUPPRESSED_PLACEHOLDER: &str = "[tool result aged]";
+
+/// Marker prefix for the batched soft-guidance placeholder (idempotency check).
+pub(super) const BATCH_CLEAR_PREFIX: &str = "[tool result aged";
+
+/// Whether this tool-result content is already a batched soft-guidance
+/// replacement and needs no further clearing.
+pub(super) fn is_batch_cleared(content: &str) -> bool {
+    content.starts_with(BATCH_CLEAR_PREFIX)
+}
+
+/// Build the batched soft-guidance replacement, preserving any
+/// `full output at:` retrieval pointer the original carried (R4, aligning the
+/// batched path with legacy [`hard_clear_replacement`]). No args echo (C-4).
+pub(super) fn batch_clear_replacement(content: &str) -> std::sync::Arc<str> {
+    pointer_preserving_replacement(BATCH_CLEAR_PLACEHOLDER, content)
+}
+
+/// Build the debounced (guidance-suppressed) batched replacement (C-4 debounce).
+pub(super) fn batch_clear_suppressed_replacement(content: &str) -> std::sync::Arc<str> {
+    pointer_preserving_replacement(BATCH_CLEAR_SUPPRESSED_PLACEHOLDER, content)
 }
 
 /// Separator inserted between head and tail in soft-trimmed results.
@@ -194,18 +245,88 @@ impl ChatStateActor {
 /// Check whether pruning should run based on context utilization.
 ///
 /// Returns `true` when `total_tokens` exceeds 50% of `context_window`.
+///
+/// The 50% trigger is [`PRUNE_WATERMARK_PERCENT`] (a named constant) so the
+/// C-7 compile-time assertion in `types.rs` can pin it against the batched
+/// reclaim line without drifting.
 pub(crate) fn should_prune(total_tokens: u64, context_window: std::num::NonZeroU64) -> bool {
-    total_tokens > context_window.get() / 2
+    total_tokens > context_window.get() * PRUNE_WATERMARK_PERCENT as u64 / 100
 }
+
+/// Context-window utilization as a floored percentage (0–100+).
+///
+/// Shared by [`should_batch_prune`] and the batched-mode hysteresis re-arm in
+/// `mutations.rs`, so the trigger/reclaim comparisons use one trusted measure.
+pub(crate) fn context_utilization_percent(
+    total_tokens: u64,
+    context_window: std::num::NonZeroU64,
+) -> u64 {
+    total_tokens.saturating_mul(100) / context_window.get()
+}
+
+/// Low-watermark batch trigger for the batched pruning mode (Phase C, C-2/C-7).
+///
+/// Mirrors the image-compaction hysteresis precedent (see
+/// [`IMAGE_COMPACT_TRIGGER_BYTES`] / [`IMAGE_COMPACT_RECLAIM_TARGET_BYTES`]):
+/// the batch clear is *gated* at the low watermark but only in the region
+/// below the high-water [`should_prune`] gate — above 50% the API-copy layer
+/// owns the conversation. Returns `true` exactly when context utilization is
+/// in `[low_watermark_percent, PRUNE_WATERMARK_PERCENT)`.
+pub(crate) fn should_batch_prune(
+    total_tokens: u64,
+    context_window: std::num::NonZeroU64,
+    low_watermark_percent: u8,
+) -> bool {
+    let utilization_percent = context_utilization_percent(total_tokens, context_window);
+    utilization_percent >= u64::from(low_watermark_percent)
+        && utilization_percent < u64::from(PRUNE_WATERMARK_PERCENT)
+}
+
+/// Tool name for the Phase C `search_tool` C-3 exemption: its `tool_result` is
+/// the MVP's only executable payload (the top-k schema list), so it is never
+/// soft-trimmed, hard-cleared, or batch-cleared in any pruning layer. Shared by
+/// the API-copy layer here and the retained batched layer in `mutations.rs`.
+pub(super) const SEARCH_TOOL_NAME: &str = "search_tool";
 
 /// Prune old, large tool results from the conversation in place.
 ///
 /// Turn age is estimated by walking backward through the conversation and
 /// counting `User` items to determine which "turn" each tool result belongs to.
+///
+/// # C-3 `search_tool` exemption
+///
+/// In **batched mode** (`config.batched_mode()`), a `search_tool` result is
+/// exempt from both soft-trim and hard-clear: trimming its mid-body schema list
+/// or blind-clearing it destroys the only executable payload the model has.
+/// The exemption is gated on the batched-mode flag so the flag-off build stays
+/// byte-identical to the pre-Phase-C behavior (C-6 anchor).
 pub(crate) fn prune_conversation(conversation: &mut [ConversationItem], config: &PruningConfig) {
     if !config.enabled {
         return;
     }
+
+    // R3: build the tool_call_id → name map once (only when the exemption is
+    // active) and reuse it for both the soft-trim and hard-clear branches.
+    // Owned strings: the map must outlive the mutable borrow the loop takes on
+    // `conversation`.
+    let search_tool_exempt = config.batched_mode();
+    let tool_name_by_id: std::collections::HashMap<String, String> = if search_tool_exempt {
+        let mut map = std::collections::HashMap::new();
+        for item in conversation.iter() {
+            if let ConversationItem::Assistant(a) = item {
+                for tc in &a.tool_calls {
+                    map.insert(tc.id.to_string(), tc.name.clone());
+                }
+            }
+        }
+        map
+    } else {
+        std::collections::HashMap::new()
+    };
+    let is_search_tool_result = |tool_call_id: &str| -> bool {
+        search_tool_exempt
+            && tool_name_by_id.get(tool_call_id).map(String::as_str) == Some(SEARCH_TOOL_NAME)
+    };
 
     let mut turn_from_end: usize = 0;
     let mut seen_first_user = false;
@@ -225,6 +346,11 @@ pub(crate) fn prune_conversation(conversation: &mut [ConversationItem], config: 
 
         // Never prune recent turns.
         if turn_from_end < config.keep_last_n_turns {
+            continue;
+        }
+
+        // C-3: `search_tool` results are exempt from both branches.
+        if is_search_tool_result(tool_result.tool_call_id.as_str()) {
             continue;
         }
 
@@ -598,6 +724,142 @@ mod tests {
             "re-clearing a pointer-preserving replacement must be a no-op"
         );
         assert!(is_hard_cleared(HARD_CLEAR_PLACEHOLDER));
+    }
+
+    #[test]
+    fn batch_clear_replacement_preserves_output_pointer() {
+        let content = "head [truncated: showing first/last 1 KB of 34 KB - full output at: /s/terminal/call-1.log]\n";
+        let cleared = batch_clear_replacement(content);
+        assert!(
+            cleared.starts_with(BATCH_CLEAR_PLACEHOLDER),
+            "R4/C-4: batched clear must start with the guidance placeholder, got: {cleared}"
+        );
+        assert!(
+            cleared.contains("full output at: /s/terminal/call-1.log"),
+            "R4/C-4: batched clear must preserve the spill pointer, got: {cleared}"
+        );
+        assert!(
+            is_batch_cleared(cleared.as_ref()),
+            "C-4: the pointer-preserving replacement must stay idempotent"
+        );
+    }
+
+    #[test]
+    fn batch_clear_replacement_without_pointer_is_plain_placeholder() {
+        let cleared = batch_clear_replacement("plain old tool output without pointer");
+        assert_eq!(cleared.as_ref(), BATCH_CLEAR_PLACEHOLDER);
+    }
+
+    #[test]
+    fn batch_clear_suppressed_replacement_is_terse_and_idempotent() {
+        let cleared = batch_clear_suppressed_replacement("plain old tool output");
+        assert_eq!(
+            cleared.as_ref(),
+            BATCH_CLEAR_SUPPRESSED_PLACEHOLDER,
+            "C-4 debounce: the suppressed variant must be the terse placeholder"
+        );
+        assert!(
+            is_batch_cleared(cleared.as_ref()),
+            "C-4: the suppressed variant must still match the idempotency prefix"
+        );
+        // A spill pointer, when present, is preserved on the suppressed variant too.
+        let with_ptr = batch_clear_suppressed_replacement("x full output at: /a.log y");
+        assert!(with_ptr.contains("full output at: /a.log"));
+    }
+
+    /// Assistant item carrying a single tool call (for the C-3 exemption map).
+    fn assistant_tool_call(id: &str, name: &str) -> ConversationItem {
+        ConversationItem::assistant_tool_calls(vec![cf_sampling_types::ToolCall {
+            id: std::sync::Arc::from(id),
+            name: name.to_string(),
+            arguments: std::sync::Arc::from("{}"),
+        }])
+    }
+
+    /// C-3 (batched): a `search_tool` result is exempt from **soft-trim** even
+    /// when it is large and aged past `keep_last_n_turns`, while a same-shaped
+    /// regular result is trimmed as usual. The exemption is gated on batched
+    /// mode (C-6): with the flag off it is inert.
+    #[test]
+    fn c3_search_tool_result_exempt_from_soft_trim() {
+        let config = PruningConfig {
+            enabled: true,
+            keep_last_n_turns: 0,
+            soft_trim_threshold: 10,
+            soft_trim_head: 3,
+            soft_trim_tail: 3,
+            hard_clear_age_turns: 10,
+            batched_pruning: true,
+            low_watermark_percent: Some(40),
+        };
+        let mut conv = vec![
+            assistant_tool_call("sc", SEARCH_TOOL_NAME),
+            ConversationItem::tool_result("sc", "S".repeat(100)),
+            assistant_tool_call("bc", "run_terminal_cmd"),
+            ConversationItem::tool_result("bc", "R".repeat(100)),
+        ];
+        prune_conversation(&mut conv, &config);
+
+        assert_eq!(
+            conv[1].text_content().len(),
+            100,
+            "C-3: search_tool result must NOT be soft-trimmed (batched exemption)"
+        );
+        assert!(
+            conv[3].text_content().len() < 100,
+            "C-3: a regular aged result must still be soft-trimmed (control)"
+        );
+
+        // C-6 gate: with batched mode OFF the exemption is inert — the
+        // search_tool result is trimmed exactly like any other.
+        let mut conv_off = vec![
+            assistant_tool_call("sc", SEARCH_TOOL_NAME),
+            ConversationItem::tool_result("sc", "S".repeat(100)),
+        ];
+        let config_off = PruningConfig {
+            batched_pruning: false,
+            low_watermark_percent: None,
+            ..config.clone()
+        };
+        prune_conversation(&mut conv_off, &config_off);
+        assert!(
+            conv_off[1].text_content().len() < 100,
+            "C-6: with batched mode off the search_tool result must NOT be exempt"
+        );
+    }
+
+    /// C-3 (batched): a `search_tool` result is exempt from **hard-clear** even
+    /// when aged past `hard_clear_age_turns`, while a regular aged result is
+    /// cleared.
+    #[test]
+    fn c3_search_tool_result_exempt_from_hard_clear() {
+        let config = PruningConfig {
+            enabled: true,
+            keep_last_n_turns: 0,
+            soft_trim_threshold: 4000,
+            soft_trim_head: 1500,
+            soft_trim_tail: 1500,
+            hard_clear_age_turns: 0,
+            batched_pruning: true,
+            low_watermark_percent: Some(40),
+        };
+        let mut conv = vec![
+            assistant_tool_call("sc", SEARCH_TOOL_NAME),
+            ConversationItem::tool_result("sc", "S".repeat(100)),
+            assistant_tool_call("bc", "run_terminal_cmd"),
+            ConversationItem::tool_result("bc", "R".repeat(100)),
+        ];
+        prune_conversation(&mut conv, &config);
+
+        assert_eq!(
+            conv[1].text_content(),
+            "S".repeat(100),
+            "C-3: search_tool result must NOT be hard-cleared (batched exemption)"
+        );
+        assert!(
+            is_hard_cleared(conv[3].text_content().as_str()),
+            "C-3: a regular aged result must still be hard-cleared (control)"
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Internal state types for the ChatStateActor.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cf_sampling_types::{
     ConversationItem, DanglingToolCallReason, SamplingConfig, TokenUsage,
@@ -9,6 +9,11 @@ use cf_sampling_types::{
 
 use crate::types::Credentials;
 use crate::usage::UsageLedger;
+
+/// Phase C replay-hint debounce cap (C-4): a given args fingerprint is
+/// prompted on its first [`REPLAY_PROMPT_MAX_COUNT`] replays and suppressed
+/// thereafter — "同 args 指纹第 3 次重放后不再提示" (design doc C-4).
+pub const REPLAY_PROMPT_MAX_COUNT: u8 = 3;
 
 /// Character-aware estimate of the system prompt portion of a
 /// [`ConversationItem`] — same basis as the message path
@@ -187,6 +192,21 @@ pub(crate) struct ChatState {
     /// discover harness subagents via their `<subagent_result>` footer.
     /// Drained by `TakeHarnessTraceTurns` at the end of the user-facing turn.
     pub(super) harness_trace_turns: Vec<Vec<ConversationItem>>,
+    /// Prompt index at which the last batched batch-clear fired (Phase C).
+    /// `None` = no batch clear yet this session, or the window has been
+    /// re-armed after utilization dropped below the low watermark. Used for
+    /// the C-7 hysteresis: at most one batch clear per window episode.
+    pub last_batch_clear_at: Option<usize>,
+    /// Phase C replay-hint debounce (C-4): args-fingerprint → replay count.
+    /// The soft-guidance placeholder is shown for the first
+    /// [`REPLAY_PROMPT_MAX_COUNT`] replays of a given args fingerprint and
+    /// suppressed thereafter.
+    pub replay_prompt_fingerprints: BTreeMap<u64, u8>,
+    /// Phase C Reasoning-summary table (C-1): block fingerprint → summary
+    /// text. Pre-generated asynchronously by the session layer and written via
+    /// `set_reasoning_summaries`; the batched prune only *reads* it (table hit
+    /// → replace with a synthetic sibling, miss → skip — never-bare-clear).
+    pub reasoning_summaries: crate::types::ReasoningSummaries,
 }
 
 /// Tracks which conversation items belong to the current turn without
@@ -259,7 +279,24 @@ impl ChatState {
             turn_capture: None,
             harness_trace_buffer: Vec::new(),
             harness_trace_turns: Vec::new(),
+            last_batch_clear_at: None,
+            replay_prompt_fingerprints: BTreeMap::new(),
+            reasoning_summaries: crate::types::ReasoningSummaries::new(),
         }
+    }
+
+    /// Phase C replay-hint debounce (C-4): records a replay of `fingerprint`
+    /// and reports whether the soft-guidance replay placeholder should now be
+    /// suppressed. Returns `false` (still prompt) for the first
+    /// [`REPLAY_PROMPT_MAX_COUNT`] replays and `true` (suppress) thereafter —
+    /// "同 args 指纹第 3 次重放后不再提示" (design doc C-4).
+    pub(super) fn replay_prompt_suppressed(&mut self, fingerprint: u64) -> bool {
+        let count = self
+            .replay_prompt_fingerprints
+            .entry(fingerprint)
+            .or_insert(0);
+        *count = count.saturating_add(1);
+        *count > REPLAY_PROMPT_MAX_COUNT
     }
 
     /// Seal the items accumulated since the last flush into one harness trace
@@ -520,5 +557,30 @@ mod tests {
         );
         let single = estimate_tool_definition_tokens(&a);
         assert_eq!(estimate_tool_definitions_tokens(&[a, b]), single * 2);
+    }
+
+    /// C-4 replay-hint debounce (skeleton): a given args fingerprint prompts
+    /// for the first `REPLAY_PROMPT_MAX_COUNT` replays and is suppressed from
+    /// the next one onward ("同 args 指纹第 3 次重放后不再提示").
+    #[test]
+    fn test_batched_replay_prompt_debounce_suppresses_after_third_replay() {
+        let mut state = ChatState::new(vec![], test_sampling_config());
+        // Replays 1..=3 still prompt.
+        for replay in 1..=usize::from(REPLAY_PROMPT_MAX_COUNT) {
+            assert!(
+                !state.replay_prompt_suppressed(0xC0FFEE),
+                "C-4: replay {replay} must still prompt"
+            );
+        }
+        // Replay 4 onward suppresses.
+        assert!(
+            state.replay_prompt_suppressed(0xC0FFEE),
+            "C-4: replay 4 must be suppressed (after the 3rd replay)"
+        );
+        // A different fingerprint starts fresh.
+        assert!(
+            !state.replay_prompt_suppressed(0xDEAD),
+            "C-4: a different args fingerprint must start at replay 1"
+        );
     }
 }

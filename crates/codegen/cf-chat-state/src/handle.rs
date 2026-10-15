@@ -147,6 +147,15 @@ impl ChatStateHandle {
             .send(ChatStateCommand::UpdateSamplingConfig { config });
     }
 
+    /// Phase C Reasoning-summary pre-generation write (C-1): replace the
+    /// block-fingerprint → summary table with the session layer's freshly
+    /// generated batch. Fire-and-forget, like the other mutation writes.
+    pub fn set_reasoning_summaries(&self, summaries: crate::types::ReasoningSummaries) {
+        let _ = self
+            .cmd_tx
+            .send(ChatStateCommand::SetReasoningSummaries { summaries });
+    }
+
     /// Track that the agent edited a file path.
     pub fn record_agent_edited_path(&self, path: String) {
         let _ = self
@@ -366,6 +375,39 @@ impl ChatStateHandle {
         })
         .await
         .unwrap_or(0)
+    }
+
+    /// Context-window utilization as a floored percentage (0–100+), computed
+    /// by the state layer so the pre-generation trigger (35%) and the
+    /// batched-clear trigger (40%) share one measure.
+    pub async fn get_context_utilization_percent(&self) -> u64 {
+        self.query("GetContextUtilizationPercent", |reply| {
+            ChatStateCommand::GetContextUtilizationPercent { reply }
+        })
+        .await
+        .unwrap_or(0)
+    }
+
+    /// Whether the Phase C batched pruning mode is active. Gates the
+    /// session-layer Reasoning-summary pre-generation hook.
+    pub async fn is_batched_pruning_enabled(&self) -> bool {
+        self.query("GetBatchedPruningEnabled", |reply| {
+            ChatStateCommand::GetBatchedPruningEnabled { reply }
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// The current Phase C Reasoning-summary table (block fingerprint →
+    /// summary). Read by the session layer before a pre-generation run so it
+    /// skips blocks that were already summarized (R2). Returns an empty table
+    /// if the actor channel is closed.
+    pub async fn get_reasoning_summaries(&self) -> crate::types::ReasoningSummaries {
+        self.query("GetReasoningSummaries", |reply| {
+            ChatStateCommand::GetReasoningSummaries { reply }
+        })
+        .await
+        .unwrap_or_default()
     }
 
     /// Retrieve the most recent stashed per-turn `TokenUsage`. Returns

@@ -124,6 +124,8 @@ async fn seed_pending_baseline(actor: &SessionActor) {
             Some(256_000),
             None,
             cf_tools::types::compat::CompatConfig::default(),
+            cf_tools::types::skill_discovery_tracker::SkillsMode::Full,
+            None,
         )
         .await;
 }

@@ -37,7 +37,17 @@ async fn seed_skills(actor: &SessionActor, names: &[&str]) {
         .collect();
     let bridge = actor.tool_bridge_handle();
     bridge
-        .seed_skill_discovery(None, None, skills, None, None, None, Default::default())
+        .seed_skill_discovery(
+            None,
+            None,
+            skills,
+            None,
+            None,
+            None,
+            Default::default(),
+            cf_tools::types::skill_discovery_tracker::SkillsMode::Full,
+            None,
+        )
         .await;
 }
 #[tokio::test(flavor = "current_thread")]

@@ -13,6 +13,10 @@ pub use cf_tools::implementations::skills::types::{SkillInfo, SkillScope};
 /// Re-export so agent-side discovery (and the shell) can name the resolved
 /// vendor-compat config without reaching into `cf_tools` directly.
 pub use cf_tools::types::compat::CompatConfig;
+/// Re-export the skill-listing projection mode and built-in essential
+/// allowlist (owned by `cf_tools`, where `SkillManager` lives) so config
+/// consumers can name them via `cf_agent`.
+pub use cf_tools::types::skill_discovery_tracker::{DEFAULT_ESSENTIAL_SKILLS, SkillsMode};
 
 use cf_tools::implementations::skills::discovery::{
     find_command_paths, find_skill_md_paths, find_skill_paths, is_valid_skill_name,
@@ -44,6 +48,39 @@ pub struct SkillsConfig {
     /// Launcher-injected platform bundled skill dirs (tagged `Bundled` scope).
     #[serde(default)]
     pub bundled_skill_dirs: Vec<String>,
+
+    /// Model-facing skill listing projection mode (P0-3 phase 1). `None`
+    /// (unset) resolves to the default [`SkillsMode::Essential`], which lists
+    /// only the core programming skills (see [`DEFAULT_ESSENTIAL_SKILLS`]) so
+    /// a fresh session starts cheap. Set `mode = "full"` to list every
+    /// discovered skill (historical behavior).
+    ///
+    /// Kept as `Option` so an unset mode is *omitted* from the persisted
+    /// config instead of pinned to the current default: the resolved default
+    /// lives in [`SkillsConfig::mode_or_default`], not on disk. Mirrors the
+    /// `load_envrc` precedent (`#[serde(default, skip_serializing_if = ...)]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<SkillsMode>,
+
+    /// Override for the essential allowlist (skill `name`s). `None` uses the
+    /// built-in [`DEFAULT_ESSENTIAL_SKILLS`]. Only consulted when the resolved
+    /// mode is `Essential`. `skip_serializing_if` keeps an unset allowlist out
+    /// of `config.toml` (explicit None handling, not reliant on the toml
+    /// serializer's None-skip behavior).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub essential_allow: Option<Vec<String>>,
+}
+
+impl SkillsConfig {
+    /// Resolved listing projection mode: the configured value, or
+    /// [`SkillsMode::Essential`] when unset.
+    ///
+    /// All consumers must resolve through this (never read `self.mode`
+    /// directly) so `None` and the explicitly-default `Some(Essential)` behave
+    /// identically.
+    pub fn mode_or_default(&self) -> SkillsMode {
+        self.mode.unwrap_or_default()
+    }
 }
 
 /// List all discovered skills with their metadata.
@@ -724,6 +761,27 @@ mod tests {
             "---\nname: {name}\ndescription: A test skill called {name}\n---\n\nSkill body here.\n"
         );
         fs::write(dir.join("SKILL.md"), content).unwrap();
+    }
+
+    // ── Listing projection mode (P0-3 phase 1) ───────────────────────────
+
+    #[test]
+    fn mode_or_default_resolves_unset_to_essential() {
+        let cfg = SkillsConfig::default();
+        assert!(cfg.mode.is_none(), "unset mode must stay None");
+        assert_eq!(cfg.mode_or_default(), SkillsMode::Essential);
+
+        let full = SkillsConfig {
+            mode: Some(SkillsMode::Full),
+            ..Default::default()
+        };
+        assert_eq!(full.mode_or_default(), SkillsMode::Full);
+
+        let explicit_essential = SkillsConfig {
+            mode: Some(SkillsMode::Essential),
+            ..Default::default()
+        };
+        assert_eq!(explicit_essential.mode_or_default(), SkillsMode::Essential);
     }
 
     // ── Server-synced skills (injected server_skill_dirs) ────────────────
@@ -1792,6 +1850,7 @@ mod tests {
             disabled: vec![],
             server_skill_dirs: vec![],
             bundled_skill_dirs: vec![],
+            ..Default::default()
         };
 
         let skills = list_skills(
@@ -1825,6 +1884,7 @@ mod tests {
             disabled: vec![],
             server_skill_dirs: vec![],
             bundled_skill_dirs: vec![],
+            ..Default::default()
         };
 
         let skills = list_skills(
@@ -1865,6 +1925,7 @@ mod tests {
             disabled: vec![],
             server_skill_dirs: vec![],
             bundled_skill_dirs: vec![],
+            ..Default::default()
         };
 
         let skills = list_skills(
@@ -1988,6 +2049,7 @@ mod tests {
             disabled: vec![],
             server_skill_dirs: vec![],
             bundled_skill_dirs: vec![],
+            ..Default::default()
         };
 
         let skills = list_skills(
@@ -2040,6 +2102,7 @@ mod tests {
             disabled: vec!["commit".to_string()],
             server_skill_dirs: vec![],
             bundled_skill_dirs: vec![],
+            ..Default::default()
         };
         let skills = list_skills(
             Some(repo_root.to_str().unwrap()),
@@ -2084,6 +2147,7 @@ mod tests {
             disabled: vec![],
             server_skill_dirs: vec![],
             bundled_skill_dirs: vec![],
+            ..Default::default()
         };
         let skills = list_skills(
             Some(repo_root.to_str().unwrap()),

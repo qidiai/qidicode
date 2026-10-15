@@ -37,6 +37,9 @@ pub mod usage;
 
 // Re-export main types for convenience
 pub use actor::ChatStateActor;
+pub use actor::reasoning_summary::{
+    reasoning_block_fingerprint, rule_extract_summary, subset_check,
+};
 pub use actor::state::{
     estimate_conversation_tokens, estimate_item_tokens, estimate_messages_tokens,
     estimate_system_message_tokens, estimate_tool_definition_tokens,

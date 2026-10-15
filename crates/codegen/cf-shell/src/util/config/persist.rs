@@ -1015,6 +1015,68 @@ auto_update = true
     }
 
     #[test]
+    fn merge_section_skills_mode_none_does_not_serialize() {
+        // P0-3 phase 1: an unset `[skills].mode` / `essential_allow` must not
+        // be pinned into config.toml — the resolved default (Essential) lives
+        // in `SkillsConfig::mode_or_default`, not on disk.
+        let mut table = TomlMap::new();
+        let cfg = cf_agent::prompt::skills::SkillsConfig::default();
+        assert!(cfg.mode.is_none());
+        assert!(cfg.essential_allow.is_none());
+        merge_section(&mut table, "skills", &cfg);
+
+        if let Some(s) = table.get("skills").and_then(|v| v.as_table()) {
+            assert!(
+                s.get("mode").is_none(),
+                "unset mode must not serialize into [skills]"
+            );
+            assert!(
+                s.get("essential_allow").is_none(),
+                "unset essential_allow must not serialize into [skills]"
+            );
+        }
+    }
+
+    #[test]
+    fn merge_section_skills_full_mode_writes_mode_key() {
+        let mut table = TomlMap::new();
+        let cfg = cf_agent::prompt::skills::SkillsConfig {
+            mode: Some(cf_agent::prompt::skills::SkillsMode::Full),
+            ..Default::default()
+        };
+        merge_section(&mut table, "skills", &cfg);
+        let s = table.get("skills").unwrap().as_table().unwrap();
+        assert_eq!(
+            s.get("mode").and_then(|v| v.as_str()),
+            Some("full"),
+            "Some(Full) must round-trip to `[skills].mode = \"full\"`"
+        );
+        assert!(
+            s.get("essential_allow").is_none(),
+            "still-unset essential_allow must not serialize alongside mode"
+        );
+    }
+
+    #[test]
+    fn skills_config_mode_deserializes_and_defaults_to_none() {
+        use cf_agent::prompt::skills::{SkillsConfig, SkillsMode};
+
+        // Missing `mode` deserializes to None and resolves to Essential.
+        let cfg: SkillsConfig = toml::from_str("paths = []\n").unwrap();
+        assert!(cfg.mode.is_none(), "absent mode must deserialize to None");
+        assert_eq!(cfg.mode_or_default(), SkillsMode::Essential);
+
+        // An explicit `mode` round-trips through toml.
+        let cfg: SkillsConfig = toml::from_str("mode = \"full\"\n").unwrap();
+        assert_eq!(cfg.mode, Some(SkillsMode::Full));
+        assert_eq!(cfg.mode_or_default(), SkillsMode::Full);
+
+        let cfg: SkillsConfig = toml::from_str("mode = \"essential\"\n").unwrap();
+        assert_eq!(cfg.mode, Some(SkillsMode::Essential));
+        assert_eq!(cfg.mode_or_default(), SkillsMode::Essential);
+    }
+
+    #[test]
     fn merge_section_cli_session_picker_grouped_writes_under_cli_section() {
         let mut table = TomlMap::new();
         let cfg = crate::agent::config::CliConfig {

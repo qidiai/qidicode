@@ -276,6 +276,12 @@ impl UserMessageContext {
         }
     }
     /// Render the skill list as `<agent_skill>` XML rows.
+    ///
+    /// TODO(P0-3 phase 2): this custom-template (XML) harness is intentionally
+    /// NOT projected by the essential-skill allowlist yet. Phase 1 applies the
+    /// projection only to the default markdown listing path
+    /// (`SkillManager::render_listing`). When phase 2 lands, thread the
+    /// resolved allowlist here and filter `self.skills` before rendering.
     pub fn render_skill_listing_xml(&self) -> Option<String> {
         if self.skills.is_empty() {
             return None;

@@ -310,6 +310,7 @@ mod tests {
             disabled: vec![],
             server_skill_dirs: vec![],
             bundled_skill_dirs: vec![],
+            ..Default::default()
         };
         let skills = discover_skills(tmp.path(), &config).await;
         let found = skills.iter().any(|s| s["name"].as_str() == Some("ignored"));

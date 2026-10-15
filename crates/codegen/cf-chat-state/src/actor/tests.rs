@@ -3023,6 +3023,32 @@ async fn push_turns(handle: &crate::handle::ChatStateHandle, turns: usize, conte
     let _ = handle.get_conversation_len().await;
 }
 
+/// Helper for the Phase C batched tests: push one complete turn (user +
+/// plain assistant + tool result), recording the given total token usage
+/// *first* so the prune that fires inside `push_user_message` sees this turn's
+/// utilization.
+async fn push_batched_plain_turn(
+    handle: &crate::handle::ChatStateHandle,
+    index: usize,
+    total_tokens: u64,
+    content_len: usize,
+) {
+    handle.record_token_usage(total_tokens);
+    // R6: mirror the production turn order — `increment_prompt_index` runs
+    // BEFORE the user message is pushed (`turn.rs:466`), so the prune that
+    // fires inside `push_user_message` sees the same `prompt_index` it does
+    // live (and the synthetic-User compensation stays exact).
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user(format!("q{index}")));
+    handle.push_assistant_response(ConversationItem::assistant(format!("a{index}")));
+    handle.push_tool_result(ConversationItem::tool_result(
+        format!("call_{index}"),
+        "x".repeat(content_len),
+    ));
+    // Sync point
+    let _ = handle.get_conversation_len().await;
+}
+
 /// After fewer turns than `hard_clear_age_turns` the retained conversation
 /// must not be touched (fast-exit path).
 #[tokio::test]
@@ -3354,6 +3380,591 @@ async fn prune_retained_synthetic_user_does_not_advance_age() {
                 "tool result must NOT be cleared: oldest is only 3 real turns old \
                  (threshold is 5), synthetic user injections must not advance age"
             );
+        }
+    }
+}
+
+// ============================================================================
+// Phase C batched-pruning tests (P0-2)
+// ============================================================================
+
+/// C-2 (design doc Phase C): within a batch window (below the low watermark)
+/// the retained layer only grows at the tail — existing items' rendered bytes
+/// are never retroactively rewritten (prefix-growth) — and the trigger turn
+/// batch-clears all eligible old tool results in a single pass.
+#[tokio::test]
+async fn test_batched_window_prefix_growth_and_single_trigger_batch() {
+    use crate::actor::ChatStateActor;
+    use crate::persistence::MockChatPersistence;
+    use crate::types::PruningConfig;
+
+    let (mock, _rx) = MockChatPersistence::new();
+    let (event_tx, _) = tokio::sync::mpsc::unbounded_channel();
+    let token = tokio_util::sync::CancellationToken::new();
+    let config = PruningConfig {
+        hard_clear_age_turns: 3,
+        keep_last_n_turns: 1,
+        batched_pruning: true,
+        low_watermark_percent: Some(40),
+        ..Default::default()
+    };
+    let handle = ChatStateActor::spawn_with_pruning(
+        vec![],
+        test_config(),
+        config,
+        Box::new(mock),
+        event_tx,
+        token,
+    );
+
+    // Phase 1: window turns below the 40% watermark — no batch clear, pure
+    // tail growth. 30_000 tokens ≈ 23% of the 128_000 context window.
+    let mut prev: Vec<Vec<u8>> = Vec::new();
+    for t in 0..6usize {
+        push_batched_plain_turn(&handle, t, 30_000, 5_000).await;
+        let conv = handle.get_conversation().await;
+        for (i, prior_bytes) in prev.iter().enumerate() {
+            assert_eq!(
+                serde_json::to_vec(&conv[i]).unwrap(),
+                *prior_bytes,
+                "C-2 prefix-growth: item {i} must not be rewritten within the batch window"
+            );
+        }
+        assert!(
+            conv.len() >= prev.len(),
+            "C-2 prefix-growth: tail must only grow ({} → {})",
+            prev.len(),
+            conv.len()
+        );
+        prev = conv
+            .iter()
+            .map(|item| serde_json::to_vec(item).unwrap())
+            .collect();
+    }
+
+    // Phase 2: cross the low watermark (55_000 ≈ 43%) → one batch clear of
+    // tool results aged >= hard_clear_age_turns (turns 0..=2), keeping the
+    // most recent turn's result (keep_last_n_turns = 1).
+    handle.record_token_usage(55_000);
+    // R6: production order — increment before the turn's user message.
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q6"));
+    let conv = handle.get_conversation().await;
+
+    // Item layout per turn k: [User, Assistant, ToolResult] at 3k, 3k+1, 3k+2.
+    for turn in 0..3usize {
+        let idx = turn * 3 + 2;
+        match &conv[idx] {
+            ConversationItem::ToolResult(tr) => assert_eq!(
+                tr.content.as_ref(),
+                "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]",
+                "C-2 trigger turn: tool result of turn {turn} must be batch-cleared once"
+            ),
+            other => panic!("expected ToolResult at index {idx}, got {other:?}"),
+        }
+    }
+    // Recent turns (3, 4, 5) stay intact.
+    for turn in 3..6usize {
+        let idx = turn * 3 + 2;
+        match &conv[idx] {
+            ConversationItem::ToolResult(tr) => assert_eq!(
+                tr.content.len(),
+                5_000,
+                "C-2 trigger turn: recent turn {turn} tool result must NOT be cleared"
+            ),
+            other => panic!("expected ToolResult at index {idx}, got {other:?}"),
+        }
+    }
+}
+
+/// C-3 禁区: the most recent `keep_last_n_turns` turns are never batch-cleared,
+/// even when a batch window fires. `hard_clear_age_turns = 1` with
+/// `keep_last_n_turns = 3` makes the `keep_last_n_turns` guard the *only*
+/// reason the third-from-last result survives (it is already aged past the
+/// hard-clear line), so the assertion exercises that branch uniquely rather
+/// than being trivially satisfied by the age gate.
+#[tokio::test]
+async fn test_batched_keep_last_n_turns_never_batch_cleared() {
+    use crate::actor::ChatStateActor;
+    use crate::persistence::MockChatPersistence;
+    use crate::types::PruningConfig;
+
+    let (mock, _rx) = MockChatPersistence::new();
+    let (event_tx, _) = tokio::sync::mpsc::unbounded_channel();
+    let token = tokio_util::sync::CancellationToken::new();
+    let config = PruningConfig {
+        hard_clear_age_turns: 1,
+        keep_last_n_turns: 3,
+        batched_pruning: true,
+        low_watermark_percent: Some(40),
+        ..Default::default()
+    };
+    let handle = ChatStateActor::spawn_with_pruning(
+        vec![],
+        test_config(),
+        config,
+        Box::new(mock),
+        event_tx,
+        token,
+    );
+
+    for t in 0..5usize {
+        push_batched_plain_turn(&handle, t, 30_000, 5_000).await;
+    }
+
+    handle.record_token_usage(55_000);
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q5"));
+    let conv = handle.get_conversation().await;
+
+    // Layout: [U0,A0,TR0, U1,A1,TR1, U2,A2,TR2, U3,A3,TR3, U4,A4,TR4, U5].
+    // TR2 (index 8) has turn_from_end = 2 — *aged past* hard_clear_age_turns(1),
+    // so only keep_last_n_turns(3) can protect it.
+    match &conv[8] {
+        ConversationItem::ToolResult(tr) => assert_eq!(
+            tr.content.len(),
+            5_000,
+            "C-3: a result inside keep_last_n_turns must never be batch-cleared \
+             (only this guard can protect it here)"
+        ),
+        other => panic!("expected ToolResult at 8, got {other:?}"),
+    }
+    // TR1 (index 5, turn_from_end = 3) and TR0 (index 2, turn_from_end = 4) are
+    // outside keep_last_n_turns and aged → cleared (window demonstrably fired).
+    for (idx, label) in [(5usize, "TR1"), (2usize, "TR0")] {
+        match &conv[idx] {
+            ConversationItem::ToolResult(tr) => assert_eq!(
+                tr.content.as_ref(),
+                "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]",
+                "C-3: aged {label} outside keep_last_n_turns must be batch-cleared"
+            ),
+            other => panic!("expected ToolResult at {idx}, got {other:?}"),
+        }
+    }
+}
+
+/// C-3 禁区: a `search_tool` tool_result is exempt by tool name — even when
+/// aged past the threshold and inside a fired batch window, it is never
+/// batch-cleared, while a same-aged regular tool result is cleared.
+#[tokio::test]
+async fn test_batched_search_tool_result_is_exempt() {
+    use crate::actor::ChatStateActor;
+    use crate::persistence::MockChatPersistence;
+    use crate::types::PruningConfig;
+    use std::sync::Arc;
+
+    let (mock, _rx) = MockChatPersistence::new();
+    let (event_tx, _) = tokio::sync::mpsc::unbounded_channel();
+    let token = tokio_util::sync::CancellationToken::new();
+    let config = PruningConfig {
+        hard_clear_age_turns: 1,
+        keep_last_n_turns: 1,
+        batched_pruning: true,
+        low_watermark_percent: Some(40),
+        ..Default::default()
+    };
+    let handle = ChatStateActor::spawn_with_pruning(
+        vec![],
+        test_config(),
+        config,
+        Box::new(mock),
+        event_tx,
+        token,
+    );
+
+    // Turn 0: regular tool (bash) → will be cleared.
+    handle.record_token_usage(30_000);
+    handle.push_user_message(ConversationItem::user("q0"));
+    handle.increment_prompt_index();
+    handle.push_assistant_response(ConversationItem::assistant_tool_calls(vec![
+        cf_sampling_types::ToolCall {
+            id: Arc::from("call_0"),
+            name: "bash".to_string(),
+            arguments: Arc::from("{}"),
+        },
+    ]));
+    handle.push_tool_result(ConversationItem::tool_result("call_0", "regular output"));
+
+    // Turn 1: search_tool → must be exempt.
+    handle.record_token_usage(30_000);
+    handle.push_user_message(ConversationItem::user("q1"));
+    handle.increment_prompt_index();
+    handle.push_assistant_response(ConversationItem::assistant_tool_calls(vec![
+        cf_sampling_types::ToolCall {
+            id: Arc::from("search_call_1"),
+            name: "search_tool".to_string(),
+            arguments: Arc::from("{}"),
+        },
+    ]));
+    handle.push_tool_result(ConversationItem::tool_result("search_call_1", "search result"));
+
+    // Turn 2: regular tool (recent, keep_last_n_turns).
+    handle.record_token_usage(30_000);
+    handle.push_user_message(ConversationItem::user("q2"));
+    handle.increment_prompt_index();
+    handle.push_assistant_response(ConversationItem::assistant_tool_calls(vec![
+        cf_sampling_types::ToolCall {
+            id: Arc::from("call_2"),
+            name: "bash".to_string(),
+            arguments: Arc::from("{}"),
+        },
+    ]));
+    handle.push_tool_result(ConversationItem::tool_result("call_2", "recent output"));
+
+    // Trigger turn: cross the watermark.
+    handle.record_token_usage(55_000);
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q3"));
+    let conv = handle.get_conversation().await;
+
+    // Layout: [U0,A0,TR0, U1,A1,TR1, U2,A2,TR2, U3].
+    // TR0 (index 2): regular, aged → cleared.
+    match &conv[2] {
+        ConversationItem::ToolResult(tr) => assert_eq!(
+            tr.content.as_ref(),
+            "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]",
+            "C-3: regular aged tool result must be batch-cleared"
+        ),
+        other => panic!("expected ToolResult at 2, got {other:?}"),
+    }
+    // TR1 (index 5): search_tool → exempt.
+    match &conv[5] {
+        ConversationItem::ToolResult(tr) => assert_eq!(
+            tr.content.as_ref(),
+            "search result",
+            "C-3: search_tool tool_result must be exempt from batch clear"
+        ),
+        other => panic!("expected ToolResult at 5, got {other:?}"),
+    }
+    // TR2 (index 8): recent regular → keep_last_n_turns.
+    match &conv[8] {
+        ConversationItem::ToolResult(tr) => assert_eq!(
+            tr.content.as_ref(),
+            "recent output",
+            "C-3: recent tool result must be exempt (keep_last_n_turns)"
+        ),
+        other => panic!("expected ToolResult at 8, got {other:?}"),
+    }
+}
+
+/// C-6 flag-off anchor: with `batched_pruning = false` the retained layer is
+/// byte-identical to the pre-Phase-C per-turn build — old tool results are
+/// hard-cleared with the legacy placeholder, never the batched soft-guidance
+/// placeholder.
+#[tokio::test]
+async fn test_batched_flag_off_is_byte_identical_to_per_turn() {
+    use crate::actor::ChatStateActor;
+    use crate::persistence::MockChatPersistence;
+    use crate::types::PruningConfig;
+
+    let (mock, _rx) = MockChatPersistence::new();
+    let (event_tx, _) = tokio::sync::mpsc::unbounded_channel();
+    let token = tokio_util::sync::CancellationToken::new();
+    // Explicitly off: flag false, watermark unset.
+    let config = PruningConfig {
+        hard_clear_age_turns: 3,
+        keep_last_n_turns: 1,
+        batched_pruning: false,
+        low_watermark_percent: None,
+        ..Default::default()
+    };
+    let handle = ChatStateActor::spawn_with_pruning(
+        vec![],
+        test_config(),
+        config,
+        Box::new(mock),
+        event_tx,
+        token,
+    );
+
+    // Even with high utilization the per-turn path hard-clears every turn.
+    for t in 0..5usize {
+        push_batched_plain_turn(&handle, t, 60_000, 5_000).await;
+    }
+    let conv = handle.get_conversation().await;
+
+    // Turn 0's tool result (index 2) must be hard-cleared with the LEGACY
+    // placeholder, not the batched one.
+    match &conv[2] {
+        ConversationItem::ToolResult(tr) => {
+            assert_eq!(
+                tr.content.as_ref(),
+                "[Tool result omitted — too old]",
+                "C-6: flag off must use the legacy hard-clear placeholder"
+            );
+            assert_ne!(
+                tr.content.as_ref(),
+                "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]",
+                "C-6: flag off must never use the batched soft-guidance placeholder"
+            );
+        }
+        other => panic!("expected ToolResult at 2, got {other:?}"),
+    }
+}
+
+// ============================================================================
+// Phase C Reasoning-summary channel tests (batch 2)
+// ============================================================================
+
+/// Spawn a batched-pruning harness with a custom config (shared by the
+/// Reasoning-summary channel tests).
+async fn spawn_batched_handle(
+    config: crate::types::PruningConfig,
+) -> crate::handle::ChatStateHandle {
+    let (mock, _rx) = crate::persistence::MockChatPersistence::new();
+    let (event_tx, _) = mpsc::unbounded_channel();
+    let token = tokio_util::sync::CancellationToken::new();
+    crate::actor::ChatStateActor::spawn_with_pruning(
+        vec![],
+        test_config(),
+        config,
+        Box::new(mock),
+        event_tx,
+        token,
+    )
+}
+
+/// Batched config tuned for the Reasoning tests: 1-turn age gate, no
+/// keep_last_n_turns, 40% low watermark.
+fn batched_reasoning_config() -> crate::types::PruningConfig {
+    crate::types::PruningConfig {
+        hard_clear_age_turns: 1,
+        keep_last_n_turns: 0,
+        batched_pruning: true,
+        low_watermark_percent: Some(40),
+        ..Default::default()
+    }
+}
+
+/// Extract the visible text of a Reasoning conversation item.
+fn reasoning_text(item: &ConversationItem) -> String {
+    match item {
+        ConversationItem::Reasoning(r) => cf_sampling_types::reasoning_item_text(r),
+        other => panic!("expected Reasoning item, got {other:?}"),
+    }
+}
+
+/// C-1b ① (table hit): a non-encrypted Reasoning block aged past the gate and
+/// whose fingerprint is present in the pre-generated table is replaced with a
+/// **visible-text `Assistant` sibling** — never a `Reasoning` item.
+#[tokio::test]
+async fn test_reasoning_table_hit_replaces_with_visible_text_sibling() {
+    let handle = spawn_batched_handle(batched_reasoning_config()).await;
+
+    let block = reasoning_sibling("r1", None);
+    let text = reasoning_text(&block);
+    let fp = crate::reasoning_block_fingerprint(&text);
+    handle.push_assistant_response(block);
+    // R5: age the block past the C-1b age gate with one filler turn.
+    push_batched_plain_turn(&handle, 0, 30_000, 6).await;
+
+    let mut table = crate::types::ReasoningSummaries::new();
+    table.insert(fp, "摘要文本".to_string());
+    handle.set_reasoning_summaries(table);
+
+    handle.record_token_usage(55_000);
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q1"));
+
+    let conv = handle.get_conversation().await;
+    match &conv[0] {
+        ConversationItem::Assistant(a) => {
+            assert!(
+                a.content.contains("摘要文本"),
+                "C-1: table hit must replace the block with a visible-text sibling \
+                 carrying the summary, got: {}",
+                a.content
+            );
+            assert!(
+                a.content.starts_with("[reasoning summary]"),
+                "C-1: the sibling must carry the [reasoning summary] marker, got: {}",
+                a.content
+            );
+        }
+        other => {
+            panic!("C-1: expected Assistant (visible-text sibling) at index 0, got {other:?}")
+        }
+    }
+}
+
+/// C-1b ②: an encrypted Reasoning block is skipped wholesale even when a table
+/// entry would otherwise match (and even though it is aged past the gate) — the
+/// skip happens before the fingerprint lookup.
+#[tokio::test]
+async fn test_reasoning_encrypted_block_is_never_cleared() {
+    let handle = spawn_batched_handle(batched_reasoning_config()).await;
+
+    let block = reasoning_sibling("r_enc", Some("enc-blob"));
+    let text = reasoning_text(&block);
+    let fp = crate::reasoning_block_fingerprint(&text);
+    handle.push_assistant_response(block);
+    push_batched_plain_turn(&handle, 0, 30_000, 6).await;
+
+    let mut table = crate::types::ReasoningSummaries::new();
+    table.insert(fp, "不应出现".to_string());
+    handle.set_reasoning_summaries(table);
+
+    handle.record_token_usage(55_000);
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q1"));
+
+    let conv = handle.get_conversation().await;
+    match &conv[0] {
+        ConversationItem::Reasoning(r) => {
+            assert_eq!(
+                r.encrypted_content.as_deref(),
+                Some("enc-blob"),
+                "C-1b ②: encrypted block must be untouched (never cleared)"
+            );
+        }
+        other => panic!("C-1b ②: expected Reasoning at index 0, got {other:?}"),
+    }
+}
+
+/// C-1b ① (table miss): a non-encrypted Reasoning block with no table entry is
+/// left unchanged (never-bare-clear), even when aged past the gate.
+#[tokio::test]
+async fn test_reasoning_table_miss_skips_block() {
+    let handle = spawn_batched_handle(batched_reasoning_config()).await;
+
+    let block = reasoning_sibling("r_miss", None);
+    handle.push_assistant_response(block);
+    push_batched_plain_turn(&handle, 0, 30_000, 6).await;
+
+    // No table entry — leave the table empty.
+    handle.set_reasoning_summaries(crate::types::ReasoningSummaries::new());
+
+    handle.record_token_usage(55_000);
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q1"));
+
+    let conv = handle.get_conversation().await;
+    assert_eq!(
+        reasoning_text(&conv[0]),
+        "thinking for r_miss",
+        "C-1b ①: table miss must leave the block unchanged (never-bare-clear)"
+    );
+}
+
+/// Idempotency: after a block is replaced with its visible-text sibling, a
+/// second batch window (re-armed and re-fired) must not re-modify it — the
+/// sibling is an `Assistant` item, so the Reasoning scan never collects it, and
+/// its fingerprint is never inserted into the dynamically rebuilt table.
+#[tokio::test]
+async fn test_reasoning_replacement_is_idempotent() {
+    let handle = spawn_batched_handle(batched_reasoning_config()).await;
+
+    let block = reasoning_sibling("r1", None);
+    let text = reasoning_text(&block);
+    let fp = crate::reasoning_block_fingerprint(&text);
+    handle.push_assistant_response(block);
+    push_batched_plain_turn(&handle, 0, 30_000, 6).await;
+
+    let mut table = crate::types::ReasoningSummaries::new();
+    table.insert(fp, "摘要文本".to_string());
+    handle.set_reasoning_summaries(table);
+
+    // First batch clear.
+    handle.record_token_usage(55_000);
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q1"));
+
+    let conv = handle.get_conversation().await;
+    let first = match &conv[0] {
+        ConversationItem::Assistant(a) => a.content.to_string(),
+        other => {
+            panic!("C-1: first window must replace with a visible-text sibling, got {other:?}")
+        }
+    };
+    assert!(
+        first.contains("摘要文本"),
+        "C-1: first window must carry the summary, got: {first}"
+    );
+
+    // Re-arm the window (drop below the low watermark) then re-fire.
+    handle.record_token_usage(30_000);
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q2"));
+    handle.record_token_usage(55_000);
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q3"));
+
+    let conv2 = handle.get_conversation().await;
+    let second = match &conv2[0] {
+        ConversationItem::Assistant(a) => a.content.to_string(),
+        other => panic!("C-1 idempotency: sibling must stay an Assistant, got {other:?}"),
+    };
+    assert_eq!(
+        second, first,
+        "C-1 idempotency: the second window must not re-modify the sibling"
+    );
+    assert_eq!(
+        second.matches("[reasoning summary]").count(),
+        1,
+        "C-1 idempotency: the sibling must not be double-wrapped across windows"
+    );
+    // Production dynamic table: the sibling is an Assistant, not a Reasoning
+    // block, so the rebuilt table never carries its fingerprint.
+    let table_now = handle.get_reasoning_summaries().await;
+    assert!(
+        !table_now.contains_key(&crate::reasoning_block_fingerprint(&second)),
+        "C-1 idempotency: the sibling's fingerprint must not be in the dynamic table"
+    );
+}
+
+/// C-4 debounce: after the same tool call (name+args fingerprint) has been
+/// batch-cleared `REPLAY_PROMPT_MAX_COUNT` times, the recovery guidance is
+/// dropped (terse placeholder). Exercises the `replay_prompt_suppressed`
+/// wiring in `prune_retained_batched` (dead-code guard).
+#[tokio::test]
+async fn test_batched_replay_prompt_debounce_suppresses_after_threshold() {
+    use crate::actor::state::REPLAY_PROMPT_MAX_COUNT;
+    use std::sync::Arc;
+
+    let handle = spawn_batched_handle(batched_reasoning_config()).await;
+    // One more turn than the prompt cap so the debounce trip is observable.
+    let turns = usize::from(REPLAY_PROMPT_MAX_COUNT) + 2; // 5
+    for t in 0..turns {
+        handle.record_token_usage(30_000);
+        handle.increment_prompt_index();
+        handle.push_user_message(ConversationItem::user(format!("q{t}")));
+        handle.push_assistant_response(ConversationItem::assistant_tool_calls(vec![
+            cf_sampling_types::ToolCall {
+                id: Arc::from(format!("call_{t}")),
+                name: "run_terminal_cmd".to_string(),
+                // Identical args every turn → one shared debounce fingerprint.
+                arguments: Arc::from("{\"cmd\":\"ls -la\"}"),
+            },
+        ]));
+        handle.push_tool_result(ConversationItem::tool_result(
+            format!("call_{t}"),
+            "x".repeat(16),
+        ));
+    }
+    // Trigger a batch clear above the low watermark.
+    handle.record_token_usage(55_000);
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("qtrig"));
+    let conv = handle.get_conversation().await;
+
+    // Layout per turn t: [U_t, A_t, TR_t] at 3t, 3t+1, 3t+2; trigger U at 15.
+    // Aged results (turns 0..=3) clear; the newest eligible is scanned first,
+    // so TR0 (oldest, 4th clear) is the one past the debounce cap.
+    let full = "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]";
+    let terse = "[tool result aged]";
+    for (idx, label, want) in [
+        (11usize, "TR3", full),
+        (8usize, "TR2", full),
+        (5usize, "TR1", full),
+        (2usize, "TR0", terse),
+    ] {
+        match &conv[idx] {
+            ConversationItem::ToolResult(tr) => assert_eq!(
+                tr.content.as_ref(),
+                want,
+                "C-4 debounce: {label} at index {idx} must be '{want}'"
+            ),
+            other => panic!("expected ToolResult at {idx}, got {other:?}"),
         }
     }
 }

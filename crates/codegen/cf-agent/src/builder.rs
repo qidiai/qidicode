@@ -1140,6 +1140,8 @@ impl AgentBuilder {
                     self.context_window_tokens,
                     skill_budget_percent,
                     self.compat,
+                    self.skills_config.mode_or_default(),
+                    self.skills_config.essential_allow.clone(),
                 )
                 .await;
         }

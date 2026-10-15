@@ -22,6 +22,28 @@ fn item_kind_str(item: &ConversationItem) -> &'static str {
     }
 }
 
+/// Marker prefix for a synthesized visible-text (C-1) Reasoning-summary
+/// sibling. The sibling is rendered as an `Assistant` text item — never a
+/// `Reasoning` item, since some providers drop `reasoning_content` wholesale
+/// (design doc C-1, haiku-4.5 实锤).
+const REASONING_SUMMARY_SIBLING_PREFIX: &str = "[reasoning summary] ";
+
+/// Render the visible-text sibling body for a Reasoning block's summary.
+fn reasoning_summary_sibling_text(summary: &str) -> String {
+    format!("{REASONING_SUMMARY_SIBLING_PREFIX}{summary}")
+}
+
+/// Args fingerprint for the C-4 replay debounce: a tool call's identity as the
+/// model issued it (name + arguments), so repeated re-runs of the same call
+/// share one debounce counter.
+fn replay_args_fingerprint(name: &str, args: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    name.hash(&mut hasher);
+    args.hash(&mut hasher);
+    hasher.finish()
+}
+
 impl ChatStateActor {
     /// Repair any dangling tool calls in the conversation and persist the fix.
     ///
@@ -206,6 +228,12 @@ impl ChatStateActor {
         if !self.pruning_config.enabled {
             return 0;
         }
+        // Phase C batched mode (C-6): route to the low-watermark batch clear.
+        // When the flag is off this branch is never taken, so the per-turn
+        // path below is byte-identical to the pre-Phase-C build.
+        if self.pruning_config.batched_mode() {
+            return self.prune_retained_batched();
+        }
         // Fast exit: not enough turns have elapsed for any hard-clear to apply.
         if self.state.prompt_index < self.pruning_config.hard_clear_age_turns {
             return 0;
@@ -270,6 +298,208 @@ impl ChatStateActor {
                 bytes_freed = before_bytes.saturating_sub(after_bytes),
                 conversation_len = self.state.conversation.len(),
                 "ChatState: in-memory tool-result prune"
+            );
+            self.persistence.replace_history(&self.state.conversation);
+        }
+
+        cleared
+    }
+
+    /// Low-watermark batch clear for the batched pruning mode (Phase C, C-1/C-2).
+    ///
+    /// Unlike the per-turn path, this does **not** hard-clear old tool results
+    /// on every turn. It fires a single batch clear only when context
+    /// utilization enters `[low_watermark, 50%)` (see
+    /// `super::request_builder::should_batch_prune`), clearing every
+    /// `ToolResult` aged ≥ `hard_clear_age_turns` in one pass, then closes the
+    /// window (`last_batch_clear_at` = current prompt index) so no further
+    /// change occurs until utilization drops back below the low watermark and
+    /// re-crosses it (C-7 hysteresis). Between windows the retained layer is
+    /// inert — the foundation of the C-2 prefix-growth invariant.
+    ///
+    /// # C-3 exclusions (never batch-cleared)
+    /// - tool results in the last `keep_last_n_turns` turns (the first result
+    ///   batch after the last real user query);
+    /// - `search_tool` tool results (exempt by tool name).
+    ///
+    /// # Clearing rules
+    /// - `ToolResult` content is batch-cleared with the soft-guidance
+    ///   placeholder (idempotent across windows; spill pointers preserved).
+    /// - `Reasoning` is replaced with a synthesized **visible-text `Assistant`
+    ///   sibling** (carrying the `[reasoning summary]` marker) **only when**
+    ///   the block is old enough AND its content fingerprint is present in the
+    ///   pre-generated `reasoning_summaries` table: encrypted blocks are
+    ///   skipped wholesale, and a table miss leaves the block untouched
+    ///   (C-1b never-bare-clear). The sibling is never a `Reasoning` item
+    ///   (C-1: some providers drop `reasoning_content`).
+    fn prune_retained_batched(&mut self) -> usize {
+        // Fast exit: not enough turns have elapsed for any clear to apply.
+        if self.state.prompt_index < self.pruning_config.hard_clear_age_turns {
+            return 0;
+        }
+
+        let watermark = self.pruning_config.effective_low_watermark_percent();
+        let utilization_percent = super::request_builder::context_utilization_percent(
+            self.state.total_tokens,
+            self.state.sampling_config.context_window,
+        );
+
+        // Below the low watermark (reclaim line): re-arm the window and leave
+        // the retained layer untouched. This is the hysteresis de-assert — the
+        // window only reopens after a batch clear once utilization drops back
+        // under the line (C-7 "触发线/回收线分离").
+        if utilization_percent < u64::from(watermark) {
+            self.state.last_batch_clear_at = None;
+            return 0;
+        }
+        // Above the high-water mark the API-copy layer owns the conversation;
+        // the retained layer stays inert here.
+        if !super::request_builder::should_batch_prune(
+            self.state.total_tokens,
+            self.state.sampling_config.context_window,
+            watermark,
+        ) {
+            return 0;
+        }
+        // Hysteresis window: a batch clear already fired for this window
+        // episode (the utilization drop that would re-arm us has not happened).
+        if self.state.last_batch_clear_at.is_some() {
+            return 0;
+        }
+
+        // Same synthetic-User compensation as the per-turn path: a synthetic
+        // User item must not make a tool result look older than it really is.
+        let total_user_items = self
+            .state
+            .conversation
+            .iter()
+            .filter(|i| matches!(i, ConversationItem::User(_)))
+            .count();
+        let synthetic_count = total_user_items.saturating_sub(self.state.prompt_index);
+        let effective_threshold = self
+            .pruning_config
+            .hard_clear_age_turns
+            .saturating_add(synthetic_count);
+
+        // Tool-call id → (name, args) map so the C-3 `search_tool` exemption
+        // and the C-4 replay debounce can look up each result's originating
+        // call.
+        let mut tool_call_by_id: std::collections::HashMap<String, (String, String)> =
+            std::collections::HashMap::new();
+        for item in &self.state.conversation {
+            if let ConversationItem::Assistant(a) = item {
+                for tc in &a.tool_calls {
+                    tool_call_by_id.insert(
+                        tc.id.to_string(),
+                        (tc.name.clone(), tc.arguments.to_string()),
+                    );
+                }
+            }
+        }
+
+        let before_bytes = self.conversation_content_bytes();
+        let mut cleared = 0usize;
+        let mut turn_from_end: usize = 0;
+        let mut seen_first_user = false;
+
+        for i in (0..self.state.conversation.len()).rev() {
+            if matches!(&self.state.conversation[i], ConversationItem::User(_)) {
+                if seen_first_user {
+                    turn_from_end += 1;
+                }
+                seen_first_user = true;
+                continue;
+            }
+
+            // Reasoning branch (C-1b): the summary channel. Encrypted blocks
+            // are never cleared (②); a block that is old enough AND whose
+            // fingerprint is present in the pre-generated table is replaced
+            // with a **visible-text sibling** — an `Assistant` text item, never
+            // a `Reasoning` item (some providers drop `reasoning_content`
+            // wholesale, C-1). A table miss leaves the block alone
+            // (① never-bare-clear).
+            if let ConversationItem::Reasoning(r) = &self.state.conversation[i] {
+                if r.encrypted_content.is_some() {
+                    continue;
+                }
+                // R5/B6: symmetric age gate — recent reasoning inside the live
+                // window is preserved, using the same `effective_threshold` as
+                // the ToolResult branch below.
+                if turn_from_end < effective_threshold {
+                    continue;
+                }
+                let text = cf_sampling_types::reasoning_item_text(r);
+                let fingerprint = super::reasoning_summary::reasoning_block_fingerprint(&text);
+                let Some(summary) = self.state.reasoning_summaries.get(&fingerprint).cloned() else {
+                    continue;
+                };
+                self.state.conversation[i] =
+                    ConversationItem::assistant(reasoning_summary_sibling_text(&summary));
+                cleared += 1;
+                continue;
+            }
+
+            // Resolve the scratch facts under an immutable borrow so the C-4
+            // debounce bookkeeping below can take `&mut self.state` without a
+            // borrow conflict.
+            let (tool_call_id, already_cleared, current_content) =
+                match &self.state.conversation[i] {
+                    ConversationItem::ToolResult(tr) => (
+                        tr.tool_call_id.clone(),
+                        super::request_builder::is_batch_cleared(tr.content.as_ref()),
+                        tr.content.clone(),
+                    ),
+                    _ => continue,
+                };
+
+            // C-3: recent turns (the first result batch after the last real
+            // user query) are never batch-cleared.
+            if turn_from_end < self.pruning_config.keep_last_n_turns {
+                continue;
+            }
+            if turn_from_end < effective_threshold {
+                continue;
+            }
+            // C-3: search_tool results are exempt by tool name.
+            let tool_call = tool_call_by_id.get(tool_call_id.as_str());
+            if tool_call.map(|(name, _)| name.as_str())
+                == Some(super::request_builder::SEARCH_TOOL_NAME)
+            {
+                continue;
+            }
+            // Idempotency: already batch-cleared results are left as-is.
+            if already_cleared {
+                continue;
+            }
+            // C-4 debounce: after the same tool call (name+args) has been
+            // batch-cleared `REPLAY_PROMPT_MAX_COUNT` times, drop the recovery
+            // guidance (keep the terse placeholder) so a repeated re-run does
+            // not keep re-injecting the pointer.
+            let replay_fp = match tool_call {
+                Some((name, args)) => replay_args_fingerprint(name, args),
+                None => replay_args_fingerprint("", tool_call_id.as_str()),
+            };
+            let suppressed = self.state.replay_prompt_suppressed(replay_fp);
+            let replacement = if suppressed {
+                super::request_builder::batch_clear_suppressed_replacement(current_content.as_ref())
+            } else {
+                super::request_builder::batch_clear_replacement(current_content.as_ref())
+            };
+            if let ConversationItem::ToolResult(tr) = &mut self.state.conversation[i] {
+                tr.content = replacement;
+            }
+            cleared += 1;
+        }
+
+        self.state.last_batch_clear_at = Some(self.state.prompt_index);
+
+        if cleared > 0 {
+            let after_bytes = self.conversation_content_bytes();
+            tracing::debug!(
+                batch_cleared = cleared,
+                bytes_freed = before_bytes.saturating_sub(after_bytes),
+                conversation_len = self.state.conversation.len(),
+                "ChatState: batched in-memory prune (tool results + reasoning summaries)"
             );
             self.persistence.replace_history(&self.state.conversation);
         }

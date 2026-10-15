@@ -130,6 +130,9 @@ use session_mode::*;
 #[path = "acp_session_impl/sampler_turn.rs"]
 mod sampler_turn;
 use sampler_turn::*;
+#[path = "acp_session_impl/reasoning_pregenerate.rs"]
+mod reasoning_pregenerate;
+use reasoning_pregenerate::*;
 #[path = "acp_session_impl/tool_dispatch.rs"]
 mod tool_dispatch;
 use tool_dispatch::*;
@@ -905,6 +908,11 @@ pub(crate) struct SessionActor {
     /// Set when the MCP server set changes and a reminder needs injection.
     /// Cleared by `maybe_inject_mcp_reminder` after injecting.
     pub(crate) mcp_reminder_dirty: Arc<std::sync::atomic::AtomicBool>,
+    /// Phase C Reasoning-summary pre-generation reentrancy guard: held `true`
+    /// while a background pre-generation task runs, so the per-turn hook never
+    /// spawns a second one. Session-scoped (one pre-generation per session);
+    /// the task resets it to `false` on exit.
+    pub(crate) reasoning_pregenerating: Arc<std::sync::atomic::AtomicBool>,
     pub(crate) mcp_connecting_reminder_injected: std::cell::Cell<bool>,
     /// Wakes waiters when MCP background handshakes finish and
     /// `initializing_servers` is cleared. Used by

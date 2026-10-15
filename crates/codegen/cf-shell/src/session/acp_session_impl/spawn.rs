@@ -434,6 +434,12 @@ pub(crate) async fn spawn_session_actor(
         soft_trim_head: session_pruning_config.soft_trim_head,
         soft_trim_tail: session_pruning_config.soft_trim_tail,
         hard_clear_age_turns: session_pruning_config.hard_clear_age_turns,
+        // Phase C batched mode is off by default (batch 1 skeleton). The
+        // per-endpoint flag plumbing from `[compaction.pruning]` ships in a
+        // later batch; until then the retained layer stays byte-identical to
+        // the pre-Phase-C per-turn build (C-6 flag-off anchor).
+        batched_pruning: false,
+        low_watermark_percent: None,
     };
     let (chat_state_event_tx, chat_state_event_rx) = mpsc::unbounded_channel();
     let chat_state_handle = cf_chat_state::ChatStateActor::spawn_with_pruning(
@@ -1319,6 +1325,7 @@ pub(crate) async fn spawn_session_actor(
         ),
         mcp_reminder_mode: McpReminderMode::from_env(),
         mcp_reminder_dirty: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        reasoning_pregenerating: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         mcp_connecting_reminder_injected: std::cell::Cell::new(false),
         mcp_handshakes_done: Arc::new(tokio::sync::Notify::new()),
         user_input_generation: std::sync::atomic::AtomicU64::new(0),

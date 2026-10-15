@@ -7,6 +7,7 @@
 
 mod mutations;
 mod queries;
+pub mod reasoning_summary;
 pub(crate) mod request_builder;
 pub mod state;
 
@@ -170,6 +171,14 @@ impl ChatStateActor {
             ChatStateCommand::UpdateSamplingConfig { config } => {
                 self.state.sampling_config = config;
             }
+            ChatStateCommand::SetReasoningSummaries { summaries } => {
+                // R2: merge, not wholesale replace. The session layer rebuilds
+                // its batch each pre-generation run, but summaries already in
+                // the table (for other fingerprints) must survive so the C-2
+                // prefix-growth invariant holds. A new value for the same
+                // fingerprint overwrites the old one (BTreeMap::extend).
+                self.state.reasoning_summaries.extend(summaries);
+            }
             ChatStateCommand::RecordAgentEditedPath { path } => {
                 self.state.agent_edited_paths.insert(path);
             }
@@ -281,6 +290,18 @@ impl ChatStateActor {
             }
             ChatStateCommand::GetTotalTokens { reply } => {
                 let _ = reply.send(self.state.total_tokens);
+            }
+            ChatStateCommand::GetContextUtilizationPercent { reply } => {
+                let _ = reply.send(request_builder::context_utilization_percent(
+                    self.state.total_tokens,
+                    self.state.sampling_config.context_window,
+                ));
+            }
+            ChatStateCommand::GetBatchedPruningEnabled { reply } => {
+                let _ = reply.send(self.pruning_config.batched_mode());
+            }
+            ChatStateCommand::GetReasoningSummaries { reply } => {
+                let _ = reply.send(self.state.reasoning_summaries.clone());
             }
             ChatStateCommand::GetLastTurnUsage { reply } => {
                 let _ = reply.send(self.state.last_turn_usage.clone());

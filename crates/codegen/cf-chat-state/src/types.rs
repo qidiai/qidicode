@@ -16,6 +16,42 @@ pub const MEMORY_CONTEXT_OPEN_TAG: &str = "<memory-context>";
 /// Closing tag paired with [`MEMORY_CONTEXT_OPEN_TAG`].
 pub const MEMORY_CONTEXT_CLOSE_TAG: &str = "</memory-context>";
 
+/// Canonical low-watermark (reclaim) context-utilization percentage for the
+/// **batched** pruning mode (Phase C, design doc O-4 / C-7). When the batched
+/// mode is enabled, a single batch clear fires once utilization reaches this
+/// percentage — and is still below the high-water [`PRUNE_WATERMARK_PERCENT`].
+/// Fixed at 40 by the Phase C 采数 (15 sessions / 183 turns, recovery-curve
+/// knee; 10 pp headroom below the 50% hard line).
+pub const LOW_WATERMARK_PERCENT_DEFAULT: u8 = 40;
+
+/// High-water (trigger) context-utilization percentage: the
+/// `request_builder::should_prune` gate fires above this line. Kept as a named
+/// constant (instead of the historical inline `/ 2`) so the C-7 compile-time
+/// assertion below can pin the reclaim line against the trigger line and
+/// prevent the two from drifting together.
+pub const PRUNE_WATERMARK_PERCENT: u8 = 50;
+
+// C-7 hysteresis invariant: the batched reclaim line must sit strictly below
+// the trigger line (design doc §Q3 / Phase C; mirrors the image-compaction
+// hysteresis at `request_builder.rs`). Enforced at compile time so the two
+// constants can't drift together.
+const _: () = assert!(LOW_WATERMARK_PERCENT_DEFAULT < PRUNE_WATERMARK_PERCENT);
+
+/// Phase C Reasoning-summary table (block fingerprint → summary text).
+///
+/// Pre-generated asynchronously by the session layer and written via
+/// [`crate::handle::ChatStateHandle::set_reasoning_summaries`]; applied as
+/// synthetic visible-text siblings by the batched prune
+/// (`prune_retained_batched`) when a batch-clear window fires. The `u64` key
+/// is the block's content fingerprint (see
+/// [`crate::actor::reasoning_summary::reasoning_block_fingerprint`]), aligning
+/// with the batch-1 `replay_prompt_fingerprints` key semantics.
+///
+/// Transient pre-generation cache: intentionally **not** part of
+/// [`ChatStateSnapshot`] (matches `last_batch_clear_at` /
+/// `replay_prompt_fingerprints` precedent) — it is fork/rewind-irrelevant.
+pub type ReasoningSummaries = std::collections::BTreeMap<u64, String>;
+
 /// Configuration for the ChatStateActor at spawn time.
 #[derive(Debug, Clone)]
 pub struct ChatStateConfig {
@@ -82,6 +118,15 @@ pub struct PruningConfig {
     pub soft_trim_tail: usize,
     /// Turn age after which tool results are hard-cleared (replaced with placeholder).
     pub hard_clear_age_turns: usize,
+    /// Phase C batched-pruning execution-mode flag (default `false` = per-turn,
+    /// byte-identical to the pre-Phase-C build). When `true`, the retained
+    /// layer switches from per-turn hard-clears to a low-watermark batch clear.
+    pub batched_pruning: bool,
+    /// Low-watermark context-utilization percentage for the batched mode.
+    /// `None` = no batched watermark configured (batched mode inert);
+    /// `Some(p)` = the batch clear fires once utilization reaches `p` percent
+    /// (and stays below [`PRUNE_WATERMARK_PERCENT`]). Must be < 50% (C-7).
+    pub low_watermark_percent: Option<u8>,
 }
 
 impl Default for PruningConfig {
@@ -93,7 +138,28 @@ impl Default for PruningConfig {
             soft_trim_head: 1500,
             soft_trim_tail: 1500,
             hard_clear_age_turns: 10,
+            batched_pruning: false,
+            low_watermark_percent: None,
         }
+    }
+}
+
+impl PruningConfig {
+    /// Whether the batched execution mode is active (Phase C, C-6).
+    ///
+    /// Both the flag and a configured low watermark must be present — the flag
+    /// is the master switch, the watermark supplies the trigger line. `false`
+    /// keeps every new Phase C path inert, byte-identical to the pre-Phase-C
+    /// build (the C-6 flag-off regression anchor).
+    pub fn batched_mode(&self) -> bool {
+        self.batched_pruning && self.low_watermark_percent.is_some()
+    }
+
+    /// The effective low-watermark percentage: the configured value, or the
+    /// canonical [`LOW_WATERMARK_PERCENT_DEFAULT`] when unset.
+    pub fn effective_low_watermark_percent(&self) -> u8 {
+        self.low_watermark_percent
+            .unwrap_or(LOW_WATERMARK_PERCENT_DEFAULT)
     }
 }
 
@@ -135,8 +201,11 @@ pub struct BatchedPruningDomain {
 }
 
 impl BatchedPruningDomain {
-    /// The 50% context watermark (design doc v3.3 ⑧).
-    pub const WATERMARK: f64 = 0.5;
+    /// The 50% context watermark (design doc v3.3 ⑧), derived from
+    /// [`PRUNE_WATERMARK_PERCENT`] so the C-7 trigger line has a single
+    /// source of truth (the inline `/ 2` in `should_prune` would otherwise
+    /// drift from this fraction).
+    pub const WATERMARK: f64 = PRUNE_WATERMARK_PERCENT as f64 / 100.0;
 
     /// Whether the C-2 invariant's applicability domain
     /// holds: batched mode enabled **and** the trigger
@@ -277,6 +346,83 @@ mod tests {
         .applies());
         // Watermark constant is the design-doc 50%.
         assert_eq!(BatchedPruningDomain::WATERMARK, 0.5);
+    }
+
+    /// C-7 (design doc §Q3 / Phase C): the batched reclaim line
+    /// (`LOW_WATERMARK_PERCENT_DEFAULT`) must sit strictly below the trigger
+    /// line (`PRUNE_WATERMARK_PERCENT`). The compile-time `assert!` above
+    /// pins the two constants; this runtime test is the belt-and-suspenders
+    /// form so a drift shows up in CI even where a const-eval lint would not.
+    #[test]
+    fn c7_batched_watermark_lines_do_not_drift() {
+        assert!(
+            LOW_WATERMARK_PERCENT_DEFAULT < PRUNE_WATERMARK_PERCENT,
+            "C-7: low watermark ({LOW_WATERMARK_PERCENT_DEFAULT}%) must sit below \
+             the trigger line ({PRUNE_WATERMARK_PERCENT}%)"
+        );
+        assert_eq!(
+            BatchedPruningDomain::WATERMARK,
+            f64::from(PRUNE_WATERMARK_PERCENT) / 100.0,
+            "C-7: domain WATERMARK must stay derived from PRUNE_WATERMARK_PERCENT"
+        );
+    }
+
+    /// C-6 flag-off anchor (skeleton): the default config is per-turn —
+    /// batched mode is off and the low watermark is unset, so every new
+    /// Phase C path is inert.
+    #[test]
+    fn default_pruning_config_is_per_turn_not_batched() {
+        let cfg = PruningConfig::default();
+        assert!(
+            !cfg.batched_mode(),
+            "C-6: default PruningConfig must not activate batched mode"
+        );
+        assert!(
+            !cfg.batched_pruning,
+            "C-6: batched_pruning flag defaults to false"
+        );
+        assert!(
+            cfg.low_watermark_percent.is_none(),
+            "C-6: low_watermark_percent defaults to None (per-turn)"
+        );
+        assert_eq!(
+            cfg.effective_low_watermark_percent(),
+            LOW_WATERMARK_PERCENT_DEFAULT,
+            "effective_low_watermark_percent must fall back to the canonical 40%"
+        );
+    }
+
+    /// C-6 flag-on + watermark: batched mode activates only when both the
+    /// flag and a configured watermark are present.
+    #[test]
+    fn batched_mode_requires_flag_and_watermark() {
+        assert!(
+            PruningConfig {
+                batched_pruning: true,
+                low_watermark_percent: Some(40),
+                ..Default::default()
+            }
+            .batched_mode(),
+            "C-6: flag + watermark must activate batched mode"
+        );
+        assert!(
+            !PruningConfig {
+                batched_pruning: true,
+                low_watermark_percent: None,
+                ..Default::default()
+            }
+            .batched_mode(),
+            "C-6: flag alone (no watermark) must NOT activate batched mode"
+        );
+        assert!(
+            !PruningConfig {
+                batched_pruning: false,
+                low_watermark_percent: Some(40),
+                ..Default::default()
+            }
+            .batched_mode(),
+            "C-6: watermark alone (no flag) must NOT activate batched mode"
+        );
     }
 
     #[test]

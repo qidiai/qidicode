@@ -7,6 +7,7 @@
 //! `SkillUpdateEffects`.
 
 mod conditional;
+mod essential;
 mod listing;
 
 use std::collections::HashSet;
@@ -18,6 +19,7 @@ use crate::types::compat::CompatConfig;
 use conditional::ConditionalSkills;
 use listing::{DEFAULT_SKILL_TOOL_NAME, SKILL_BUDGET_CONTEXT_PERCENT, format_announcement};
 
+pub use essential::{DEFAULT_ESSENTIAL_SKILLS, SkillsMode};
 pub use listing::{XmlRenderMode, format_announcement_xml, format_compaction_skill_listing};
 
 /// Why a `SkillUpdateEffects` was produced.
@@ -141,6 +143,15 @@ pub struct SkillManager {
     /// `paths:`-gated skills held back from the listing until a matching file
     /// is touched, plus their activation state. See [`ConditionalSkills`].
     conditional: ConditionalSkills,
+
+    /// Essential-mode listing projection (P0-3 phase 1). `None` = `Full` mode:
+    /// the listing advertises every discovered skill (historical behavior,
+    /// byte-identical). `Some(set)` = `Essential` mode: only skills whose
+    /// `name` is in `set` are rendered; every other skill is filtered out of
+    /// the listing (it never renders, so it never announces). A listing filter
+    /// only — discovery, slash commands, and the skill tool are unaffected.
+    /// Set once via [`SkillManager::set_skills_mode`] before `seed`.
+    essential_allow: Option<HashSet<String>>,
 }
 
 /// Canonicalize a skill path, falling back to the raw path for not-yet-created
@@ -202,16 +213,55 @@ struct ListingRenderParams<'a> {
     use_xml_format: bool,
     read_tool_name: &'a str,
     skill_tool_name: &'a str,
+    /// Essential-mode allowlist. `Some(set)` restricts the listing to skills
+    /// named in `set`; `None` lists every skill (Full mode). See
+    /// [`SkillManager::set_skills_mode`].
+    essential_allow: Option<&'a HashSet<String>>,
 }
 
-/// Render the model-facing listing for `skills`, deduplicating against
-/// `announced`. Keys are inserted before budget truncation, so `announced`
-/// tracks skills that qualified, not skills whose text survived.
+/// Render the model-facing listing for `skills`, applying the essential-skill
+/// projection in `Essential` mode and deduplicating against `announced`.
 ///
 /// Both [`SkillManager::take_pending`] and
 /// [`SkillManager::listing_snapshot`] render through this path, so the
 /// injected reminders and the `/context` estimate cannot drift apart.
+///
+/// In `Essential` mode (see [`SkillManager::set_skills_mode`]) the default
+/// markdown harness renders only allowlisted skills; every non-allowlisted
+/// skill is dropped from the projection. The drop is a *listing* filter, not
+/// a state mutation: excluded skills are never inserted into `announced`, so
+/// they simply never appear in a listing (and thus never announce mid-session)
+/// while `listing_snapshot`'s `skill_count` keeps counting only the skills
+/// that actually qualified — the same invariant as the pre-projection
+/// renderer. `Full` mode passes `skills` through unchanged, byte-identical to
+/// the historical renderer.
 fn render_listing(
+    skills: &[SkillInfo],
+    announced: &mut HashSet<String>,
+    params: &ListingRenderParams<'_>,
+) -> Option<String> {
+    // TODO(P0-3 phase 2): apply the essential-skill allowlist to the XML
+    // (custom-template / cursor) harness. Phase 1 projects only the default
+    // markdown harness; the XML branch below is intentionally untouched so
+    // its code path is byte-for-byte identical to pre-projection behavior.
+    if params.use_xml_format {
+        return render_listing_inner(skills, announced, params);
+    }
+    let Some(allow) = params.essential_allow else {
+        return render_listing_inner(skills, announced, params);
+    };
+    let allowed: Vec<SkillInfo> = skills
+        .iter()
+        .filter(|skill| allow.contains(&skill.name))
+        .cloned()
+        .collect();
+    render_listing_inner(&allowed, announced, params)
+}
+
+/// Render `skills` with no projection filter, deduplicating against
+/// `announced`. Keys are inserted before budget truncation, so `announced`
+/// tracks skills that qualified, not skills whose text survived.
+fn render_listing_inner(
     skills: &[SkillInfo],
     announced: &mut HashSet<String>,
     params: &ListingRenderParams<'_>,
@@ -273,6 +323,26 @@ impl SkillManager {
     /// `SkillDiscoveryReminder` gates vendor dirs correctly.
     pub fn set_compat(&mut self, compat: CompatConfig) {
         self.compat = compat;
+    }
+
+    /// Configure the essential-skill listing projection from `[skills].mode`.
+    ///
+    /// `Full` clears the projection (every discovered skill is listed,
+    /// matching the historical renderer byte-for-byte). `Essential` installs
+    /// the resolved allowlist: the user's `[skills].essential_allow` when
+    /// provided, otherwise the built-in [`DEFAULT_ESSENTIAL_SKILLS`].
+    ///
+    /// Must be called at session start, before `seed()`. Mirrors
+    /// [`Self::set_compat`]: the manager defaults to the historical behavior
+    /// (`Full`) and the resolved value is pushed in from config.
+    pub fn set_skills_mode(&mut self, mode: SkillsMode, allow: Option<Vec<String>>) {
+        self.essential_allow = match mode {
+            SkillsMode::Full => None,
+            SkillsMode::Essential => Some(match allow {
+                Some(names) => names.into_iter().collect(),
+                None => DEFAULT_ESSENTIAL_SKILLS.iter().map(|s| (*s).to_owned()).collect(),
+            }),
+        };
     }
 
     /// Pre-populate `announced_names` from persisted state.
@@ -500,6 +570,7 @@ impl SkillManager {
                 .skill_tool_name
                 .as_deref()
                 .unwrap_or(DEFAULT_SKILL_TOOL_NAME),
+            essential_allow: self.essential_allow.as_ref(),
         }
     }
 
@@ -1572,5 +1643,237 @@ mod tests {
                 .unwrap();
             assert_eq!(snapshot.text, injected, "xml={xml}");
         }
+    }
+
+    // ── Essential-mode projection (P0-3 phase 1) ─────────────────
+
+    #[test]
+    fn essential_mode_lists_only_allowlisted_skills() {
+        let mut mgr = SkillManager::new();
+        mgr.set_skills_mode(
+            SkillsMode::Essential,
+            Some(vec!["allowed-a".to_owned(), "allowed-b".to_owned()]),
+        );
+        mgr.seed(
+            None,
+            None,
+            vec![
+                make_skill("allowed-a", "/a/SKILL.md"),
+                make_skill("excluded", "/b/SKILL.md"),
+                make_skill("allowed-b", "/c/SKILL.md"),
+            ],
+            None,
+            None,
+            None,
+        );
+        let r = mgr.take_pending_reconciliation().unwrap();
+        let text = r.effects.system_reminder.expect("listing rendered");
+        assert!(
+            text.contains("- allowed-a:"),
+            "allowlisted skill missing:\n{text}"
+        );
+        assert!(
+            text.contains("- allowed-b:"),
+            "allowlisted skill missing:\n{text}"
+        );
+        assert!(
+            !text.contains("excluded"),
+            "non-allowlisted skill leaked into listing:\n{text}"
+        );
+    }
+
+    #[test]
+    fn essential_mode_suppresses_non_allowlisted_discovery() {
+        let mut mgr = SkillManager::new();
+        mgr.set_skills_mode(
+            SkillsMode::Essential,
+            Some(vec!["core".to_owned(), "core-dyn".to_owned()]),
+        );
+        mgr.seed(
+            None,
+            None,
+            vec![make_skill("core", "/core/SKILL.md")],
+            None,
+            None,
+            None,
+        );
+        let _ = mgr.take_pending_reconciliation(); // drain baseline
+
+        // A non-allowlisted discovery must not announce.
+        assert!(mgr.add_discovered(vec![make_skill("noise", "/noise/SKILL.md")]));
+        let r = mgr.take_pending_reconciliation().unwrap();
+        assert!(
+            r.effects.system_reminder.is_none(),
+            "non-allowlisted discovery must not announce: {:?}",
+            r.effects.system_reminder
+        );
+        // Discovery/invocation is unaffected: the skill is still advertised
+        // for slash commands (projection is listing-only).
+        assert!(mgr.slash_skills().iter().any(|s| s.name == "noise"));
+
+        // An allowlisted discovery still announces normally.
+        assert!(mgr.add_discovered(vec![make_skill("core-dyn", "/core-dyn/SKILL.md")]));
+        let text = mgr
+            .take_pending_reconciliation()
+            .unwrap()
+            .effects
+            .system_reminder
+            .expect("allowlisted discovery must announce");
+        assert!(text.contains("core-dyn"), "{text}");
+    }
+
+    #[test]
+    fn essential_mode_second_render_omits_excluded_skill() {
+        // After the excluded skill is marked decided, a re-announce (e.g. a
+        // baseline change) still omits it.
+        let mut mgr = SkillManager::new();
+        mgr.set_skills_mode(SkillsMode::Essential, Some(vec!["keep".to_owned()]));
+        mgr.seed(
+            None,
+            None,
+            vec![
+                make_skill("keep", "/keep/SKILL.md"),
+                make_skill("drop", "/drop/SKILL.md"),
+            ],
+            None,
+            None,
+            None,
+        );
+        let _ = mgr.take_pending_reconciliation();
+
+        mgr.update_startup_baseline(vec![
+            make_skill("keep", "/keep/SKILL.md"),
+            make_skill("drop2", "/drop2/SKILL.md"),
+        ]);
+        let text = mgr
+            .take_pending_reconciliation()
+            .unwrap()
+            .effects
+            .system_reminder
+            .expect("baseline change re-announces");
+        assert!(text.contains("- keep:"), "{text}");
+        assert!(!text.contains("drop"), "excluded skill reappeared:\n{text}");
+    }
+
+    #[test]
+    fn full_mode_matches_default_rendering() {
+        let skills = vec![
+            make_skill("x", "/x/SKILL.md"),
+            make_skill("y", "/y/SKILL.md"),
+        ];
+
+        let mut default_mgr = SkillManager::new();
+        default_mgr.seed(None, None, skills.clone(), None, None, None);
+        let default_text = default_mgr
+            .take_pending_reconciliation()
+            .unwrap()
+            .effects
+            .system_reminder;
+
+        let mut full_mgr = SkillManager::new();
+        // Explicit Full with a would-be allowlist must behave like no filter.
+        full_mgr.set_skills_mode(SkillsMode::Full, Some(vec!["x".to_owned()]));
+        full_mgr.seed(None, None, skills.clone(), None, None, None);
+        let full_text = full_mgr
+            .take_pending_reconciliation()
+            .unwrap()
+            .effects
+            .system_reminder;
+
+        assert_eq!(default_text, full_text, "Full must equal default rendering");
+        let text = full_text.expect("full listing rendered");
+        assert!(text.contains("- x:"), "{text}");
+        assert!(text.contains("- y:"), "{text}");
+    }
+
+    #[test]
+    fn essential_default_uses_builtin_allowlist() {
+        let mut mgr = SkillManager::new();
+        mgr.set_skills_mode(SkillsMode::Essential, None);
+        assert!(
+            mgr.essential_allow.as_ref().unwrap().contains("check-work"),
+            "built-in allowlist should be installed when no override is given"
+        );
+
+        mgr.seed(
+            None,
+            None,
+            vec![
+                make_skill("check-work", "/ck/SKILL.md"),
+                make_skill("bid-write", "/bid/SKILL.md"),
+            ],
+            None,
+            None,
+            None,
+        );
+        let text = mgr
+            .take_pending_reconciliation()
+            .unwrap()
+            .effects
+            .system_reminder
+            .unwrap();
+        assert!(text.contains("- check-work:"), "{text}");
+        assert!(
+            !text.contains("bid-write"),
+            "office skill must not be essential:\n{text}"
+        );
+    }
+
+    #[test]
+    fn essential_listing_snapshot_reflects_projection() {
+        // /context accounting must reflect the projected listing, not the
+        // full set.
+        let mut mgr = SkillManager::new();
+        mgr.set_skills_mode(SkillsMode::Essential, Some(vec!["keep".to_owned()]));
+        mgr.seed(
+            None,
+            None,
+            vec![
+                make_skill("keep", "/keep/SKILL.md"),
+                make_skill("drop", "/drop/SKILL.md"),
+            ],
+            None,
+            None,
+            None,
+        );
+        let snapshot = mgr.listing_snapshot().unwrap();
+        assert_eq!(snapshot.skill_count, 1);
+        assert!(snapshot.text.contains("keep"), "{}", snapshot.text);
+        assert!(
+            !snapshot.text.contains("drop"),
+            "snapshot must reflect the projection: {}",
+            snapshot.text
+        );
+    }
+
+    #[test]
+    fn essential_is_ignored_by_xml_harness_phase1() {
+        // Phase 1 projects only the markdown harness. The XML branch must
+        // stay unfiltered until the phase-2 TODO is implemented.
+        let mut mgr = SkillManager::new();
+        mgr.set_xml_format(true);
+        mgr.set_skills_mode(SkillsMode::Essential, Some(vec!["keep".to_owned()]));
+        mgr.seed(
+            None,
+            None,
+            vec![
+                make_skill("keep", "/keep/SKILL.md"),
+                make_skill("drop", "/drop/SKILL.md"),
+            ],
+            None,
+            None,
+            None,
+        );
+        let text = mgr
+            .take_pending_reconciliation()
+            .unwrap()
+            .effects
+            .system_reminder
+            .unwrap();
+        assert!(text.contains("keep"), "{text}");
+        assert!(
+            text.contains("drop"),
+            "XML harness must remain unfiltered in phase 1: {text}"
+        );
     }
 }
