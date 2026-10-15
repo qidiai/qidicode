@@ -392,7 +392,7 @@ async fn test_headless_free_usage_exhausted_prints_paywall_message() {
         stderr_tail(&result.stderr, 1000)
     );
     assert!(
-        !combined.contains("hit the rate limit for your plan"),
+        !combined.contains("Rate limited for your current plan"),
         "generic rate-limit message must be replaced by the paywall text"
     );
 }

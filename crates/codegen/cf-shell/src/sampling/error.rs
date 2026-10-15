@@ -17,14 +17,24 @@ use agent_client_protocol as acp;
 /// see this code and show a user-friendly upgrade message instead.
 pub const RATE_LIMITED_ERROR_CODE: i32 = -32003;
 
-/// OAuth / session rate-limit copy (personal plan upgrade path).
+/// OAuth / session rate-limit copy.
+///
+/// This fork samples through many heterogeneous providers, so an HTTP 429 may
+/// originate from any third-party line — not necessarily the upstream
+/// account's own plan. Keep the copy provider-neutral: it says the request was
+/// rate limited and suggests retrying or upgrading, without naming a vendor.
 pub const RATE_LIMITED_USER_MESSAGE_OAUTH: &str =
-    "You\u{2019}ve hit the rate limit for your plan. Upgrade your account or try again later.";
+    "Rate limited for your current plan. Try again later or upgrade your plan.";
 
-/// API key / team rate-limit copy. Personal grok.com upgrades do not raise API
-/// team limits; admins purchase credits or a higher spend-based tier.
-/// See https://docs.x.ai/developers/rate-limits#rate-limit-tiers
-pub const RATE_LIMITED_USER_MESSAGE_API_KEY: &str = "You\u{2019}ve hit your team\u{2019}s API rate limit. Ask a team admin to purchase more credits for higher limits, or try again later. See https://docs.x.ai/developers/rate-limits#rate-limit-tiers";
+/// API-key rate-limit copy (constant name retained for the API-key auth branch).
+///
+/// Deliberately neutral: this fork routes sampling through many heterogeneous
+/// providers, so a 429 may come from any third-party line. The copy no longer
+/// claims an x.ai "team" limit, no longer tells users to ask a team admin for
+/// credits, and no longer points at x.ai docs. (Historically this text
+/// mislabeled third-party throttling — e.g. sensenova/luyou 429s surfaced by
+/// RUST_LOG probes — as an x.ai team quota.)
+pub const RATE_LIMITED_USER_MESSAGE_API_KEY: &str = "Rate limited (HTTP 429) by the current model's provider. The line's quota or rate limit was reached — wait and retry, or switch to another model line.";
 
 /// Pick rate-limit copy from the *active* auth method.
 ///
@@ -324,14 +334,21 @@ mod tests {
             rate_limited_user_message(true),
             RATE_LIMITED_USER_MESSAGE_API_KEY
         );
-        assert!(RATE_LIMITED_USER_MESSAGE_OAUTH.contains("Upgrade your account"));
-        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("team"));
-        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("credits"));
-        assert!(
-            RATE_LIMITED_USER_MESSAGE_API_KEY
-                .contains("https://docs.x.ai/developers/rate-limits#rate-limit-tiers")
-        );
-        assert!(!RATE_LIMITED_USER_MESSAGE_API_KEY.contains("Upgrade your account"));
+        // Copy is provider-neutral: a 429 may originate from any third-party
+        // line in this fork, so it must not claim an x.ai/team quota.
+        assert!(RATE_LIMITED_USER_MESSAGE_OAUTH.contains("Rate limited"));
+        assert!(RATE_LIMITED_USER_MESSAGE_OAUTH.contains("upgrade your plan"));
+        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("HTTP 429"));
+        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("provider"));
+        for msg in [
+            RATE_LIMITED_USER_MESSAGE_OAUTH,
+            RATE_LIMITED_USER_MESSAGE_API_KEY,
+        ] {
+            assert!(!msg.contains("docs.x.ai"), "must not point at x.ai docs: {msg}");
+            assert!(!msg.contains("x.ai"), "must not mention x.ai: {msg}");
+            assert!(!msg.contains("team"), "must not claim a team quota: {msg}");
+            assert!(!msg.contains("credits"), "must not claim credits: {msg}");
+        }
     }
 
     #[test]
