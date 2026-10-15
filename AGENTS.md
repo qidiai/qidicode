@@ -123,9 +123,10 @@
 
 **spawn 路由实测注意（2026-10-11 深挖）**：
 - spawn 子代理的模型调用**与本机 config.toml / auth.json 解耦**（走平台内置目录+独立凭据，细节未全还原）：同模型手动直连 200 而 spawn 可能 401/503（实测：kimi-k2.6 手动 200 / spawn 503 `no usable credential for provider 'intern'`；kimi-k2.7-code 手动 200 / spawn 401 `Invalid token` from api.openai-next.com）——**派活前先 spawn 小任务验连通，勿以手动直连结果为准**
+- **spawn_subagent 的 `model` 参数序列化 bug（2026-10-15 实测 7 连败）**：`model` 值的引号被序列化层稳定吞掉（`"model": KIMI-K3-222` 裸 token → Invalid JSON，改参数顺序/转义/换 slug 全无效；**不带 model 继承父模型可正常 spawn**）。**根治通道：qidi CLI headless——`qidi.exe --prompt-file <任务书> -m "<模型>" --tools/--permission-mode ... --cwd ... --output-format plain`**（同走云端中转，实测 KIMI-K3-222 审计 170s 成跑；编码手派工用 `--permission-mode dontAsk`+相应工具面）。指针式短 prompt（任务书落盘+只发路径）可同时缩小报文与序列化风险
 - luyou/codely 池为**每日共享额度制**（用户口径）：429 = 当日配额被共享用户挤占/用尽，波动型限流（同分钟内小请求与大请求成败可并存），等窗口或次日；KIMI-K3-222 命运取决于此
 - luyou→kimi-k3 流的 `finish_reason:""` 空串坑已修（commit `b333b253`：`empty_finish_reason_as_none` 双路径归一化+5 回归测试）——**旧 qidi.exe 进程 spawn K3 必炸**（unknown variant ''），换新版 exe 后消除
-- K 系 spawn 实测可用位：`kimi-k2.7-code-highspeed-222`（apigoto 直连带独立 key）；`KIMI-K3-222` 需新版 exe+额度窗口双就绪
+- K 系 spawn 实测可用位：`kimi-k2.7-code-highspeed-222`（apigoto 直连带独立 key）；`KIMI-K3-222` 需新版 exe+额度窗口双就绪；**K3 审计可靠位 = qidi CLI headless 通道**（2026-10-15 实测）
 
 ## 10. Git 提交与推送（生产纪律）
 
