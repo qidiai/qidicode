@@ -39,6 +39,17 @@ pub enum SkillsMode {
 /// Scope discipline (user directive: "only load the most core programming
 /// aspect"): office (`bid-*`), NPU-adaptation, and model-deploy skills are
 /// deliberately excluded. Only core programming skills stay resident.
+///
+/// Two entries look surprising but are intentional:
+/// - `code-review` stays on the allowlist even though it never announces: its
+///   bundled `SKILL.md` carries `disable-model-invocation: true`, so the
+///   listing projection (`listing.rs`) filters it out of the model-visible
+///   list by design (user-only, via `/code-review`).
+/// - Headless-only built-ins (e.g. `best-of-n`) are never listed here: it is a
+///   cf-shell compiled-in `SKILL.md` (`BEST_OF_N_SKILL_MD`, "not extracted as
+///   a bundled skill"), and legacy cleanup deletes stale user copies on disk,
+///   so the discoverer can never see it — such an entry would be permanently
+///   dead.
 pub const DEFAULT_ESSENTIAL_SKILLS: &[&str] = &[
     // ── Programming flow ────────────────────────────────────────────
     "check-work",
@@ -71,7 +82,6 @@ pub const DEFAULT_ESSENTIAL_SKILLS: &[&str] = &[
     "create-skill",
     "plugin-creator",
     "install-skill-dependency",
-    "best-of-n",
     "help",
     // ── Guidance / environment ──────────────────────────────────────
     "qoderwork-guidance",
@@ -98,6 +108,15 @@ mod tests {
                 "duplicate allowlist entry: {name}"
             );
         }
+    }
+
+    #[test]
+    fn default_allowlist_excludes_headless_only_builtins() {
+        // `best-of-n` is a compiled-in headless-only skill (cf-shell
+        // `BEST_OF_N_SKILL_MD`, "not extracted as a bundled skill"); legacy
+        // cleanup deletes user copies on startup, so discovery can never see
+        // it — a whitelist entry here would be permanently dead.
+        assert!(!DEFAULT_ESSENTIAL_SKILLS.contains(&"best-of-n"));
     }
 
     #[test]
