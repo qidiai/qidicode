@@ -147,9 +147,10 @@ impl ChatStateHandle {
             .send(ChatStateCommand::UpdateSamplingConfig { config });
     }
 
-    /// Phase C Reasoning-summary pre-generation write (C-1): replace the
-    /// block-fingerprint → summary table with the session layer's freshly
-    /// generated batch. Fire-and-forget, like the other mutation writes.
+    /// Phase C Reasoning-summary pre-generation write (C-1): merge (extend)
+    /// the session layer's freshly generated batch into the existing
+    /// block-fingerprint → summary table (R2: earlier entries survive).
+    /// Fire-and-forget, like the other mutation writes.
     pub fn set_reasoning_summaries(&self, summaries: crate::types::ReasoningSummaries) {
         let _ = self
             .cmd_tx
@@ -396,6 +397,18 @@ impl ChatStateHandle {
         })
         .await
         .unwrap_or(false)
+    }
+
+    /// The retained-layer hard-clear age threshold (turns), read from the live
+    /// [`PruningConfig`]. M10: the session-layer pre-generation passes this to
+    /// `collect_eligible_reasoning_blocks` so both age thresholds share one
+    /// source. Falls back to the config default when the actor is unreachable.
+    pub async fn get_hard_clear_age_turns(&self) -> usize {
+        self.query("GetHardClearAgeTurns", |reply| {
+            ChatStateCommand::GetHardClearAgeTurns { reply }
+        })
+        .await
+        .unwrap_or_else(|| crate::types::PruningConfig::default().hard_clear_age_turns)
     }
 
     /// The current Phase C Reasoning-summary table (block fingerprint →

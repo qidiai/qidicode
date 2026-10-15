@@ -913,6 +913,14 @@ pub(crate) struct SessionActor {
     /// spawns a second one. Session-scoped (one pre-generation per session);
     /// the task resets it to `false` on exit.
     pub(crate) reasoning_pregenerating: Arc<std::sync::atomic::AtomicBool>,
+    /// N2 (step-5 第五方审计): end time of the last completed pre-generation
+    /// run, stamped by the background task on every completed run (success or
+    /// error; a panicking run leaves it unset, which conservatively allows the
+    /// next round). Read at claim time to enforce the cross-run minimum gap
+    /// (`reasoning_summarizer::CROSS_RUN_MIN_GAP`). The actor is
+    /// single-threaded, so a `Cell` suffices.
+    pub(crate) reasoning_pregen_last_run_end:
+        std::cell::Cell<Option<std::time::Instant>>,
     pub(crate) mcp_connecting_reminder_injected: std::cell::Cell<bool>,
     /// Wakes waiters when MCP background handshakes finish and
     /// `initializing_servers` is cleared. Used by

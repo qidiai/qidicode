@@ -37,6 +37,19 @@ pub const PRUNE_WATERMARK_PERCENT: u8 = 50;
 // constants can't drift together.
 const _: () = assert!(LOW_WATERMARK_PERCENT_DEFAULT < PRUNE_WATERMARK_PERCENT);
 
+/// M1 (C-7 hysteresis dead zone): percentage points below the low-watermark
+/// trigger line at which the batch-clear window re-arms. A batch clear closes
+/// the window; it only reopens once utilization falls this far back below the
+/// trigger line (e.g. 40% trigger → 35% reclaim). Between the reclaim line and
+/// the trigger line the retained layer stays inert, so a small dip-and-re-rise
+/// near the trigger cannot fire a second clear.
+pub const LOW_WATERMARK_RECLAIM_MARGIN_PERCENT: u8 = 5;
+
+// The reclaim margin must be small enough that the reclaim line stays strictly
+// below the canonical trigger line (a margin ≥ the trigger itself would make
+// the dead zone collapse). Enforced at compile time.
+const _: () = assert!(LOW_WATERMARK_RECLAIM_MARGIN_PERCENT < LOW_WATERMARK_PERCENT_DEFAULT);
+
 /// Phase C Reasoning-summary table (block fingerprint → summary text).
 ///
 /// Pre-generated asynchronously by the session layer and written via
@@ -157,9 +170,26 @@ impl PruningConfig {
 
     /// The effective low-watermark percentage: the configured value, or the
     /// canonical [`LOW_WATERMARK_PERCENT_DEFAULT`] when unset.
+    ///
+    /// M1: the value is clamped. A configured watermark `>= ` the high-water
+    /// [`PRUNE_WATERMARK_PERCENT`] (50%) is invalid — it would put the trigger
+    /// line at or above the API-copy gate, so the batched layer could never
+    /// fire in its own region — and is treated as the canonical
+    /// [`LOW_WATERMARK_PERCENT_DEFAULT`] with a `warn` for post-mortem.
     pub fn effective_low_watermark_percent(&self) -> u8 {
-        self.low_watermark_percent
-            .unwrap_or(LOW_WATERMARK_PERCENT_DEFAULT)
+        match self.low_watermark_percent {
+            Some(p) if p < PRUNE_WATERMARK_PERCENT => p,
+            Some(p) => {
+                tracing::warn!(
+                    configured = p,
+                    fallback = LOW_WATERMARK_PERCENT_DEFAULT,
+                    "low_watermark_percent must be < PRUNE_WATERMARK_PERCENT (50%); \
+                     M1: falling back to the canonical low watermark"
+                );
+                LOW_WATERMARK_PERCENT_DEFAULT
+            }
+            None => LOW_WATERMARK_PERCENT_DEFAULT,
+        }
     }
 }
 
@@ -181,13 +211,13 @@ impl PruningConfig {
 ///    `should_prune` gate engages and rewrites items on the
 ///    clone — a different layer with different rules).
 ///
-/// **Phase A placeholder** (design doc §6 Phase A 范围 4):
-/// the batched mode itself ships in Phase C — this module
-/// declares the domain and the Phase A test asserts the
-/// current (per-turn) build sits **outside** it, so the
-/// placeholder is honest: nothing claims the invariant
-/// today. Phase C implements the mode and converts the
-/// placeholder test into the real invariant.
+/// **Status (N6, step-5 第五方审计)**: Phase C **shipped** — the batched
+/// execution mode is live behind `[compaction.pruning].batched_pruning`
+/// (cf-config, default `false`, R7), wired through
+/// `PruningConfig::batched_mode()`. This struct itself still has **no
+/// production call site**: it is reserved as the C-2 applicability-domain
+/// declaration, and the tests below pin its membership semantics so a
+/// future C-2 wiring can adopt it as-is.
 // `Eq` intentionally omitted: the context fraction is an
 // `f64` (watermark comparison), and `f64` is not `Eq`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -302,13 +332,12 @@ mod tests {
     /// 第二步 §Q3 / Phase C, v3.3 ⑧): the batched-mode
     /// prefix-growth invariant applies **only** when the
     /// batched execution mode is enabled AND the trigger
-    /// fires below the 50% context watermark. **Phase A
-    /// placeholder**: the batched mode ships in Phase C,
-    /// so this asserts the domain *declaration* — the
-    /// current per-turn build (default domain) sits
+    /// fires below the 50% context watermark. **N6 (step-5 第五方审计)**:
+    /// the batched mode has since shipped (R7,
+    /// `[compaction.pruning].batched_pruning`); this test keeps pinning the
+    /// domain *declaration* — the default (per-turn) domain sits
     /// outside it, and every quadrant of the domain
-    /// predicate evaluates as specified. Phase C
-    /// converts this into the real invariant test.
+    /// predicate evaluates as specified.
     #[test]
     fn c2_applicability_domain_requires_batched_and_below_watermark() {
         // Phase A / current build: per-turn mode —
@@ -422,6 +451,42 @@ mod tests {
             }
             .batched_mode(),
             "C-6: watermark alone (no flag) must NOT activate batched mode"
+        );
+    }
+
+    /// M1: a configured low watermark `>=` the 50% high-water line is invalid
+    /// (the trigger would sit at/above the API-copy gate) and falls back to the
+    /// canonical 40%; valid values pass through unchanged.
+    #[test]
+    fn effective_low_watermark_percent_clamps_invalid_values() {
+        let cfg = |p: Option<u8>| PruningConfig {
+            low_watermark_percent: p,
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg(Some(30)).effective_low_watermark_percent(),
+            30,
+            "M1: a valid watermark passes through unchanged"
+        );
+        assert_eq!(
+            cfg(Some(49)).effective_low_watermark_percent(),
+            49,
+            "M1: 49% is still valid (strictly below the 50% line)"
+        );
+        assert_eq!(
+            cfg(Some(50)).effective_low_watermark_percent(),
+            LOW_WATERMARK_PERCENT_DEFAULT,
+            "M1: 50% is invalid (>= high-water) → fall back to the canonical default"
+        );
+        assert_eq!(
+            cfg(Some(80)).effective_low_watermark_percent(),
+            LOW_WATERMARK_PERCENT_DEFAULT,
+            "M1: >50% is invalid → fall back to the canonical default"
+        );
+        assert_eq!(
+            cfg(None).effective_low_watermark_percent(),
+            LOW_WATERMARK_PERCENT_DEFAULT,
+            "M1: unset → canonical default"
         );
     }
 

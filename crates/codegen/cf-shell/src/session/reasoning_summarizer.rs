@@ -18,8 +18,9 @@
 //! clear in `cf-chat-state` only applies already-ready summaries, so the
 //! pre-generation is non-blocking.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cf_sampling_types::{ConversationItem, ConversationRequest};
 
@@ -33,9 +34,18 @@ pub const PREGENERATION_UTILIZATION_PERCENT: u64 = 35;
 pub const SUMMARY_THROTTLE_MIN_MS: u64 = 2_000;
 pub const SUMMARY_THROTTLE_MAX_MS: u64 = 5_000;
 
-/// Reasoning blocks younger than this many turns are never summarized —
-/// aligns with the batch-clear `hard_clear_age_turns` age threshold intent.
-pub const REASONING_SUMMARY_AGE_TURNS: usize = 10;
+// M10: the pre-generation age gate is **not** a hard-coded constant. The
+// session layer reads `hard_clear_age_turns` from the live config
+// (`ChatStateHandle::get_hard_clear_age_turns`) and passes it into
+// `collect_eligible_reasoning_blocks`, so the pre-generation and prune age
+// thresholds share a single source and cannot drift.
+
+/// B-2: reasoning blocks shorter than this many characters are never
+/// summarized. A short block's rule floor plus attribution is very unlikely to
+/// be smaller than the block itself (net-negative replacement), and it would
+/// also cost a wasted LLM input pass for no gain — so short blocks are left
+/// entirely alone (a table miss keeps the original, C-1b never-bare-clear).
+pub const MIN_SUMMARIZABLE_BLOCK_CHARS: usize = 80;
 
 /// The summarizer prompt, written verbatim per the design doc (C-1):
 /// ① keep key qualitative attribution words verbatim ② keep secondary
@@ -71,6 +81,35 @@ pub fn try_claim_pregeneration(guard: &AtomicBool) -> bool {
         .is_ok()
 }
 
+/// M4: owning RAII guard for the session-scoped pre-generation reentrancy
+/// flag. Holding a [`PregenerationGuard`] means this task owns the flag;
+/// dropping it — on normal completion, an early `return`, **or unwinding from
+/// a panic** — resets the flag so a later turn can pre-generate again. This
+/// replaces the previous manual `.store(false)` at task exit, which was
+/// skipped on panic and would have permanently stalled pre-generation for the
+/// session.
+pub struct PregenerationGuard {
+    flag: Arc<AtomicBool>,
+}
+
+impl Drop for PregenerationGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::Release);
+    }
+}
+
+/// M4: try to claim the pre-generation guard, returning an owning RAII guard
+/// on success and `None` when a pre-generation is already running. The caller
+/// moves the guard into the spawned pre-generation task so the flag is
+/// released on every exit path (including panic / task cancellation).
+pub fn try_claim_pregeneration_guard(flag: Arc<AtomicBool>) -> Option<PregenerationGuard> {
+    if try_claim_pregeneration(flag.as_ref()) {
+        Some(PregenerationGuard { flag })
+    } else {
+        None
+    }
+}
+
 /// Deterministic throttle delay for the i-th summary call, clamped to
 /// [`SUMMARY_THROTTLE_MIN_MS`, `SUMMARY_THROTTLE_MAX_MS`]. A simple arithmetic
 /// stagger (no RNG) so calls in a batch don't fire together.
@@ -86,6 +125,27 @@ pub fn throttle_interval_ms(block_index: usize) -> u64 {
 /// [`throttle_interval_ms`] as a [`Duration`] (for `tokio::time::sleep`).
 pub fn throttle_interval(block_index: usize) -> Duration {
     Duration::from_millis(throttle_interval_ms(block_index))
+}
+
+/// N2 (step-5 第五方审计): minimum gap between the END of one pre-generation
+/// run and the START of the next. The session-scoped
+/// [`try_claim_pregeneration_guard`] only serializes runs; without a
+/// cross-run gap a run that just finished can be followed immediately by
+/// another (every turn end re-enters), so the throttled 2–5 s/block LLM
+/// channel never rests between rounds. Enforced at claim time by the
+/// `SessionActor` (`reasoning_pregen_last_run_end`).
+pub const CROSS_RUN_MIN_GAP: Duration = Duration::from_secs(5);
+
+/// N2 pure decision: may a new pre-generation run start at `now`, given when
+/// the previous run ended? `None` (no completed run yet) always allows; a gap
+/// of exactly [`CROSS_RUN_MIN_GAP`] allows (only "less than 5 s" gives up).
+/// A "future" end stamp (clock oddity) saturates to a zero gap → blocked,
+/// which is the conservative direction for the channel.
+pub fn cross_run_gap_allows(last_run_end: Option<Instant>, now: Instant) -> bool {
+    match last_run_end {
+        None => true,
+        Some(end) => now.saturating_duration_since(end) >= CROSS_RUN_MIN_GAP,
+    }
 }
 
 /// Compose the final summary: deterministic rule floor + the LLM attribution
@@ -138,6 +198,8 @@ pub const REASONING_SUMMARY_SIBLING_MARKER: &str = "[reasoning summary]";
 ///
 /// # Filters
 /// - Encrypted blocks are skipped (C-1b ② — never summarized, never cleared).
+/// - Blocks shorter than [`MIN_SUMMARIZABLE_BLOCK_CHARS`] are skipped (B-2 —
+///   net-negative to summarize, and a wasted LLM input pass).
 /// - Blocks whose text already carries [`REASONING_SUMMARY_MARKER`] are skipped
 ///   (never re-summarize a summary).
 /// - Blocks already present in `already_summarized` are skipped (the table is
@@ -183,6 +245,13 @@ pub fn collect_eligible_reasoning_blocks(
             continue;
         }
         let text = cf_sampling_types::reasoning_item_text(r);
+        // B-2: skip short blocks — summarizing them is net-negative (their
+        // rule floor can exceed the block) and wastes an LLM input pass. A
+        // skipped block simply has no table entry, so the batched prune leaves
+        // the original untouched (C-1b never-bare-clear).
+        if text.chars().count() < MIN_SUMMARIZABLE_BLOCK_CHARS {
+            continue;
+        }
         // Never re-summarize a synthesized summary sibling — defense in depth:
         // the rule-floor marker *and* the R1 visible-text (`[reasoning summary]`)
         // marker both exclude it.
@@ -287,6 +356,12 @@ mod tests {
         })
     }
 
+    /// B-2: a reasoning block text comfortably above [`MIN_SUMMARIZABLE_BLOCK_CHARS`]
+    /// so it is not filtered by the short-block gate.
+    fn long_text(prefix: &str) -> String {
+        format!("{prefix} {}", "x".repeat(90))
+    }
+
     #[test]
     fn should_pregenerate_gates_at_35_percent() {
         assert!(!should_pregenerate(0));
@@ -309,6 +384,40 @@ mod tests {
         assert!(try_claim_pregeneration(&guard));
     }
 
+    /// M4: the RAII guard releases the flag even when the holder panics, so a
+    /// later turn can pre-generate again (the old manual release was skipped on
+    /// panic and permanently stalled pre-generation).
+    #[test]
+    fn pregeneration_guard_releases_on_panic_and_drop() {
+        let flag = Arc::new(AtomicBool::new(false));
+
+        // Normal drop releases.
+        {
+            let _g = try_claim_pregeneration_guard(Arc::clone(&flag)).expect("first claim wins");
+            assert!(flag.load(Ordering::Acquire), "flag held while guard alive");
+        }
+        assert!(
+            !flag.load(Ordering::Acquire),
+            "M4: dropping the guard must release the flag"
+        );
+
+        // Panic unwinds through Drop → flag released.
+        let panic_flag = Arc::clone(&flag);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _g = try_claim_pregeneration_guard(Arc::clone(&panic_flag)).expect("re-claim after drop");
+            panic!("simulated pre-generation panic");
+        }));
+        assert!(result.is_err(), "the closure must have panicked");
+        assert!(
+            !flag.load(Ordering::Acquire),
+            "M4: a panic must still release the flag via Drop"
+        );
+        assert!(
+            try_claim_pregeneration_guard(Arc::clone(&flag)).is_some(),
+            "M4: the flag must be re-claimable after a panic release"
+        );
+    }
+
     #[test]
     fn throttle_interval_stays_within_bounds() {
         for i in 0..50 {
@@ -320,6 +429,34 @@ mod tests {
         }
         // Deterministic: same index → same delay.
         assert_eq!(throttle_interval_ms(3), throttle_interval_ms(3));
+    }
+
+    /// N2: the cross-run gap decision — no previous run always allows; a gap
+    /// shorter than [`CROSS_RUN_MIN_GAP`] gives up; exactly the gap (or more)
+    /// allows.
+    #[test]
+    fn cross_run_gap_allows_enforces_minimum_interval() {
+        let now = Instant::now();
+        assert!(
+            cross_run_gap_allows(None, now),
+            "N2: the first run (no completed predecessor) must always be allowed"
+        );
+        assert!(
+            !cross_run_gap_allows(Some(now), now),
+            "N2: a run ending now must block an immediate re-entry (< 5 s)"
+        );
+        assert!(
+            !cross_run_gap_allows(Some(now - Duration::from_millis(4_999)), now),
+            "N2: 4.999 s after the last run's end must still give up (< 5 s)"
+        );
+        assert!(
+            cross_run_gap_allows(Some(now - Duration::from_secs(5)), now),
+            "N2: exactly 5 s after the last run's end must allow (gap >= min)"
+        );
+        assert!(
+            cross_run_gap_allows(Some(now - Duration::from_secs(3_600)), now),
+            "N2: a long-idle channel must allow a new run"
+        );
     }
 
     #[test]
@@ -358,13 +495,16 @@ mod tests {
 
     #[test]
     fn collect_eligible_reasoning_blocks_filters_by_age_and_encryption() {
+        // B-2: all clear-text blocks are long enough to clear the short-block
+        // gate, so age/encryption are the only filters exercised here.
+        let old = long_text("old clear text");
         let conv = vec![
             ConversationItem::user("q0"),
-            reasoning_block("old clear text", None), // age 1 → eligible
+            reasoning_block(&old, None), // age 1 → eligible
             ConversationItem::user("q1"),
-            reasoning_block("old encrypted", Some("enc")), // age 1 but encrypted → skip
+            reasoning_block(&long_text("old encrypted"), Some("enc")), // age 1 but encrypted → skip
             ConversationItem::user("q2"),
-            reasoning_block("young text", None), // age 0 → skip (too young)
+            reasoning_block(&long_text("young text"), None), // age 0 → skip (too young)
         ];
 
         let eligible = collect_eligible_reasoning_blocks(
@@ -374,18 +514,44 @@ mod tests {
             &cf_chat_state::ReasoningSummaries::new(),
         );
         assert_eq!(eligible.len(), 1, "only the aged non-encrypted block is eligible");
-        assert_eq!(eligible[0].text, "old clear text");
+        assert_eq!(eligible[0].text, old);
         assert_eq!(
             eligible[0].fingerprint,
-            cf_chat_state::reasoning_block_fingerprint("old clear text")
+            cf_chat_state::reasoning_block_fingerprint(&old)
         );
+    }
+
+    /// B-2: a block shorter than [`MIN_SUMMARIZABLE_BLOCK_CHARS`] is never
+    /// collected (its rule floor can exceed the block / wastes an LLM pass).
+    #[test]
+    fn collect_eligible_reasoning_blocks_skips_short_blocks() {
+        let short = "x".repeat(MIN_SUMMARIZABLE_BLOCK_CHARS - 1);
+        let long = long_text("boundary");
+        assert!(long.chars().count() >= MIN_SUMMARIZABLE_BLOCK_CHARS);
+        let conv = vec![
+            reasoning_block(&short, None), // just under the gate → skip
+            reasoning_block(&long, None),  // at/over the gate → eligible
+            ConversationItem::user("q0"),
+        ];
+        let eligible = collect_eligible_reasoning_blocks(
+            &conv,
+            0,
+            1,
+            &cf_chat_state::ReasoningSummaries::new(),
+        );
+        assert_eq!(
+            eligible.len(),
+            1,
+            "B-2: only the >= {MIN_SUMMARIZABLE_BLOCK_CHARS}-char block is eligible, got {eligible:?}"
+        );
+        assert_eq!(eligible[0].text, long, "B-2: the long block must be the collected one");
     }
 
     #[test]
     fn collect_eligible_reasoning_blocks_empty_when_none_eligible() {
         let conv = vec![
             ConversationItem::user("q0"),
-            reasoning_block("enc", Some("enc")),
+            reasoning_block(&long_text("enc"), Some("enc")),
         ];
         let empty = cf_chat_state::ReasoningSummaries::new();
         assert!(collect_eligible_reasoning_blocks(&conv, 0, 1, &empty).is_empty());
@@ -395,7 +561,8 @@ mod tests {
     #[test]
     fn collect_eligible_reasoning_blocks_compensates_for_synthetic_user_items() {
         // The block sits before the only User item → turn_from_end = 0.
-        let conv = vec![reasoning_block("blk", None), ConversationItem::user("q0")];
+        let blk = long_text("blk");
+        let conv = vec![reasoning_block(&blk, None), ConversationItem::user("q0")];
         let empty = cf_chat_state::ReasoningSummaries::new();
         // prompt_index == user count → no synthetic users → eligible at age 0.
         let with_real = collect_eligible_reasoning_blocks(&conv, 0, 1, &empty);
@@ -411,17 +578,22 @@ mod tests {
 
     #[test]
     fn collect_eligible_reasoning_blocks_skips_already_summarized_and_markers() {
+        // B-2: every block is long enough that only the summary/marker filters
+        // (not the short-block gate) can be responsible for the empty result.
+        let fresh = long_text("fresh block");
+        let floor_marked = long_text("[推理摘要|规则抽取] 数字/参数：1");
+        let sibling_marked = long_text("[reasoning summary] 早期合成摘要无规则地板前缀");
         let conv = vec![
-            reasoning_block("fresh block", None),
-            reasoning_block("[推理摘要|规则抽取] 数字/参数：1", None),
+            reasoning_block(&fresh, None),
+            reasoning_block(&floor_marked, None),
             // R1 visible-text sibling marker WITHOUT the rule-floor prefix —
             // uniquely exercises the `[reasoning summary]` filter branch.
-            reasoning_block("[reasoning summary] 早期合成摘要无规则地板前缀", None),
+            reasoning_block(&sibling_marked, None),
             ConversationItem::user("q0"),
         ];
         let mut table = cf_chat_state::ReasoningSummaries::new();
         table.insert(
-            cf_chat_state::reasoning_block_fingerprint("fresh block"),
+            cf_chat_state::reasoning_block_fingerprint(&fresh),
             "s".to_string(),
         );
         let eligible = collect_eligible_reasoning_blocks(&conv, 0, 1, &table);

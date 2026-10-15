@@ -367,6 +367,7 @@ pub(crate) async fn create_test_actor_ex(
         mcp_reminder_mode: McpReminderMode::Delta,
         mcp_reminder_dirty: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         reasoning_pregenerating: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        reasoning_pregen_last_run_end: std::cell::Cell::new(None),
         mcp_connecting_reminder_injected: std::cell::Cell::new(false),
         mcp_handshakes_done: Arc::new(tokio::sync::Notify::new()),
         user_input_generation: std::sync::atomic::AtomicU64::new(0),

@@ -2489,6 +2489,21 @@ pub struct PruningConfig {
     pub soft_trim_tail: usize,
     /// Turn age after which tool results are hard-cleared (replaced with placeholder).
     pub hard_clear_age_turns: usize,
+    /// Phase C batched-pruning execution-mode master switch
+    /// (`[compaction.pruning].batched_pruning`). **Default `false`** = per-turn
+    /// mode, byte-identical to the pre-Phase-C build (the C-6 flag-off anchor).
+    /// Enabling it (together with [`Self::low_watermark_percent`]) switches the
+    /// retained layer to the low-watermark batch clear. The `false` default is
+    /// skipped on serialize so existing config files are unchanged.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub batched_pruning: bool,
+    /// Phase C low-watermark context-utilization percentage
+    /// (`[compaction.pruning].low_watermark_percent`). `None` = unset (batched
+    /// mode stays inert); `Some(p)` = the batch clear triggers once utilization
+    /// reaches `p` percent (`p` must be `< 50`, C-7). `None` is skipped on
+    /// serialize so the key is absent until explicitly configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub low_watermark_percent: Option<u8>,
 }
 
 impl Default for PruningConfig {
@@ -2500,7 +2515,63 @@ impl Default for PruningConfig {
             soft_trim_head: 1500,
             soft_trim_tail: 1500,
             hard_clear_age_turns: 10,
+            batched_pruning: false,
+            low_watermark_percent: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod pruning_config_tests {
+    use super::*;
+
+    /// B-1: the Phase C batched-mode keys round-trip through serde and are
+    /// *absent* from the serialized form until explicitly configured — the
+    /// `[compaction.pruning]` config file stays byte-identical for sessions
+    /// that never opt in (S-2/S-3 persist 范式).
+    #[test]
+    fn batched_fields_round_trip_and_skip_defaults() {
+        // Defaults (false / None) must not emit either key.
+        let json = serde_json::to_value(PruningConfig::default()).unwrap();
+        assert!(
+            json.get("batched_pruning").is_none(),
+            "B-1: batched_pruning=false must be skipped on serialize, got: {json}"
+        );
+        assert!(
+            json.get("low_watermark_percent").is_none(),
+            "B-1: low_watermark_percent=None must be skipped on serialize, got: {json}"
+        );
+
+        // An absent key deserializes to the off defaults.
+        let parsed: PruningConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(
+            !parsed.batched_pruning,
+            "B-1: a missing batched_pruning key must default to false"
+        );
+        assert_eq!(
+            parsed.low_watermark_percent, None,
+            "B-1: a missing low_watermark_percent key must default to None"
+        );
+
+        // Explicit values serialize and round-trip exactly.
+        let on = PruningConfig {
+            batched_pruning: true,
+            low_watermark_percent: Some(40),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&on).unwrap();
+        assert_eq!(
+            json.get("batched_pruning").and_then(|v| v.as_bool()),
+            Some(true),
+            "B-1: batched_pruning=true must serialize, got: {json}"
+        );
+        assert_eq!(
+            json.get("low_watermark_percent").and_then(|v| v.as_u64()),
+            Some(40),
+            "B-1: low_watermark_percent=Some(40) must serialize, got: {json}"
+        );
+        let back: PruningConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(back, on, "B-1: batched fields must round-trip losslessly");
     }
 }
 

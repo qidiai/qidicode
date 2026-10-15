@@ -300,6 +300,12 @@ impl ChatStateActor {
             ChatStateCommand::GetBatchedPruningEnabled { reply } => {
                 let _ = reply.send(self.pruning_config.batched_mode());
             }
+            ChatStateCommand::GetHardClearAgeTurns { reply } => {
+                // M10: single source of truth for the retained hard-clear age —
+                // the session-layer pre-generation reads the same value the
+                // prune side applies.
+                let _ = reply.send(self.pruning_config.hard_clear_age_turns);
+            }
             ChatStateCommand::GetReasoningSummaries { reply } => {
                 let _ = reply.send(self.state.reasoning_summaries.clone());
             }

@@ -344,11 +344,17 @@ impl ChatStateActor {
             self.state.sampling_config.context_window,
         );
 
-        // Below the low watermark (reclaim line): re-arm the window and leave
-        // the retained layer untouched. This is the hysteresis de-assert — the
-        // window only reopens after a batch clear once utilization drops back
-        // under the line (C-7 "触发线/回收线分离").
-        if utilization_percent < u64::from(watermark) {
+        // M1 (C-7 hysteresis): re-arm the window only once utilization drops a
+        // real margin *below* the trigger line, not the instant it dips under
+        // it. The trigger line is the configured low watermark (e.g. 40%); the
+        // reclaim line sits `LOW_WATERMARK_RECLAIM_MARGIN_PERCENT` below it
+        // (e.g. 35%), forming a dead zone so a small dip-and-re-rise around the
+        // trigger cannot fire a second clear. Below the reclaim line the window
+        // reopens; between reclaim and trigger it stays inert (C-7
+        // "触发线/回收线分离").
+        let reclaim_percent =
+            watermark.saturating_sub(crate::types::LOW_WATERMARK_RECLAIM_MARGIN_PERCENT);
+        if utilization_percent < u64::from(reclaim_percent) {
             self.state.last_batch_clear_at = None;
             return 0;
         }
@@ -433,6 +439,13 @@ impl ChatStateActor {
                 let Some(summary) = self.state.reasoning_summaries.get(&fingerprint).cloned() else {
                     continue;
                 };
+                // B-2 net-benefit fuse: never let the summary *enlarge* a block.
+                // If the summary exceeds 60% of the original length the
+                // replacement would not shrink the context, so keep the
+                // original (skip; its bytes are not counted as cleared).
+                if summary.chars().count() > text.chars().count() * 6 / 10 {
+                    continue;
+                }
                 self.state.conversation[i] =
                     ConversationItem::assistant(reasoning_summary_sibling_text(&summary));
                 cleared += 1;
@@ -491,9 +504,15 @@ impl ChatStateActor {
             cleared += 1;
         }
 
-        self.state.last_batch_clear_at = Some(self.state.prompt_index);
-
+        // B-3: close the hysteresis window **only when something was actually
+        // cleared**. A no-op pass (cleared == 0 — e.g. everything eligible was
+        // already cleared) must not set `last_batch_clear_at`: otherwise the
+        // window closes without freeing anything and the retained Reasoning
+        // channel stays dead until utilization drops back below the reclaim
+        // line. Leaving it `None` lets the next cross re-attempt and catch
+        // items that aged in between.
         if cleared > 0 {
+            self.state.last_batch_clear_at = Some(self.state.prompt_index);
             let after_bytes = self.conversation_content_bytes();
             tracing::debug!(
                 batch_cleared = cleared,

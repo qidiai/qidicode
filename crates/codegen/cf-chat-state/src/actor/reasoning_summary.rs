@@ -49,6 +49,19 @@ const ASSERT_KEYWORDS: &[&str] = &[
     "排除", "不能", "必须", "禁止", "约束", "仅有", "只能", "关键", "天花板",
 ];
 
+/// B-2 rule-floor caps: at most this many numeric/parameter atoms and this
+/// many assertion sentences (both in appearance order) are kept, and the whole
+/// rule-floor string is truncated to this many UTF-8 bytes (with an ellipsis
+/// marker) when it would otherwise exceed them. Without these caps a long
+/// reasoning block's rule floor (numbers + every ASCII identifier + long
+/// verbatim sentences) can be *larger* than the original — making the batched
+/// replacement grow the context instead of shrinking it.
+const MAX_SUMMARY_PARAMS: usize = 8;
+const MAX_SUMMARY_SENTENCES: usize = 8;
+const MAX_SUMMARY_BYTES: usize = 480;
+/// Marker appended when the rule floor is byte-truncated (B-2).
+const SUMMARY_ELLIPSIS: &str = "…";
+
 /// Sentence-split delimiters, matching the Python prototype `SENT_SPLIT_RE`
 /// (`[。；！\n]`).
 fn is_sentence_split(c: char) -> bool {
@@ -131,6 +144,11 @@ pub fn rule_extract_summary(text: &str) -> Option<String> {
         return None;
     }
 
+    // B-2: cap both lists (appearance order) before rendering, so the floor is
+    // bounded per section.
+    let params: Vec<String> = params.into_iter().take(MAX_SUMMARY_PARAMS).collect();
+    let sentences: Vec<String> = sentences.into_iter().take(MAX_SUMMARY_SENTENCES).collect();
+
     let mut sections: Vec<String> = Vec::with_capacity(2);
     if !params.is_empty() {
         sections.push(format!("数字/参数：{}", params.join("、")));
@@ -139,7 +157,28 @@ pub fn rule_extract_summary(text: &str) -> Option<String> {
         let quoted: Vec<String> = sentences.iter().map(|s| format!("\"{s}\"")).collect();
         sections.push(format!("断言：{}", quoted.join("、")));
     }
-    Some(format!("[推理摘要|规则抽取] {}", sections.join("；")))
+    // B-2: byte cap with an ellipsis marker (UTF-8-safe truncation).
+    Some(truncate_summary_bytes(format!(
+        "[推理摘要|规则抽取] {}",
+        sections.join("；")
+    )))
+}
+
+/// B-2: truncate a rule-floor summary to [`MAX_SUMMARY_BYTES`] bytes on a
+/// UTF-8 char boundary, appending [`SUMMARY_ELLIPSIS`] when truncation
+/// occurred. Guarantees the returned length is ≤ [`MAX_SUMMARY_BYTES`].
+fn truncate_summary_bytes(mut summary: String) -> String {
+    if summary.len() <= MAX_SUMMARY_BYTES {
+        return summary;
+    }
+    let budget = MAX_SUMMARY_BYTES.saturating_sub(SUMMARY_ELLIPSIS.len());
+    let mut cut = budget.min(summary.len());
+    while cut > 0 && !summary.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    summary.truncate(cut);
+    summary.push_str(SUMMARY_ELLIPSIS);
+    summary
 }
 
 /// Content fingerprint for a reasoning block — the [`crate::types::ReasoningSummaries`]
@@ -211,6 +250,60 @@ mod tests {
         assert!(s.contains("CRC32-C"), "got: {s}");
         assert!(s.contains("try-with-resources"), "got: {s}");
         assert!(!s.contains('x'), "single-char ident 'x' must be filtered: {s}");
+    }
+
+    /// B-2: both the numeric/parameter list and the assertion list are capped
+    /// at top-8 (appearance order).
+    #[test]
+    fn rule_extract_caps_params_and_sentences_at_top_n() {
+        // 12 distinct numbers in appearance order → only the first 8 survive.
+        let s = rule_extract_summary("1 2 3 4 5 6 7 8 9 10 11 12").unwrap();
+        assert_eq!(
+            s, "[推理摘要|规则抽取] 数字/参数：1、2、3、4、5、6、7、8",
+            "B-2 top-N: only the first 8 params may be kept"
+        );
+
+        // 10 distinct assertion sentences → only the first 8 survive.
+        let text = "必须保留甲。必须保留乙。必须保留丙。必须保留丁。必须保留戊。\
+                    必须保留己。必须保留庚。必须保留辛。必须保留壬。必须保留癸。";
+        let s = rule_extract_summary(text).unwrap();
+        assert!(
+            s.contains("\"必须保留辛。\""),
+            "B-2 top-N: the 8th assertion sentence must be kept: {s}"
+        );
+        assert!(
+            !s.contains("\"必须保留壬。\"") && !s.contains("\"必须保留癸。\""),
+            "B-2 top-N: the 9th/10th assertion sentences must be dropped: {s}"
+        );
+    }
+
+    /// B-2: an over-long rule floor is byte-truncated to ≤ 480 bytes with an
+    /// ellipsis marker (both caps can be satisfied yet the floor still huge).
+    #[test]
+    fn rule_extract_truncates_over_long_output_at_byte_cap() {
+        // 8 long assertion sentences (~370 bytes each) → far over 480 bytes
+        // even though the top-8 sentence cap is already applied.
+        let mut text = String::new();
+        for filler in ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛"] {
+            text.push_str("必须");
+            text.push_str(&filler.repeat(120));
+            text.push('。');
+        }
+        let s = rule_extract_summary(&text).unwrap();
+        assert!(
+            s.len() <= MAX_SUMMARY_BYTES,
+            "B-2 byte cap: summary must be <= {} bytes, got {}: {s}",
+            MAX_SUMMARY_BYTES,
+            s.len()
+        );
+        assert!(
+            s.ends_with(SUMMARY_ELLIPSIS),
+            "B-2 byte cap: a truncated floor must carry the ellipsis marker: {s}"
+        );
+        assert!(
+            s.is_char_boundary(s.len()),
+            "B-2 byte cap: truncation must land on a UTF-8 char boundary"
+        );
     }
 
     #[test]

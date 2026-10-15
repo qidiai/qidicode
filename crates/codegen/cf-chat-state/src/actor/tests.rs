@@ -3457,7 +3457,7 @@ async fn test_batched_window_prefix_growth_and_single_trigger_batch() {
         match &conv[idx] {
             ConversationItem::ToolResult(tr) => assert_eq!(
                 tr.content.as_ref(),
-                "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]",
+                "[tool result aged; full output preserved in the session archive — read_file the raw updates.jsonl transcript to recover it (segment_*.md files exist only in Segments compaction mode)]",
                 "C-2 trigger turn: tool result of turn {turn} must be batch-cleared once"
             ),
             other => panic!("expected ToolResult at index {idx}, got {other:?}"),
@@ -3535,7 +3535,7 @@ async fn test_batched_keep_last_n_turns_never_batch_cleared() {
         match &conv[idx] {
             ConversationItem::ToolResult(tr) => assert_eq!(
                 tr.content.as_ref(),
-                "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]",
+                "[tool result aged; full output preserved in the session archive — read_file the raw updates.jsonl transcript to recover it (segment_*.md files exist only in Segments compaction mode)]",
                 "C-3: aged {label} outside keep_last_n_turns must be batch-cleared"
             ),
             other => panic!("expected ToolResult at {idx}, got {other:?}"),
@@ -3574,8 +3574,9 @@ async fn test_batched_search_tool_result_is_exempt() {
 
     // Turn 0: regular tool (bash) → will be cleared.
     handle.record_token_usage(30_000);
-    handle.push_user_message(ConversationItem::user("q0"));
+    // R6: production order — increment before the turn's user message.
     handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q0"));
     handle.push_assistant_response(ConversationItem::assistant_tool_calls(vec![
         cf_sampling_types::ToolCall {
             id: Arc::from("call_0"),
@@ -3587,8 +3588,9 @@ async fn test_batched_search_tool_result_is_exempt() {
 
     // Turn 1: search_tool → must be exempt.
     handle.record_token_usage(30_000);
-    handle.push_user_message(ConversationItem::user("q1"));
+    // R6: production order — increment before the turn's user message.
     handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q1"));
     handle.push_assistant_response(ConversationItem::assistant_tool_calls(vec![
         cf_sampling_types::ToolCall {
             id: Arc::from("search_call_1"),
@@ -3600,8 +3602,9 @@ async fn test_batched_search_tool_result_is_exempt() {
 
     // Turn 2: regular tool (recent, keep_last_n_turns).
     handle.record_token_usage(30_000);
-    handle.push_user_message(ConversationItem::user("q2"));
+    // R6: production order — increment before the turn's user message.
     handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q2"));
     handle.push_assistant_response(ConversationItem::assistant_tool_calls(vec![
         cf_sampling_types::ToolCall {
             id: Arc::from("call_2"),
@@ -3622,7 +3625,7 @@ async fn test_batched_search_tool_result_is_exempt() {
     match &conv[2] {
         ConversationItem::ToolResult(tr) => assert_eq!(
             tr.content.as_ref(),
-            "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]",
+            "[tool result aged; full output preserved in the session archive — read_file the raw updates.jsonl transcript to recover it (segment_*.md files exist only in Segments compaction mode)]",
             "C-3: regular aged tool result must be batch-cleared"
         ),
         other => panic!("expected ToolResult at 2, got {other:?}"),
@@ -3694,7 +3697,7 @@ async fn test_batched_flag_off_is_byte_identical_to_per_turn() {
             );
             assert_ne!(
                 tr.content.as_ref(),
-                "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]",
+                "[tool result aged; full output preserved in the session archive — read_file the raw updates.jsonl transcript to recover it (segment_*.md files exist only in Segments compaction mode)]",
                 "C-6: flag off must never use the batched soft-guidance placeholder"
             );
         }
@@ -3912,6 +3915,55 @@ async fn test_reasoning_replacement_is_idempotent() {
     );
 }
 
+/// R2 merge semantics (step-5 第五方审计 阻塞-4): two consecutive
+/// `SetReasoningSummaries` writes with disjoint fingerprints must **merge** —
+/// the second write's fresh batch must not drop the first batch's entries.
+/// Guards the `BTreeMap::extend` in the actor command handler against a
+/// regression back to wholesale table replacement: with replace semantics the
+/// first assert goes red.
+#[tokio::test]
+async fn test_set_reasoning_summaries_merges_disjoint_batches() {
+    let handle = spawn_batched_handle(batched_reasoning_config()).await;
+
+    // Disjoint fingerprints. The table is keyed by `reasoning_block_fingerprint`
+    // u64s; arbitrary sentinels suffice for a pure table-level write (no
+    // conversation involved) and make the disjointness explicit.
+    let fp1 = 0xA11CE_u64;
+    let fp2 = 0xB0B_u64;
+
+    // First pre-generation round: only block fp1 was eligible.
+    let mut first = crate::types::ReasoningSummaries::new();
+    first.insert(fp1, "摘要A".to_string());
+    handle.set_reasoning_summaries(first);
+
+    // Second round: only block fp2 was eligible (fp1's summary already lives
+    // in the table, so the rebuilt batch no longer carries it).
+    let mut second = crate::types::ReasoningSummaries::new();
+    second.insert(fp2, "摘要B".to_string());
+    handle.set_reasoning_summaries(second);
+
+    let table = handle.get_reasoning_summaries().await;
+    assert!(
+        table.contains_key(&fp1),
+        "R2 merge regression - second SetReasoningSummaries dropped earlier entries (replace semantics detected); table: {table:?}"
+    );
+    assert_eq!(
+        table.get(&fp1).map(String::as_str),
+        Some("摘要A"),
+        "R2: the first batch's entry must survive the second write unchanged"
+    );
+    assert_eq!(
+        table.get(&fp2).map(String::as_str),
+        Some("摘要B"),
+        "R2: the second batch's own entry must be present (extend, not dropped)"
+    );
+    assert_eq!(
+        table.len(),
+        2,
+        "R2: two disjoint batches must yield exactly two table entries"
+    );
+}
+
 /// C-4 debounce: after the same tool call (name+args fingerprint) has been
 /// batch-cleared `REPLAY_PROMPT_MAX_COUNT` times, the recovery guidance is
 /// dropped (terse placeholder). Exercises the `replay_prompt_suppressed`
@@ -3950,7 +4002,7 @@ async fn test_batched_replay_prompt_debounce_suppresses_after_threshold() {
     // Layout per turn t: [U_t, A_t, TR_t] at 3t, 3t+1, 3t+2; trigger U at 15.
     // Aged results (turns 0..=3) clear; the newest eligible is scanned first,
     // so TR0 (oldest, 4th clear) is the one past the debounce cap.
-    let full = "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]";
+    let full = "[tool result aged; full output preserved in the session archive — read_file the raw updates.jsonl transcript to recover it (segment_*.md files exist only in Segments compaction mode)]";
     let terse = "[tool result aged]";
     for (idx, label, want) in [
         (11usize, "TR3", full),
@@ -3966,6 +4018,172 @@ async fn test_batched_replay_prompt_debounce_suppresses_after_threshold() {
             ),
             other => panic!("expected ToolResult at {idx}, got {other:?}"),
         }
+    }
+}
+
+/// M10: the session-layer pre-generation reads `hard_clear_age_turns` from the
+/// live config through the handle, so the pre-generation and prune age gates
+/// share one source (no hard-coded constant drifting from the config).
+#[tokio::test]
+async fn get_hard_clear_age_turns_reflects_config() {
+    let config = crate::types::PruningConfig {
+        hard_clear_age_turns: 7,
+        ..batched_reasoning_config()
+    };
+    let handle = spawn_batched_handle(config).await;
+    assert_eq!(
+        handle.get_hard_clear_age_turns().await,
+        7,
+        "M10: the handle must expose the configured hard_clear_age_turns"
+    );
+}
+
+/// M2 judgment: the Reasoning age gate is load-bearing — a block whose
+/// fingerprint is in the table but which is *younger* than
+/// `hard_clear_age_turns` is NOT replaced. Delete the age gate and this block
+/// would be rewritten, turning this test red.
+#[tokio::test]
+async fn test_reasoning_age_gate_keeps_young_block() {
+    let handle = spawn_batched_handle(batched_reasoning_config()).await;
+
+    let block = reasoning_sibling("r_young", None);
+    let text = reasoning_text(&block);
+    let fp = crate::reasoning_block_fingerprint(&text);
+    handle.push_assistant_response(block);
+    // NOTE: deliberately no filler turn — the block stays at age 0.
+
+    let mut table = crate::types::ReasoningSummaries::new();
+    table.insert(fp, "短摘要".to_string());
+    handle.set_reasoning_summaries(table);
+
+    handle.record_token_usage(55_000);
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q1"));
+
+    let conv = handle.get_conversation().await;
+    match &conv[0] {
+        ConversationItem::Reasoning(r) => assert_eq!(
+            cf_sampling_types::reasoning_item_text(r),
+            text,
+            "M2: a table-hit Reasoning block younger than hard_clear_age_turns \
+             must stay unchanged (age gate)"
+        ),
+        other => panic!("M2: expected Reasoning at index 0 (age gate), got {other:?}"),
+    }
+}
+
+/// M2 judgment: once a batch clear closes the hysteresis window, crossing the
+/// trigger line again **without** dropping below the reclaim line must not
+/// fire a second clear. Delete the guard and TR1 (aged, below) would be
+/// cleared on turn 3, turning this test red.
+#[tokio::test]
+async fn test_batched_hysteresis_guard_blocks_second_clear_within_window() {
+    let handle = spawn_batched_handle(batched_reasoning_config()).await;
+
+    let full = "[tool result aged; full output preserved in the session archive — read_file the raw updates.jsonl transcript to recover it (segment_*.md files exist only in Segments compaction mode)]";
+
+    // Turns 0-1 below the trigger (23%): no clear.
+    push_batched_plain_turn(&handle, 0, 30_000, 6).await;
+    push_batched_plain_turn(&handle, 1, 30_000, 6).await;
+    // Turn 2 at 42% (>= trigger, < 50%): fires — clears TR0 and closes the
+    // window (cleared > 0).
+    push_batched_plain_turn(&handle, 2, 55_000, 6).await;
+    // Turns 3-4 stay at 42% (above the 35% reclaim line): window stays closed.
+    push_batched_plain_turn(&handle, 3, 55_000, 6).await;
+    push_batched_plain_turn(&handle, 4, 55_000, 6).await;
+
+    let conv = handle.get_conversation().await;
+    // Layout per turn k: [U_k, A_k, TR_k] at 3k, 3k+1, 3k+2.
+    // TR1 (index 5) is aged >= 1 and not search_tool; only the hysteresis guard
+    // can protect it here.
+    match &conv[5] {
+        ConversationItem::ToolResult(tr) => assert_eq!(
+            tr.content.as_ref(),
+            "xxxxxx",
+            "M2: the closed hysteresis window must block a second clear (TR1 intact)"
+        ),
+        other => panic!("expected ToolResult at 5, got {other:?}"),
+    }
+
+    // Drop below the reclaim line (23% < 35%) → re-arm, then re-fire at 42%.
+    push_batched_plain_turn(&handle, 5, 30_000, 6).await;
+    push_batched_plain_turn(&handle, 6, 55_000, 6).await;
+
+    let conv2 = handle.get_conversation().await;
+    match &conv2[5] {
+        ConversationItem::ToolResult(tr) => assert_eq!(
+            tr.content.as_ref(),
+            full,
+            "M2: after re-arming below the reclaim line the aged TR1 must clear"
+        ),
+        other => panic!("expected ToolResult at 5, got {other:?}"),
+    }
+}
+
+/// B-2 net-benefit fuse: if a table summary is longer than 60% of the original
+/// block, the replacement is skipped and the original is kept (otherwise the
+/// "shrink" could grow the context).
+#[tokio::test]
+async fn test_reasoning_net_benefit_fuse_keeps_original() {
+    let handle = spawn_batched_handle(batched_reasoning_config()).await;
+
+    let id = "x".repeat(100);
+    let block = reasoning_sibling(&id, None);
+    let text = reasoning_text(&block);
+    let fp = crate::reasoning_block_fingerprint(&text);
+    handle.push_assistant_response(block);
+    // Age the block past the C-1b age gate.
+    push_batched_plain_turn(&handle, 0, 30_000, 6).await;
+
+    // Summary > 60% of the original length → fuse must skip the replacement.
+    let too_long = "S".repeat(text.chars().count() * 7 / 10);
+    let mut table = crate::types::ReasoningSummaries::new();
+    table.insert(fp, too_long);
+    handle.set_reasoning_summaries(table);
+
+    handle.record_token_usage(55_000);
+    handle.increment_prompt_index();
+    handle.push_user_message(ConversationItem::user("q1"));
+
+    let conv = handle.get_conversation().await;
+    match &conv[0] {
+        ConversationItem::Reasoning(r) => assert_eq!(
+            cf_sampling_types::reasoning_item_text(r),
+            text,
+            "B-2 fuse: a summary > 60% of the original must NOT replace the block"
+        ),
+        other => panic!("B-2 fuse: expected Reasoning at index 0, got {other:?}"),
+    }
+}
+
+/// B-3: a batch window that clears nothing (cleared == 0) must stay open — it
+/// must NOT set `last_batch_clear_at`. With the old behaviour (set
+/// unconditionally) the window would close on turn 0 and TR0 would never clear
+/// on turn 2.
+#[tokio::test]
+async fn test_batched_noop_window_stays_open_for_next_turn() {
+    let handle = spawn_batched_handle(batched_reasoning_config()).await;
+
+    let full = "[tool result aged; full output preserved in the session archive — read_file the raw updates.jsonl transcript to recover it (segment_*.md files exist only in Segments compaction mode)]";
+
+    // Turn 0 at 42%: window opens, but nothing is eligible yet (no aged tool
+    // result) → cleared == 0 → window must stay None.
+    push_batched_plain_turn(&handle, 0, 55_000, 6).await;
+    // Turn 1 at 42%: TR0 is still age 0 → nothing clears.
+    push_batched_plain_turn(&handle, 1, 55_000, 6).await;
+    // Turn 2 at 42%: TR0 is now aged. Because the window never closed, it must
+    // clear here.
+    push_batched_plain_turn(&handle, 2, 55_000, 6).await;
+
+    let conv = handle.get_conversation().await;
+    match &conv[2] {
+        ConversationItem::ToolResult(tr) => assert_eq!(
+            tr.content.as_ref(),
+            full,
+            "B-3: a cleared==0 window must stay open so a later turn can clear \
+             (TR0 must be cleared on turn 2)"
+        ),
+        other => panic!("expected ToolResult at 2, got {other:?}"),
     }
 }
 

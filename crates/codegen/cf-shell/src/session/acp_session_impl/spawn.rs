@@ -427,20 +427,7 @@ pub(crate) async fn spawn_session_actor(
         reasoning_effort: sampling_config.reasoning_effort,
         stream_tool_calls: Some(sampling_config.stream_tool_calls),
     };
-    let actor_pruning_config = cf_chat_state::PruningConfig {
-        enabled: session_pruning_config.enabled,
-        keep_last_n_turns: session_pruning_config.keep_last_n_turns,
-        soft_trim_threshold: session_pruning_config.soft_trim_threshold,
-        soft_trim_head: session_pruning_config.soft_trim_head,
-        soft_trim_tail: session_pruning_config.soft_trim_tail,
-        hard_clear_age_turns: session_pruning_config.hard_clear_age_turns,
-        // Phase C batched mode is off by default (batch 1 skeleton). The
-        // per-endpoint flag plumbing from `[compaction.pruning]` ships in a
-        // later batch; until then the retained layer stays byte-identical to
-        // the pre-Phase-C per-turn build (C-6 flag-off anchor).
-        batched_pruning: false,
-        low_watermark_percent: None,
-    };
+    let actor_pruning_config = actor_pruning_config(&session_pruning_config);
     let (chat_state_event_tx, chat_state_event_rx) = mpsc::unbounded_channel();
     let chat_state_handle = cf_chat_state::ChatStateActor::spawn_with_pruning(
         conversation.clone(),
@@ -1326,6 +1313,7 @@ pub(crate) async fn spawn_session_actor(
         mcp_reminder_mode: McpReminderMode::from_env(),
         mcp_reminder_dirty: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         reasoning_pregenerating: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        reasoning_pregen_last_run_end: std::cell::Cell::new(None),
         mcp_connecting_reminder_injected: std::cell::Cell::new(false),
         mcp_handshakes_done: Arc::new(tokio::sync::Notify::new()),
         user_input_generation: std::sync::atomic::AtomicU64::new(0),
@@ -2079,6 +2067,32 @@ impl crate::session::mcp_restart::RestartActions for SessionRestartActions {
             .end_restart(server);
     }
 }
+/// Map the `[compaction.pruning]` session config
+/// ([`crate::config::PruningConfig`], re-exported from `cf-config`) into the
+/// `cf-chat-state` actor's [`cf_chat_state::PruningConfig`].
+///
+/// B-1: the Phase C batched-mode fields (`batched_pruning`,
+/// `low_watermark_percent`) are passed through **from the config** rather than
+/// hard-coded off, so the flag is actually reachable in production (a
+/// `[compaction.pruning] batched_pruning = true` / `low_watermark_percent = 40`
+/// enables the batched low-watermark clear). The defaults remain
+/// `false` / `None`, so a session that never opts in stays byte-identical to
+/// the pre-Phase-C per-turn build (C-6 flag-off anchor).
+fn actor_pruning_config(
+    session: &crate::config::PruningConfig,
+) -> cf_chat_state::PruningConfig {
+    cf_chat_state::PruningConfig {
+        enabled: session.enabled,
+        keep_last_n_turns: session.keep_last_n_turns,
+        soft_trim_threshold: session.soft_trim_threshold,
+        soft_trim_head: session.soft_trim_head,
+        soft_trim_tail: session.soft_trim_tail,
+        hard_clear_age_turns: session.hard_clear_age_turns,
+        batched_pruning: session.batched_pruning,
+        low_watermark_percent: session.low_watermark_percent,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TerminalBackendKind {
     ReuseParent,
@@ -2101,6 +2115,42 @@ fn select_terminal_backend_kind(
         TerminalBackendKind::LocalPersistent
     } else {
         TerminalBackendKind::LocalNonPersistent
+    }
+}
+/// B-1: the `[compaction.pruning]` batched-mode fields flow through the
+/// config→actor mapping so `batched_mode()` can actually be turned on in
+/// production. Regression anchor: the default config stays per-turn.
+#[cfg(test)]
+mod actor_pruning_wiring_tests {
+    use super::actor_pruning_config;
+
+    #[test]
+    fn batched_flag_and_watermark_reach_actor_batched_mode() {
+        let session = crate::config::PruningConfig {
+            batched_pruning: true,
+            low_watermark_percent: Some(40),
+            ..Default::default()
+        };
+        let actor = actor_pruning_config(&session);
+        assert!(
+            actor.batched_mode(),
+            "B-1: config batched_pruning=true + low_watermark_percent=Some(40) must \
+             reach the actor's batched_mode()"
+        );
+        assert_eq!(
+            actor.low_watermark_percent,
+            Some(40),
+            "B-1: the configured watermark must pass through verbatim"
+        );
+    }
+
+    #[test]
+    fn default_session_config_stays_per_turn() {
+        let actor = actor_pruning_config(&crate::config::PruningConfig::default());
+        assert!(
+            !actor.batched_mode(),
+            "B-1/C-6: the default session config must not activate batched mode"
+        );
     }
 }
 #[cfg(test)]

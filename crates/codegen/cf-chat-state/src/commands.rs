@@ -96,10 +96,12 @@ pub enum ChatStateCommand {
     /// Update the sampling config (e.g., model switch).
     UpdateSamplingConfig { config: SamplingConfig },
 
-    /// Phase C Reasoning-summary pre-generation write (C-1): replace the
-    /// whole block-fingerprint → summary table with the session layer's
-    /// freshly generated batch. The batched prune reads this table when a
-    /// batch-clear window fires (table hit → synthetic sibling, miss → skip).
+    /// Phase C Reasoning-summary pre-generation write (C-1): merge (extend)
+    /// the session layer's freshly generated batch into the existing
+    /// block-fingerprint → summary table (R2: entries for other fingerprints
+    /// survive; a repeat fingerprint overwrites its own value). The batched
+    /// prune reads this table when a batch-clear window fires (table hit →
+    /// synthetic sibling, miss → skip).
     SetReasoningSummaries { summaries: crate::types::ReasoningSummaries },
 
     /// Track that the agent edited a file path.
@@ -227,6 +229,15 @@ pub enum ChatStateCommand {
     /// anchor: off → zero action).
     GetBatchedPruningEnabled {
         reply: oneshot::Sender<bool>,
+    },
+
+    /// The retained-layer hard-clear age threshold (turns), read from the
+    /// live `PruningConfig`. M10: the session-layer Reasoning-summary
+    /// pre-generation uses this *same* value as the prune side so the two age
+    /// thresholds cannot drift (a user lowering `hard_clear_age_turns` keeps
+    /// pre-generation in step instead of silently losing 5–9-age blocks).
+    GetHardClearAgeTurns {
+        reply: oneshot::Sender<usize>,
     },
 
     /// The current Phase C Reasoning-summary table (block fingerprint →
@@ -445,6 +456,9 @@ mod tests {
 
         let (tx, _rx) = oneshot::channel();
         let _ = ChatStateCommand::GetBatchedPruningEnabled { reply: tx };
+
+        let (tx, _rx) = oneshot::channel();
+        let _ = ChatStateCommand::GetHardClearAgeTurns { reply: tx };
 
         let (tx, _rx) = oneshot::channel();
         let _ = ChatStateCommand::GetReasoningSummaries { reply: tx };

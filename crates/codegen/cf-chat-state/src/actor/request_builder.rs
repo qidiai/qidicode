@@ -65,15 +65,23 @@ pub(super) fn is_hard_cleared(content: &str) -> bool {
 ///
 /// Unlike [`HARD_CLEAR_PLACEHOLDER`] (per-turn mode), this is a **soft
 /// guidance** placeholder: it points the model at the session's compaction
-/// archive — the `segment_*.md` segment store (see
-/// [`crate::compaction_mode::CompactionMode::transcript_hint`]) or the raw
-/// `updates.jsonl` transcript — so it can read the aged output back, without
-/// echoing the original tool-call arguments (C-4 定案: never echo args; the
-/// compact rebuild drops `tool_use` raw_input, so echoing them would be
-/// unrecoverable). The `full output at:` retrieval pointer, when the original
-/// carried one, is preserved by [`batch_clear_replacement`].
+/// archive so it can read the aged output back, without echoing the original
+/// tool-call arguments (C-4 定案: never echo args; the compact rebuild drops
+/// `tool_use` raw_input, so echoing them would be unrecoverable). The
+/// `full output at:` retrieval pointer, when the original carried one, is
+/// preserved by [`batch_clear_replacement`].
+///
+/// N4 (step-5 第五方审计): the pointer must be truthful in **every**
+/// compaction mode. The raw `updates.jsonl` transcript is append-only and
+/// never touched by compaction in any mode, so it is the unconditional
+/// recovery target; the `segment_*.md` store exists only in `Segments` mode
+/// ([`crate::compaction_mode::CompactionMode::writes_segments`]) and must
+/// not be claimed unconditionally. The in-context compaction summary is
+/// lossy and may not exist yet (no compaction has run), so it is not cited
+/// as a full-output recovery target either. The actor holds no
+/// `CompactionMode`, so the wording stays a static, mode-agnostic truth.
 pub(super) const BATCH_CLEAR_PLACEHOLDER: &str =
-    "[tool result aged; full output preserved in the session archive — read_file segment_*.md or updates.jsonl to recover it]";
+    "[tool result aged; full output preserved in the session archive — read_file the raw updates.jsonl transcript to recover it (segment_*.md files exist only in Segments compaction mode)]";
 
 /// Debounce variant of [`BATCH_CLEAR_PLACEHOLDER`] (C-4): once the same
 /// tool-call args fingerprint has been batch-cleared
@@ -869,6 +877,35 @@ mod tests {
         assert!(!should_prune(1000, cw)); // 10%
         assert!(should_prune(6000, cw)); // 60%
         assert!(!should_prune(5000, cw)); // 50% exact (> not >=)
+    }
+
+    /// M2: `should_batch_prune` fires exactly in `[low_watermark, 50%)` — the
+    /// 50% upper bound (where the API-copy layer takes over) and the low
+    /// watermark lower bound are both load-bearing.
+    #[test]
+    fn should_batch_prune_gating() {
+        use std::num::NonZeroU64;
+        let cw = NonZeroU64::new(10000).unwrap();
+        // Below the low watermark → no batch prune.
+        assert!(
+            !should_batch_prune(3900, cw, 40),
+            "M2: <40% (below low watermark) must not batch-prune"
+        );
+        // Inside [40, 50) → batch prune.
+        assert!(
+            should_batch_prune(4000, cw, 40),
+            "M2: 40% exact (low watermark) must batch-prune"
+        );
+        assert!(should_batch_prune(4900, cw, 40), "M2: 49% must batch-prune");
+        // >= 50% → the API-copy layer owns the conversation; not batched.
+        assert!(
+            !should_batch_prune(5000, cw, 40),
+            "M2: 50% exact (upper bound) must NOT batch-prune"
+        );
+        assert!(
+            !should_batch_prune(6000, cw, 40),
+            "M2: >50% must NOT batch-prune"
+        );
     }
 
     #[test]
