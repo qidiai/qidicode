@@ -43,9 +43,11 @@ pub fn default_agent_type() -> String {
     DEFAULT_AGENT_TYPE.to_owned()
 }
 /// Default base URL for the cli chat proxy.
-pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://cli-chat-proxy.grok.com/v1";
+/// Rebrand completion (2026-10-16): default now points at the qidiai platform; env/config overrides still win.
+pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://api.qidiai.ltd/v1";
 /// Default base URL for the public xAI API.
-pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
+/// Rebrand completion (2026-10-16): ApiKey-mode inference base + `/models` source now point at the qidiai platform; env/config overrides still win.
+pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.qidiai.ltd/v1";
 /// Default base URL for the asset server (profile images, etc.).
 pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.grok.com";
 /// One or more environment variable names that may hold a model API key.
@@ -6338,7 +6340,7 @@ reasoning_effort = "low"
         assert_eq!(model.api_key, Some("user-custom-api-key".to_string()));
         assert_eq!(model.info.model, dm);
         assert_eq!(
-            model.info.base_url, "https://cli-chat-proxy.grok.com/v1",
+            model.info.base_url, "https://api.qidiai.ltd/v1",
             "base_url should inherit from default, not be stale"
         );
     }
@@ -7759,7 +7761,7 @@ reasoning_effort = "low"
         let sampling = resolve_sampling(model, Some("session-token-123"));
         assert_eq!(sampling.api_key.as_deref(), Some("session-token-123"));
         assert_eq!(
-            sampling.base_url, "https://cli-chat-proxy.grok.com/v1",
+            sampling.base_url, "https://api.qidiai.ltd/v1",
             "session auth should route to cli-chat-proxy, not api.x.ai"
         );
     }
@@ -7774,7 +7776,7 @@ reasoning_effort = "low"
         let sampling = resolve_sampling(model, None);
         assert_eq!(sampling.api_key.as_deref(), Some("xai-external-key"));
         assert_eq!(
-            sampling.base_url, "https://api.x.ai/v1",
+            sampling.base_url, "https://api.qidiai.ltd/v1",
             "external API key should route to api.x.ai via api_base_url"
         );
         unsafe { std::env::remove_var("XAI_API_KEY") };
@@ -7899,7 +7901,7 @@ reasoning_effort = "low"
         assert_eq!(sampling.base_url, "https://inference.example.com/v1");
         let sampling = resolve_sampling(default, Some("session-key"));
         assert_eq!(sampling.api_key.as_deref(), Some("session-key"));
-        assert_eq!(sampling.base_url, "https://cli-chat-proxy.grok.com/v1",);
+        assert_eq!(sampling.base_url, "https://api.qidiai.ltd/v1",);
     }
     #[test]
     fn e2e_enterprise_custom_endpoint_skips_xai_defaults() {
