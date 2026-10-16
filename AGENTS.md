@@ -169,7 +169,7 @@
 | cf-memory 测试 | `cargo test -p cf-memory --lib` | ~2-10 分钟 |
 | **cf-shell 测试** | `$env:CARGO_TARGET_DIR='C:\qidi-cfshell-test'; $env:CARGO_PROFILE_DEV_DEBUG='0'; cargo test -p cf-shell --lib -j 4` | **热缓存全量 ~2.5 分钟**；`DEBUG=0`+串行是内存 OOM 的解药（本机 16GB，cf-shell 测试二进制直跑必 OOM） |
 | cf-chat-state 测试 | `cargo test -p cf-chat-state --lib`（G 盘直跑）；历史注记：2026-10-04 曾报 G 盘链接确定性挂起（link.exe ~369MB 零 I/O 冻结，两次复现），**2026-10-09 复测未复现**——冷编 21m22s + link.exe 活跃推进（工作集 5.4GB，非冻结特征）+ 链接正常完成 + 测试 0.53s；若再现挂起，改用 C 盘热 target 方案（同 cf-shell 行） | G 盘冷编（禁 sccache）~21 分钟；基线 345 passed / 0 failed（2026-10-09，较 2026-10-04 基线 343 +2 = B1-6 新增 cache_read_ratio 两测试，数目自洽） |
-| **cf-pager 测试** | ⚠️ G 盘冷链**严重偏离旧记载**（2026-10-04 实测 >90 分钟未完成，pdb 1.6GB 链接为瓶颈）→ **一律用 C 盘热 target 方案**（同 cf-shell 行） | C 盘 ~15 分钟；基线 6968 passed + 53 预先存在字形失败（字体/终端环境类，失败集与业务改动零交集，2026-10-04 实测记录） |
+| **cf-pager 测试** | ⚠️ G 盘冷链**严重偏离旧记载**（2026-10-04 实测 >90 分钟未完成，pdb 1.6GB 链接为瓶颈）→ **一律用 C 盘热 target 方案**（同 cf-shell 行） | C 盘热缓存 ~40 分钟；基线 **7033 passed + 6 ignored / 0 failed**（2026-10-16 实测，7039 总数）——**必须加 `$env:QIDI_FORCE_LEGACY_CONSOLE='0'`**：旧记载"53 预先存在字形失败"已作废（根因=legacy OEM 代码页遗留，非环境字体） |
 | 快速全局校验 | `cargo check --workspace` | 0 errors 为过 |
 | **macOS 构建** | `.github/workflows/ci.yml` 的 macos-build job（直推 main 自动触发，`git push origin feat/xxx:main`） | aarch64-apple-darwin 产物挂 artifact `qidi-macos-arm64`（~59MB）可下载；libc 依赖门教训（b507ae61）：依赖 cfg 不得比代码使用面窄（`cfg(unix)` ⊃ macos） |
 | **ai-bridge 多工具桥** | Hub `http://127.0.0.1:9800`（`/api/dispatch` 等，鉴权 token=用户级环境变量 `AI_BRIDGE_TOKEN`） | claude-code 与 opencode 适配器已改 **stdin 传参**（2026-10-14——arg 模式多行长文本丢失实锤）；opencode 已注册免费模型 `opencode-go/deepseek-v4-flash`；开关状态在 switches.json（`/api/toggle`）；Hub 挂了用 WMI 拉起（`Win32_Process.Create`，脱离 Job Object） |
