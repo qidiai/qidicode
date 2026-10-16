@@ -37,6 +37,7 @@ default-bazel = []
 tempfile = { workspace = true }
 serde_json = { workspace = true }
 serial_test = { workspace = true }
+cf-tool-runtime = { workspace = true }
 
 [lints]
 workspace = true

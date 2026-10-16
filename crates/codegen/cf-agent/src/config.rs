@@ -291,6 +291,16 @@ fn default_qidi_build_toolset() -> ToolServerConfig {
             // user skill. `Edit`-class writes into `~/.qidi/skills/**` are
             // gated to `Ask`, so this is the only supported deploy path.
             (&cf_tools::implementations::skills::deploy::DeploySkillTool).into(),
+            // Skill *invocation*, distinct from `deploy_skill` above (which only
+            // installs a skill into the user skills dir). This is the tool that
+            // loads a skill's `SKILL.md` body into the conversation on demand.
+            // Canonical registry id `OpenCode:skill` (the `OpenCode` namespace
+            // token — registry ids use the namespace's Display form);
+            // `ToolKind::Skill` is always allowed by `capability.rs`, so
+            // restricted subagents can invoke skills too. F1: wires the
+            // activation-layer half of the subagent skill-surface gap (the tool
+            // previously lived only in `opencode_toolset()`).
+            (&opencode::OpenCodeSkillTool).into(),
         ],
         behavior_preset: None,
     }
@@ -2300,6 +2310,84 @@ description: Test default tool config
                 .map(|tc| &tc.id)
                 .collect::<Vec<_>>()
         );
+    }
+    /// F1: the default QIDI toolset must ship the skill *invocation* tool, not
+    /// only the `deploy_skill` install tool. Subagents inherit this toolset, so
+    /// its presence is what lets a subagent activate a skill (`ToolKind::Skill`
+    /// is always allowed by capability filtering).
+    #[test]
+    fn default_toolset_includes_skill_invocation_tool() {
+        let config = default_qidi_build_toolset();
+        let skill_id = ToolConfig::from(&opencode::OpenCodeSkillTool).id;
+        assert_eq!(skill_id, "OpenCode:skill", "sanity: skill tool id");
+
+        let entry = config.tools.iter().find(|tc| tc.id == skill_id).unwrap_or_else(|| {
+            panic!(
+                "default_qidi_build_toolset() must include the skill invocation tool \
+                 `{skill_id}`; got tool IDs: {:?}",
+                config.tools.iter().map(|tc| &tc.id).collect::<Vec<_>>()
+            )
+        });
+        assert_eq!(
+            entry.kind,
+            Some(cf_tools::types::tool::ToolKind::Skill),
+            "skill invocation tool must carry ToolKind::Skill so capability \
+             filtering treats it as always-allowed"
+        );
+
+        // The install tool must remain, distinct from the invocation tool.
+        let deploy_id =
+            ToolConfig::from(&cf_tools::implementations::skills::deploy::DeploySkillTool).id;
+        assert!(
+            config.tools.iter().any(|tc| tc.id == deploy_id),
+            "deploy_skill (`{deploy_id}`) must still be present alongside the \
+             skill invocation tool"
+        );
+    }
+    /// F1: activating a skill through the default toolset's skill tool loads the
+    /// skill's `SKILL.md` body into the tool result.
+    #[tokio::test]
+    async fn skill_invocation_tool_loads_skill_body() {
+        use cf_tools::implementations::opencode::skill::{SkillInput, SkillTool};
+        use cf_tools::implementations::skills::types::SkillInfo;
+        use cf_tools::types::resources::{AvailableSkills, Resources};
+        use cf_tools::types::tool_metadata::test_ctx;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let skill_path = tmp.path().join("SKILL.md");
+        std::fs::write(
+            &skill_path,
+            "---\nname: help\ndescription: Show help\n---\n# Help Skill\n\nDo the helpful thing.",
+        )
+        .unwrap();
+
+        let mut resources = Resources::new();
+        resources.insert(AvailableSkills(vec![SkillInfo {
+            name: "help".to_string(),
+            description: "Show help".to_string(),
+            path: skill_path.to_str().unwrap().to_string(),
+            ..Default::default()
+        }]));
+
+        let output = cf_tool_runtime::Tool::run(
+            &SkillTool,
+            test_ctx(resources.into_shared()),
+            SkillInput {
+                name: "help".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(output.success, "skill load should succeed");
+        let message = output
+            .skill_message
+            .expect("skill_message must carry the SKILL.md body");
+        assert!(
+            message.contains("Do the helpful thing."),
+            "skill body must reach the tool result; got: {message}"
+        );
+        assert!(message.contains("<skill_content name=\"help\">"));
     }
     #[test]
     fn test_from_json_with_prompt_body() {

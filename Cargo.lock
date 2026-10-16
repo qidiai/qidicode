@@ -1698,6 +1698,7 @@ dependencies = [
  "cf-hooks",
  "cf-sampling-types",
  "cf-token-estimation",
+ "cf-tool-runtime",
  "cf-tool-types",
  "cf-tools",
  "chrono",
