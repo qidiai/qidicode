@@ -29,6 +29,31 @@ pub enum SkillsMode {
     Full,
 }
 
+/// Which skill listing a **subagent** session injects at startup (F2).
+///
+/// Subagent (child) sessions render their baseline skill listing
+/// unconditionally, bypassing the cross-session announcement ledger
+/// (`SkillManager::announced_names`): a child may inherit "already announced"
+/// state and would otherwise receive no listing at all. Set from
+/// `[skills].subagent_listing` in `config.toml`.
+///
+/// This is independent of the primary session's [`SkillsMode`]: the primary
+/// keeps its own projection, the child has its own knob.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SubagentSkillListing {
+    /// Inject the essential projection (the resolved essential allowlist —
+    /// the user's `[skills].essential_allow`, else
+    /// [`DEFAULT_ESSENTIAL_SKILLS`]). This is the default: a child gets the
+    /// core programming skills without the full catalog's context tax.
+    #[default]
+    Essential,
+    /// Inject every discovered skill (the full listing).
+    Full,
+    /// Inject nothing — the child receives no baseline skill listing.
+    None,
+}
+
 /// Built-in allowlist projected in [`SkillsMode::Essential`].
 ///
 /// Entries are skill `name`s (the frontmatter name / command identity). A
@@ -97,6 +122,38 @@ mod tests {
     #[test]
     fn essential_is_the_default_mode() {
         assert_eq!(SkillsMode::default(), SkillsMode::Essential);
+    }
+
+    #[test]
+    fn subagent_listing_defaults_to_essential() {
+        assert_eq!(
+            SubagentSkillListing::default(),
+            SubagentSkillListing::Essential
+        );
+    }
+
+    #[test]
+    fn subagent_listing_serde_uses_lowercase_names() {
+        assert_eq!(
+            serde_json::to_string(&SubagentSkillListing::Essential).unwrap(),
+            "\"essential\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SubagentSkillListing::Full).unwrap(),
+            "\"full\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SubagentSkillListing::None).unwrap(),
+            "\"none\""
+        );
+        assert_eq!(
+            serde_json::from_str::<SubagentSkillListing>("\"none\"").unwrap(),
+            SubagentSkillListing::None
+        );
+        assert_eq!(
+            serde_json::from_str::<SubagentSkillListing>("\"full\"").unwrap(),
+            SubagentSkillListing::Full
+        );
     }
 
     #[test]

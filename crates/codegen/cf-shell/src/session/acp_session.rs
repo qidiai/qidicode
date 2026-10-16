@@ -1686,6 +1686,9 @@ mod rewrite_zero_turn_prefix_tests;
 #[path = "acp_session_tests/subagent_usage_fold_tests.rs"]
 mod subagent_usage_fold_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/subagent_skill_listing_tests.rs"]
+mod subagent_skill_listing_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/turn_completion_emit_tests.rs"]
 mod turn_completion_emit_tests;
 #[cfg(test)]

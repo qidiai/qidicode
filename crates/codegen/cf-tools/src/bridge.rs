@@ -296,6 +296,28 @@ impl ToolBridge {
             .and_then(|t| t.listing_snapshot())
     }
 
+    /// The baseline skill listing a **subagent** session injects at startup
+    /// (F2), rendered read-only with the requested projection.
+    ///
+    /// Drains any pending reconciliation (`clear_pending`) so the child's
+    /// stale baseline pending cannot re-fire on the first tool call, then
+    /// renders the listing *without* touching `announced_names` — the
+    /// announcement ledger stays pristine, so a child never pollutes the
+    /// primary session's inherited state.
+    ///
+    /// `None` when the projection is `SubagentSkillListing::None` or no skill
+    /// qualifies (also when no `SkillManager` is registered).
+    pub async fn subagent_skill_listing(
+        &self,
+        listing: crate::types::skill_discovery_tracker::SubagentSkillListing,
+    ) -> Option<crate::types::skill_discovery_tracker::SkillListingSnapshot> {
+        let registry = &*self.registry;
+        let mut res = registry.resources.lock().await;
+        let tracker = res.get_mut::<crate::types::skill_discovery_tracker::SkillManager>()?;
+        tracker.clear_pending();
+        tracker.listing_for_subagent(listing)
+    }
+
     /// Seed the SkillDiscoveryTracker with session context and startup skills.
     ///
     /// Must be called at session start so the `SkillDiscoveryReminder` can

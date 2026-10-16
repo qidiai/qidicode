@@ -16,7 +16,9 @@ pub use cf_tools::types::compat::CompatConfig;
 /// Re-export the skill-listing projection mode and built-in essential
 /// allowlist (owned by `cf_tools`, where `SkillManager` lives) so config
 /// consumers can name them via `cf_agent`.
-pub use cf_tools::types::skill_discovery_tracker::{DEFAULT_ESSENTIAL_SKILLS, SkillsMode};
+pub use cf_tools::types::skill_discovery_tracker::{
+    DEFAULT_ESSENTIAL_SKILLS, SkillsMode, SubagentSkillListing,
+};
 
 use cf_tools::implementations::skills::discovery::{
     find_command_paths, find_skill_md_paths, find_skill_paths, is_valid_skill_name,
@@ -69,6 +71,19 @@ pub struct SkillsConfig {
     /// serializer's None-skip behavior).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub essential_allow: Option<Vec<String>>,
+
+    /// Baseline skill listing a **subagent** session injects at startup (F2).
+    /// `None` (unset) resolves to [`SubagentSkillListing::Essential`]. A child
+    /// session injects this listing unconditionally, bypassing the
+    /// cross-session announcement ledger (see `SkillManager`); `full` restores
+    /// the whole catalog, `none` suppresses the injection entirely. Independent
+    /// of [`SkillsConfig::mode`], which governs the primary session.
+    ///
+    /// Kept as `Option` so an unset value stays out of the persisted config,
+    /// matching the `mode` precedent; the resolved default lives in
+    /// [`SkillsConfig::subagent_listing_or_default`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_listing: Option<SubagentSkillListing>,
 }
 
 impl SkillsConfig {
@@ -80,6 +95,16 @@ impl SkillsConfig {
     /// identically.
     pub fn mode_or_default(&self) -> SkillsMode {
         self.mode.unwrap_or_default()
+    }
+
+    /// Resolved subagent baseline listing mode: the configured value, or
+    /// [`SubagentSkillListing::Essential`] when unset.
+    ///
+    /// All consumers must resolve through this (never read
+    /// `self.subagent_listing` directly) so `None` and the
+    /// explicitly-default `Some(Essential)` behave identically.
+    pub fn subagent_listing_or_default(&self) -> SubagentSkillListing {
+        self.subagent_listing.unwrap_or_default()
     }
 }
 
@@ -782,6 +807,64 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(explicit_essential.mode_or_default(), SkillsMode::Essential);
+    }
+
+    // ── Subagent baseline listing (F2) ───────────────────────────────────
+
+    #[test]
+    fn subagent_listing_or_default_resolves_unset_to_essential() {
+        let cfg = SkillsConfig::default();
+        assert!(
+            cfg.subagent_listing.is_none(),
+            "unset subagent_listing must stay None"
+        );
+        assert_eq!(
+            cfg.subagent_listing_or_default(),
+            SubagentSkillListing::Essential
+        );
+
+        for (value, expected) in [
+            (SubagentSkillListing::Full, SubagentSkillListing::Full),
+            (
+                SubagentSkillListing::None,
+                SubagentSkillListing::None,
+            ),
+            (
+                SubagentSkillListing::Essential,
+                SubagentSkillListing::Essential,
+            ),
+        ] {
+            let cfg = SkillsConfig {
+                subagent_listing: Some(value),
+                ..Default::default()
+            };
+            assert_eq!(cfg.subagent_listing_or_default(), expected);
+        }
+    }
+
+    #[test]
+    fn subagent_listing_round_trips_and_is_skipped_when_unset() {
+        let unset: SkillsConfig = serde_json::from_str("{\"paths\":[]}").unwrap();
+        assert!(
+            unset.subagent_listing.is_none(),
+            "absent key must default to None"
+        );
+        let serialized = serde_json::to_string(&unset).unwrap();
+        assert!(
+            !serialized.contains("subagent_listing"),
+            "unset subagent_listing must stay out of the serialized config:\n{serialized}"
+        );
+
+        for (raw, expected) in [
+            ("\"none\"", SubagentSkillListing::None),
+            ("\"full\"", SubagentSkillListing::Full),
+            ("\"essential\"", SubagentSkillListing::Essential),
+        ] {
+            let cfg: SkillsConfig =
+                serde_json::from_str(&format!("{{\"paths\":[],\"subagent_listing\":{raw}}}"))
+                    .unwrap();
+            assert_eq!(cfg.subagent_listing_or_default(), expected);
+        }
     }
 
     // ── Server-synced skills (injected server_skill_dirs) ────────────────

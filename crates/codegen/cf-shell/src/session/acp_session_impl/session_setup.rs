@@ -83,6 +83,28 @@ impl SessionActor {
                 Some(cf_sampling_types::SyntheticReason::SystemReminder)
             )
         });
+        // F2: a subagent session injects its baseline skill listing
+        // unconditionally and **read-only**. It bypasses the cross-session
+        // announcement ledger entirely — the child neither reads nor writes
+        // `announced_names` — so it can never inherit the primary session's
+        // "already announced" state (which would otherwise suppress the
+        // listing and leave the child with none), nor pollute that ledger for
+        // the primary. Projection is governed by `[skills].subagent_listing`.
+        if self.rebuild_spec.prompt_audience
+            == cf_agent::prompt::context::PromptAudience::Subagent
+        {
+            let listing = self.rebuild_spec.skills_config.subagent_listing_or_default();
+            // `subagent_skill_listing` also drops the child's stale pending
+            // baseline so the first tool call cannot drain it into a second
+            // listing.
+            let snapshot = bridge.subagent_skill_listing(listing).await;
+            if !is_cursor
+                && let Some(snapshot) = snapshot
+            {
+                conversation.push(self.wrap_reminder_text(&snapshot.text));
+            }
+            return None;
+        }
         let effects = bridge.apply_pending_skill_update().await?;
         if let Some(item) = self.wrap_skill_reminder(&effects) {
             conversation.push(item);
@@ -251,10 +273,14 @@ impl SessionActor {
             return None;
         }
         let text = effects.system_reminder.as_deref()?;
+        Some(self.wrap_reminder_text(text))
+    }
+    /// Build the wrapped `<system[_-]reminder>` carrier around `text` using
+    /// the harness's current tag. Shared by [`Self::wrap_skill_reminder`]
+    /// (effects path) and the subagent baseline path.
+    fn wrap_reminder_text(&self, text: &str) -> ConversationItem {
         let tag = self.reminder_wrapper_tag();
-        Some(ConversationItem::system_reminder(format!(
-            "<{tag}>\n{text}\n</{tag}>"
-        )))
+        ConversationItem::system_reminder(format!("<{tag}>\n{text}\n</{tag}>"))
     }
     /// Apply skill update side-effects produced by the tools layer.
     ///

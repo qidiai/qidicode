@@ -19,7 +19,7 @@ use crate::types::compat::CompatConfig;
 use conditional::ConditionalSkills;
 use listing::{DEFAULT_SKILL_TOOL_NAME, SKILL_BUDGET_CONTEXT_PERCENT, format_announcement};
 
-pub use essential::{DEFAULT_ESSENTIAL_SKILLS, SkillsMode};
+pub use essential::{DEFAULT_ESSENTIAL_SKILLS, SkillsMode, SubagentSkillListing};
 pub use listing::{XmlRenderMode, format_announcement_xml, format_compaction_skill_listing};
 
 /// Why a `SkillUpdateEffects` was produced.
@@ -560,6 +560,16 @@ impl SkillManager {
 
     /// Listing-render inputs shared by the reminder and snapshot paths.
     fn render_params(&self) -> ListingRenderParams<'_> {
+        self.render_params_with_allow(self.essential_allow.as_ref())
+    }
+
+    /// Listing-render inputs with an explicit essential projection, so the
+    /// subagent baseline path ([`Self::listing_for_subagent`]) can render
+    /// with a projection other than the primary session's configured one.
+    fn render_params_with_allow<'a>(
+        &'a self,
+        essential_allow: Option<&'a HashSet<String>>,
+    ) -> ListingRenderParams<'a> {
         ListingRenderParams {
             real_prefix: self.real_cwd_prefix.as_deref(),
             display_prefix: self.display_cwd.as_deref(),
@@ -570,8 +580,61 @@ impl SkillManager {
                 .skill_tool_name
                 .as_deref()
                 .unwrap_or(DEFAULT_SKILL_TOOL_NAME),
-            essential_allow: self.essential_allow.as_ref(),
+            essential_allow,
         }
+    }
+
+    /// Render the baseline skill listing a **subagent** session injects at
+    /// startup (F2), applying the requested [`SubagentSkillListing`] projection.
+    ///
+    /// **Read-only**: draws from the current combined skill set (startup +
+    /// discovered) with a throwaway announce set, so `announced_names` (the
+    /// cross-session announcement ledger) is never read for dedup nor written.
+    /// This is why the child cannot pollute the primary session's ledger.
+    ///
+    /// Returns `None` when the projection is [`SubagentSkillListing::None`]
+    /// (no injection) or when no skill qualifies for the listing.
+    pub fn listing_for_subagent(
+        &self,
+        listing: SubagentSkillListing,
+    ) -> Option<SkillListingSnapshot> {
+        let allow: Option<HashSet<String>> = match listing {
+            SubagentSkillListing::None => return None,
+            // The child's essential projection reuses the session's resolved
+            // allowlist when present (the user's `[skills].essential_allow`),
+            // otherwise the built-in default. Mirrors `set_skills_mode`.
+            SubagentSkillListing::Essential => Some(self.essential_allow.clone().unwrap_or_else(
+                || {
+                    DEFAULT_ESSENTIAL_SKILLS
+                        .iter()
+                        .map(|s| (*s).to_owned())
+                        .collect()
+                },
+            )),
+            // Full: no projection.
+            SubagentSkillListing::Full => None,
+        };
+        let skills =
+            dedupe_by_canonical_path_and_name(&self.discovered_skills, &self.startup_skills);
+        let mut qualified = HashSet::new();
+        let params = self.render_params_with_allow(allow.as_ref());
+        let text = render_listing(&skills, &mut qualified, &params)?;
+        Some(SkillListingSnapshot {
+            text,
+            skill_count: qualified.len(),
+        })
+    }
+
+    /// Discard any pending reconciliation without rendering or announcing.
+    ///
+    /// Used by the subagent baseline path (F2): the child injects its baseline
+    /// listing read-only, so the pending `BaselineChange` must be dropped
+    /// rather than drained — draining (`take_pending`) writes
+    /// `announced_names`, the ledger a child must leave untouched. Without
+    /// this, the first tool call would drain the stale pending and inject a
+    /// second listing (and pollute the ledger).
+    pub fn clear_pending(&mut self) {
+        self.pending = None;
     }
 
     /// Get the current dynamically discovered skills.
@@ -1874,6 +1937,119 @@ mod tests {
         assert!(
             text.contains("drop"),
             "XML harness must remain unfiltered in phase 1: {text}"
+        );
+    }
+
+    // ── Subagent baseline listing (F2) ───────────────────────────
+
+    /// Seed a manager with an allowlisted core skill plus a non-allowlisted
+    /// one, returning it with the baseline pending still in place.
+    fn manager_with_mixed_skills() -> SkillManager {
+        let mut mgr = SkillManager::new();
+        mgr.seed(
+            None,
+            None,
+            vec![
+                make_skill("check-work", "/ck/SKILL.md"),
+                make_skill("bid-write", "/bid/SKILL.md"),
+                make_skill("random-tool", "/rt/SKILL.md"),
+            ],
+            None,
+            None,
+            None,
+        );
+        mgr
+    }
+
+    #[test]
+    fn subagent_essential_projection_filters_to_allowlist() {
+        let mgr = manager_with_mixed_skills();
+        let snapshot = mgr
+            .listing_for_subagent(SubagentSkillListing::Essential)
+            .expect("essential projection must render");
+        assert!(
+            snapshot.text.contains("check-work"),
+            "allowlisted core skill must be present in the subagent essential listing:\n{}",
+            snapshot.text
+        );
+        assert!(
+            !snapshot.text.contains("bid-write") && !snapshot.text.contains("random-tool"),
+            "non-allowlisted skills must be projected out of the subagent essential listing:\n{}",
+            snapshot.text
+        );
+        assert_eq!(
+            snapshot.skill_count, 1,
+            "exactly one allowlisted skill should qualify: {}",
+            snapshot.text
+        );
+    }
+
+    #[test]
+    fn subagent_full_projection_lists_every_skill() {
+        let mgr = manager_with_mixed_skills();
+        let snapshot = mgr
+            .listing_for_subagent(SubagentSkillListing::Full)
+            .expect("full projection must render");
+        for name in ["check-work", "bid-write", "random-tool"] {
+            assert!(
+                snapshot.text.contains(name),
+                "full projection must list {name}:\n{}",
+                snapshot.text
+            );
+        }
+        assert_eq!(snapshot.skill_count, 3, "all three skills should qualify");
+    }
+
+    #[test]
+    fn subagent_none_projection_injects_nothing() {
+        let mgr = manager_with_mixed_skills();
+        assert!(
+            mgr.listing_for_subagent(SubagentSkillListing::None).is_none(),
+            "`none` must suppress the subagent baseline listing entirely"
+        );
+    }
+
+    #[test]
+    fn subagent_listing_is_read_only_and_leaves_ledger_untouched() {
+        // The announcement ledger (`announced_names`) must NOT be read for
+        // dedup nor written by the subagent baseline path.
+        let mut mgr = manager_with_mixed_skills();
+        // Simulate an inherited, fully-populated ledger.
+        mgr.restore_announced_names(
+            ["check-work", "bid-write", "random-tool"]
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
+        );
+        let before = mgr.announced_names().clone();
+
+        // Even with every skill already "announced", the subagent still gets a
+        // listing (unconditional), and the ledger is unchanged.
+        let snapshot = mgr
+            .listing_for_subagent(SubagentSkillListing::Essential)
+            .expect("subagent listing must not be suppressed by an inherited ledger");
+        assert!(snapshot.text.contains("check-work"), "{}", snapshot.text);
+        assert_eq!(
+            mgr.announced_names(),
+            &before,
+            "subagent baseline rendering must not mutate the announcement ledger"
+        );
+    }
+
+    #[test]
+    fn clear_pending_drops_stale_baseline_without_announcing() {
+        let mut mgr = manager_with_mixed_skills();
+        // seed() set a pending BaselineChange; the subagent path drops it
+        // read-only so the first tool call cannot drain a second listing.
+        mgr.clear_pending();
+        assert!(
+            mgr.take_pending_reconciliation().is_none(),
+            "clear_pending must discard the pending reconciliation"
+        );
+        // And the ledger stays empty (nothing rendered, nothing announced).
+        assert!(
+            mgr.announced_names().is_empty(),
+            "clear_pending must not announce anything"
         );
     }
 }
