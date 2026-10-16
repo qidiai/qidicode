@@ -48,7 +48,8 @@ pub enum ToolSegment {
     /// 恒驻 meta 层 — the pipeline's own channels (`search_tool` /
     /// `use_tool`). **Correction (design-doc v3.5 errata ①)**: these are
     /// registered into `defs` since the fork
-    /// (`cf-agent/src/config.rs:286-287`, `default_qidi_build_toolset()`);
+    /// (`cf-agent/src/config.rs:287-288` inside
+    /// `default_qidi_build_toolset()`, defined at `config.rs:270`);
     /// the earlier "not registered in this build" claim is retracted. They
     /// are never trimmed by any trim config (builder `SearchTool | UseTool`
     /// keep-clause, `cf-agent/src/builder.rs`) and always ship at the resident

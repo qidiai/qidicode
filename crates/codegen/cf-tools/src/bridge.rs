@@ -297,13 +297,20 @@ impl ToolBridge {
     }
 
     /// The baseline skill listing a **subagent** session injects at startup
-    /// (F2), rendered read-only with the requested projection.
+    /// (F2), rendered read-only with the requested projection; also installs
+    /// the projected runtime set into `AvailableSkills` (O-1).
     ///
     /// Drains any pending reconciliation (`clear_pending`) so the child's
     /// stale baseline pending cannot re-fire on the first tool call, then
     /// renders the listing *without* touching `announced_names` — the
     /// announcement ledger stays pristine, so a child never pollutes the
     /// primary session's inherited state.
+    ///
+    /// The same projection is written into `AvailableSkills` so the skill
+    /// tool's activatable set matches the listing: without it, an `Essential`
+    /// listing would advertise only allowlisted skills while the tool could
+    /// still activate every startup skill (per-session `finalize()` seeds
+    /// `AvailableSkills` with the unprojected catalog).
     ///
     /// `None` when the projection is `SubagentSkillListing::None` or no skill
     /// qualifies (also when no `SkillManager` is registered).
@@ -313,9 +320,20 @@ impl ToolBridge {
     ) -> Option<crate::types::skill_discovery_tracker::SkillListingSnapshot> {
         let registry = &*self.registry;
         let mut res = registry.resources.lock().await;
-        let tracker = res.get_mut::<crate::types::skill_discovery_tracker::SkillManager>()?;
-        tracker.clear_pending();
-        tracker.listing_for_subagent(listing)
+        let (snapshot, runtime_skills) = {
+            let tracker =
+                res.get_mut::<crate::types::skill_discovery_tracker::SkillManager>()?;
+            tracker.clear_pending();
+            (
+                tracker.listing_for_subagent(listing),
+                tracker.subagent_runtime_skills(listing),
+            )
+        };
+        // Write the runtime projection directly -- the shell never sees this.
+        if let Some(runtime_skills) = runtime_skills {
+            res.insert(crate::types::resources::AvailableSkills(runtime_skills));
+        }
+        snapshot
     }
 
     /// Seed the SkillDiscoveryTracker with session context and startup skills.

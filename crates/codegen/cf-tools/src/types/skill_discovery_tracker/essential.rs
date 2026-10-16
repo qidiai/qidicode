@@ -32,10 +32,11 @@ pub enum SkillsMode {
 /// Which skill listing a **subagent** session injects at startup (F2).
 ///
 /// Subagent (child) sessions render their baseline skill listing
-/// unconditionally, bypassing the cross-session announcement ledger
-/// (`SkillManager::announced_names`): a child may inherit "already announced"
-/// state and would otherwise receive no listing at all. Set from
-/// `[skills].subagent_listing` in `config.toml`.
+/// unconditionally, read-only against the cross-session announcement ledger
+/// (`SkillManager::announced_names`). The injection point is the spawn path
+/// (`spawn_session_actor` -> `inject_subagent_baseline_listing`): a subagent
+/// never sends `SessionCommand::Initialize`, so it has no other startup seam.
+/// Set from `[skills].subagent_listing` in `config.toml`.
 ///
 /// This is independent of the primary session's [`SkillsMode`]: the primary
 /// keeps its own projection, the child has its own knob.
@@ -128,7 +129,8 @@ mod tests {
     fn subagent_listing_defaults_to_essential() {
         assert_eq!(
             SubagentSkillListing::default(),
-            SubagentSkillListing::Essential
+            SubagentSkillListing::Essential,
+            "an unset subagent_listing must resolve to the Essential projection"
         );
     }
 
@@ -136,23 +138,28 @@ mod tests {
     fn subagent_listing_serde_uses_lowercase_names() {
         assert_eq!(
             serde_json::to_string(&SubagentSkillListing::Essential).unwrap(),
-            "\"essential\""
+            "\"essential\"",
+            "Essential must serialize as the lowercase token `essential`"
         );
         assert_eq!(
             serde_json::to_string(&SubagentSkillListing::Full).unwrap(),
-            "\"full\""
+            "\"full\"",
+            "Full must serialize as the lowercase token `full`"
         );
         assert_eq!(
             serde_json::to_string(&SubagentSkillListing::None).unwrap(),
-            "\"none\""
+            "\"none\"",
+            "None must serialize as the lowercase token `none`"
         );
         assert_eq!(
             serde_json::from_str::<SubagentSkillListing>("\"none\"").unwrap(),
-            SubagentSkillListing::None
+            SubagentSkillListing::None,
+            "deserializing `none` must yield SubagentSkillListing::None"
         );
         assert_eq!(
             serde_json::from_str::<SubagentSkillListing>("\"full\"").unwrap(),
-            SubagentSkillListing::Full
+            SubagentSkillListing::Full,
+            "deserializing `full` must yield SubagentSkillListing::Full"
         );
     }
 

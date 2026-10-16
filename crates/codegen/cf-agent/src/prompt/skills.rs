@@ -820,7 +820,8 @@ mod tests {
         );
         assert_eq!(
             cfg.subagent_listing_or_default(),
-            SubagentSkillListing::Essential
+            SubagentSkillListing::Essential,
+            "an unset subagent_listing must resolve to Essential"
         );
 
         for (value, expected) in [
@@ -838,7 +839,11 @@ mod tests {
                 subagent_listing: Some(value),
                 ..Default::default()
             };
-            assert_eq!(cfg.subagent_listing_or_default(), expected);
+            assert_eq!(
+                cfg.subagent_listing_or_default(),
+                expected,
+                "a set subagent_listing must round-trip through the resolver"
+            );
         }
     }
 
@@ -863,7 +868,11 @@ mod tests {
             let cfg: SkillsConfig =
                 serde_json::from_str(&format!("{{\"paths\":[],\"subagent_listing\":{raw}}}"))
                     .unwrap();
-            assert_eq!(cfg.subagent_listing_or_default(), expected);
+            assert_eq!(
+                cfg.subagent_listing_or_default(),
+                expected,
+                "deserialized `{raw}` must resolve to {expected:?}"
+            );
         }
     }
 

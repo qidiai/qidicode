@@ -73,6 +73,46 @@ mod cli_catchall_drop_tests {
         assert!(dropped.is_empty());
     }
 }
+/// Inject a subagent session's baseline skill listing into `conversation`.
+///
+/// A subagent (`PromptAudience::Subagent`) session must inject its baseline
+/// skill listing **unconditionally**, read-only against the cross-session
+/// announcement ledger. Its real initialization point is the spawn path
+/// (`spawn_session_actor`, after `install_system_prompt`); it never sends
+/// `SessionCommand::Initialize`, so the `inject_baseline_skill_reminder` seam
+/// in `session_setup.rs` would otherwise never fire for it — the original F2
+/// defect. The zero-turn agent rebuild (`handle_rebuild_agent_for_definition`),
+/// which a subagent can also drive, delegates here too.
+///
+/// Reuses the F2 read-only assets via `bridge.subagent_skill_listing`:
+/// `listing_for_subagent` renders the projection, `clear_pending` drops any
+/// stale pending baseline, and the projected runtime set is written into
+/// `AvailableSkills` so the skill tool's activatable set matches the listing.
+/// The ledger (`announced_names`) is neither read nor written. Projection is
+/// governed by `[skills].subagent_listing`. No-op when the projection is
+/// `none`, when no skill qualifies, or under the cursor harness (whose
+/// preamble lists skills inline).
+pub(super) async fn inject_subagent_baseline_listing(
+    conversation: &mut Vec<ConversationItem>,
+    bridge: &cf_tools::bridge::ToolBridge,
+    skills_config: &cf_agent::prompt::skills::SkillsConfig,
+    is_cursor: bool,
+) {
+    let listing = skills_config.subagent_listing_or_default();
+    // Always clear the child's stale pending + seed the runtime projection,
+    // even under the cursor harness (which suppresses only the reminder text).
+    let Some(snapshot) = bridge.subagent_skill_listing(listing).await else {
+        return;
+    };
+    if is_cursor {
+        return;
+    }
+    let tag = cf_tools::reminders::DEFAULT_REMINDER_TAG;
+    conversation.push(ConversationItem::system_reminder(format!(
+        "<{tag}>\n{}\n</{tag}>",
+        snapshot.text
+    )));
+}
 /// Spawns a session actor and returns the session handle plus a receiver for permission events.
 ///
 /// The permission events receiver should be used to collect telemetry about permission
@@ -952,6 +992,15 @@ pub(crate) async fn spawn_session_actor(
         if let Some(ref mut len) = startup_hints.inherited_prefix_len {
             *len += 1;
         }
+    }
+    // F2R: subagents inject their baseline skill listing here — their real
+    // initialization point. They never send `SessionCommand::Initialize`, so
+    // the `inject_baseline_skill_reminder` seam is otherwise unreachable for
+    // them (the original F2 defect). Covers New/Forked/Resumed subagents. The
+    // cursor-harness twin is `false` in this build (see `session_mode.rs`).
+    if prompt_audience == cf_agent::prompt::context::PromptAudience::Subagent {
+        inject_subagent_baseline_listing(&mut conversation, agent.tool_bridge(), &skills_config, false)
+            .await;
     }
     if let Some(section) = agent.agents_md_section()
         && should_set_classifier_project_instructions(

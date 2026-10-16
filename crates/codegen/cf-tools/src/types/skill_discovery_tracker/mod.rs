@@ -584,13 +584,41 @@ impl SkillManager {
         }
     }
 
-    /// Render the baseline skill listing a **subagent** session injects at
-    /// startup (F2), applying the requested [`SubagentSkillListing`] projection.
+    /// Resolve the essential allowlist governing a [`SubagentSkillListing`]
+    /// projection (O-1).
     ///
-    /// **Read-only**: draws from the current combined skill set (startup +
-    /// discovered) with a throwaway announce set, so `announced_names` (the
-    /// cross-session announcement ledger) is never read for dedup nor written.
-    /// This is why the child cannot pollute the primary session's ledger.
+    /// - `Some(None)` — [`SubagentSkillListing::Full`]: no projection.
+    /// - `Some(Some(set))` — [`SubagentSkillListing::Essential`]: restrict to
+    ///   `set` (the session's resolved `essential_allow` when present, else the
+    ///   built-in [`DEFAULT_ESSENTIAL_SKILLS`]; mirrors `set_skills_mode`).
+    /// - `None` — [`SubagentSkillListing::None`]: no injection at all.
+    fn subagent_listing_allow(
+        &self,
+        listing: SubagentSkillListing,
+    ) -> Option<Option<HashSet<String>>> {
+        match listing {
+            SubagentSkillListing::None => None,
+            SubagentSkillListing::Essential => Some(Some(
+                self.essential_allow.clone().unwrap_or_else(|| {
+                    DEFAULT_ESSENTIAL_SKILLS
+                        .iter()
+                        .map(|s| (*s).to_owned())
+                        .collect()
+                }),
+            )),
+            SubagentSkillListing::Full => Some(None),
+        }
+    }
+
+    /// Render the baseline skill listing a **subagent** session injects at
+    /// startup, applying the requested [`SubagentSkillListing`] projection.
+    ///
+    /// **Read-only w.r.t. the announcement ledger**: draws from the current
+    /// combined skill set (startup + discovered) with a throwaway announce set,
+    /// so `announced_names` is never read for dedup nor written. This is why
+    /// the child can neither pollute nor be suppressed by the cross-session
+    /// ledger (its production call path is the shell's subagent-spawn
+    /// injection, via `ToolBridge::subagent_skill_listing`).
     ///
     /// Returns `None` when the projection is [`SubagentSkillListing::None`]
     /// (no injection) or when no skill qualifies for the listing.
@@ -598,22 +626,7 @@ impl SkillManager {
         &self,
         listing: SubagentSkillListing,
     ) -> Option<SkillListingSnapshot> {
-        let allow: Option<HashSet<String>> = match listing {
-            SubagentSkillListing::None => return None,
-            // The child's essential projection reuses the session's resolved
-            // allowlist when present (the user's `[skills].essential_allow`),
-            // otherwise the built-in default. Mirrors `set_skills_mode`.
-            SubagentSkillListing::Essential => Some(self.essential_allow.clone().unwrap_or_else(
-                || {
-                    DEFAULT_ESSENTIAL_SKILLS
-                        .iter()
-                        .map(|s| (*s).to_owned())
-                        .collect()
-                },
-            )),
-            // Full: no projection.
-            SubagentSkillListing::Full => None,
-        };
+        let allow = self.subagent_listing_allow(listing)?;
         let skills =
             dedupe_by_canonical_path_and_name(&self.discovered_skills, &self.startup_skills);
         let mut qualified = HashSet::new();
@@ -625,14 +638,49 @@ impl SkillManager {
         })
     }
 
+    /// The runtime (skill-tool-visible) skill set matching the baseline
+    /// listing a subagent injects at startup, for installation into
+    /// `AvailableSkills` (O-1).
+    ///
+    /// The skill tool reads its activatable set from `AvailableSkills`. The
+    /// per-session `finalize()` seeds that resource with the **unprojected**
+    /// startup catalog, so without this a subagent whose listing is
+    /// `Essential` would advertise only the allowlisted skills while the tool
+    /// could still activate every startup skill — the listing and the
+    /// activatable set would disagree. Applying the same projection here keeps
+    /// them in lockstep.
+    ///
+    /// Mirrors [`render_listing`]'s gate so the two cannot drift: the XML
+    /// harness does not apply the essential allowlist (P0-3 phase 2 TODO), so
+    /// neither does the runtime set. Returns `None` for
+    /// [`SubagentSkillListing::None`] (no injection ⇒ no override).
+    pub fn subagent_runtime_skills(
+        &self,
+        listing: SubagentSkillListing,
+    ) -> Option<Vec<SkillInfo>> {
+        let allow = self.subagent_listing_allow(listing)?;
+        let skills =
+            dedupe_by_canonical_path_and_name(&self.discovered_skills, &self.startup_skills);
+        if self.use_xml_format {
+            return Some(skills);
+        }
+        Some(match allow {
+            Some(allow) => skills
+                .into_iter()
+                .filter(|skill| allow.contains(&skill.name))
+                .collect(),
+            None => skills,
+        })
+    }
+
     /// Discard any pending reconciliation without rendering or announcing.
     ///
-    /// Used by the subagent baseline path (F2): the child injects its baseline
-    /// listing read-only, so the pending `BaselineChange` must be dropped
-    /// rather than drained — draining (`take_pending`) writes
-    /// `announced_names`, the ledger a child must leave untouched. Without
-    /// this, the first tool call would drain the stale pending and inject a
-    /// second listing (and pollute the ledger).
+    /// Used by the subagent baseline path: the child injects its baseline
+    /// listing read-only, so its pending `BaselineChange` must be dropped
+    /// rather than drained — draining (`take_pending`) writes `announced_names`,
+    /// the ledger a child must leave untouched. Without this, the first tool
+    /// call would drain the stale pending and inject a second listing (and
+    /// pollute the ledger).
     pub fn clear_pending(&mut self) {
         self.pending = None;
     }
@@ -2050,6 +2098,42 @@ mod tests {
         assert!(
             mgr.announced_names().is_empty(),
             "clear_pending must not announce anything"
+        );
+    }
+
+    /// O-1: the runtime set a subagent installs into `AvailableSkills` must
+    /// match its listing — `Essential` restricts to the allowlist, `Full`
+    /// keeps every skill, `None` overrides nothing. Otherwise the skill tool
+    /// could activate a skill the listing never advertised.
+    #[test]
+    fn subagent_runtime_skills_tracks_the_listing_projection() {
+        let mgr = manager_with_mixed_skills();
+
+        let essential = mgr
+            .subagent_runtime_skills(SubagentSkillListing::Essential)
+            .expect("essential must produce a runtime set");
+        let mut names: Vec<&str> = essential.iter().map(|s| s.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            vec!["check-work"],
+            "essential runtime set must be exactly the allowlisted skill"
+        );
+
+        let full = mgr
+            .subagent_runtime_skills(SubagentSkillListing::Full)
+            .expect("full must produce a runtime set");
+        assert_eq!(
+            full.len(),
+            3,
+            "full runtime set must keep every skill: {:?}",
+            full.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()
+        );
+
+        assert!(
+            mgr.subagent_runtime_skills(SubagentSkillListing::None)
+                .is_none(),
+            "`none` must not override the runtime set (no injection)"
         );
     }
 }

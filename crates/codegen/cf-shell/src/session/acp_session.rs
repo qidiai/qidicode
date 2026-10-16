@@ -1689,6 +1689,9 @@ mod subagent_usage_fold_tests;
 #[path = "acp_session_tests/subagent_skill_listing_tests.rs"]
 mod subagent_skill_listing_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/subagent_skill_listing_spawn_tests.rs"]
+mod subagent_skill_listing_spawn_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/turn_completion_emit_tests.rs"]
 mod turn_completion_emit_tests;
 #[cfg(test)]

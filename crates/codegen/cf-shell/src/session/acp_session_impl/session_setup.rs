@@ -57,6 +57,13 @@ impl SessionActor {
     /// conversation is the inherited zero-turn shape). Both drain the current
     /// bridge's pending baseline.
     ///
+    /// A subagent (`PromptAudience::Subagent`) conversation is handled
+    /// separately: its listing is injected read-only via
+    /// [`super::spawn::inject_subagent_baseline_listing`] (the same helper the
+    /// spawn path uses), and no pending effects are returned. Reaching this
+    /// method for a subagent only happens on the zero-turn rebuild, never at
+    /// spawn (subagents do not send `SessionCommand::Initialize`).
+    ///
     /// Idempotent: strips any existing baseline skill reminder before
     /// injecting, so a reminder-using -> reminder-using rebuild -- where
     /// `rewrite_zero_turn_prefix` keeps the inherited reminder (it only drops it
@@ -83,26 +90,24 @@ impl SessionActor {
                 Some(cf_sampling_types::SyntheticReason::SystemReminder)
             )
         });
-        // F2: a subagent session injects its baseline skill listing
-        // unconditionally and **read-only**. It bypasses the cross-session
-        // announcement ledger entirely — the child neither reads nor writes
-        // `announced_names` — so it can never inherit the primary session's
-        // "already announced" state (which would otherwise suppress the
-        // listing and leave the child with none), nor pollute that ledger for
-        // the primary. Projection is governed by `[skills].subagent_listing`.
+        // F2R: a subagent session injects its baseline skill listing
+        // unconditionally and read-only against the ledger. Its real
+        // initialization point is the spawn path
+        // (`spawn_session_actor` -> `inject_subagent_baseline_listing`) because
+        // subagents never send `SessionCommand::Initialize`; this branch covers
+        // the zero-turn agent rebuild (`handle_rebuild_agent_for_definition`),
+        // which a subagent can also drive. Both share one implementation, so
+        // the projection/ledger policy cannot drift.
         if self.rebuild_spec.prompt_audience
             == cf_agent::prompt::context::PromptAudience::Subagent
         {
-            let listing = self.rebuild_spec.skills_config.subagent_listing_or_default();
-            // `subagent_skill_listing` also drops the child's stale pending
-            // baseline so the first tool call cannot drain it into a second
-            // listing.
-            let snapshot = bridge.subagent_skill_listing(listing).await;
-            if !is_cursor
-                && let Some(snapshot) = snapshot
-            {
-                conversation.push(self.wrap_reminder_text(&snapshot.text));
-            }
+            super::spawn::inject_subagent_baseline_listing(
+                conversation,
+                &bridge,
+                &self.rebuild_spec.skills_config,
+                is_cursor,
+            )
+            .await;
             return None;
         }
         let effects = bridge.apply_pending_skill_update().await?;
