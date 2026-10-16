@@ -312,12 +312,32 @@ impl ToolBridge {
     /// still activate every startup skill (per-session `finalize()` seeds
     /// `AvailableSkills` with the unprojected catalog).
     ///
-    /// `None` when the projection is `SubagentSkillListing::None` or no skill
-    /// qualifies (also when no `SkillManager` is registered).
+    /// The F2S subagent gate rides on top of every projection: the skills
+    /// denied by `[skills].subagent_denied_skills` (default: the built-in
+    /// `DEFAULT_SUBAGENT_DENIED_SKILLS`) are removed from both the listing and
+    /// the runtime set. Because the gate is a permission boundary rather than a
+    /// context-cost projection, `SubagentSkillListing::None` **also** installs
+    /// the runtime set (all skills minus the denied ones) instead of leaving
+    /// `finalize()`'s unprojected catalog activatable — otherwise `none` would
+    /// bypass the gate. The primary session never reaches this method.
+    ///
+    /// `subagent_denied` is the raw `[skills].subagent_denied_skills` value,
+    /// resolved here through `SubagentSkillDenylist::resolve` (`None` → the
+    /// built-in set, `Some(vec![])` → fully open). Taking it at this seam — the
+    /// same one that carries the listing knob — means the gate cannot be
+    /// forgotten by a caller that never seeds the manager, and stays inert for
+    /// anything that is not a subagent injection.
+    ///
+    /// Returns the rendered listing snapshot, or `None` when the projection is
+    /// `SubagentSkillListing::None` (no injection) / no skill qualifies / no
+    /// `SkillManager` is registered. The runtime set is installed regardless.
     pub async fn subagent_skill_listing(
         &self,
         listing: crate::types::skill_discovery_tracker::SubagentSkillListing,
+        subagent_denied: Option<Vec<String>>,
     ) -> Option<crate::types::skill_discovery_tracker::SkillListingSnapshot> {
+        let denied =
+            crate::types::skill_discovery_tracker::SubagentSkillDenylist::resolve(subagent_denied);
         let registry = &*self.registry;
         let mut res = registry.resources.lock().await;
         let (snapshot, runtime_skills) = {
@@ -325,14 +345,12 @@ impl ToolBridge {
                 res.get_mut::<crate::types::skill_discovery_tracker::SkillManager>()?;
             tracker.clear_pending();
             (
-                tracker.listing_for_subagent(listing),
-                tracker.subagent_runtime_skills(listing),
+                tracker.listing_for_subagent(listing, &denied),
+                tracker.subagent_runtime_skills(listing, &denied),
             )
         };
         // Write the runtime projection directly -- the shell never sees this.
-        if let Some(runtime_skills) = runtime_skills {
-            res.insert(crate::types::resources::AvailableSkills(runtime_skills));
-        }
+        res.insert(crate::types::resources::AvailableSkills(runtime_skills));
         snapshot
     }
 

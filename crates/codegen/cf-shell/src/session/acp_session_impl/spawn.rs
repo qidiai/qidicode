@@ -89,9 +89,12 @@ mod cli_catchall_drop_tests {
 /// stale pending baseline, and the projected runtime set is written into
 /// `AvailableSkills` so the skill tool's activatable set matches the listing.
 /// The ledger (`announced_names`) is neither read nor written. Projection is
-/// governed by `[skills].subagent_listing`. No-op when the projection is
-/// `none`, when no skill qualifies, or under the cursor harness (whose
-/// preamble lists skills inline).
+/// governed by `[skills].subagent_listing`; the F2S gate
+/// (`[skills].subagent_denied_skills`) is handed over at the same seam and
+/// removes the denied skills from both the listing and the runtime set, under
+/// every listing value. No-op for the *listing* when the projection is `none`,
+/// when no skill qualifies, or under the cursor harness (whose preamble lists
+/// skills inline) — the runtime set is still installed.
 pub(super) async fn inject_subagent_baseline_listing(
     conversation: &mut Vec<ConversationItem>,
     bridge: &cf_tools::bridge::ToolBridge,
@@ -101,7 +104,13 @@ pub(super) async fn inject_subagent_baseline_listing(
     let listing = skills_config.subagent_listing_or_default();
     // Always clear the child's stale pending + seed the runtime projection,
     // even under the cursor harness (which suppresses only the reminder text).
-    let Some(snapshot) = bridge.subagent_skill_listing(listing).await else {
+    // The F2S gate travels with the config here (the same seam as the listing
+    // knob), so a child is gated even when its manager was never seeded with
+    // `[skills]` (e.g. built straight from the registry `finalize()` path).
+    let Some(snapshot) = bridge
+        .subagent_skill_listing(listing, skills_config.subagent_denied_skills.clone())
+        .await
+    else {
         return;
     };
     if is_cursor {

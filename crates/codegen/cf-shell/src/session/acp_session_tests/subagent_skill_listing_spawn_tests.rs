@@ -37,7 +37,12 @@ fn seed_skill(name: &str) -> cf_tools::implementations::skills::types::SkillInfo
 /// Build a `ToolBridge` exactly the way `spawn_session_actor` does: through the
 /// registry `finalize()` path, seeding a fresh `SkillManager` + unprojected
 /// `AvailableSkills` from `ctx.skills`.
-async fn bridge_with_skills() -> crate::tools::bridge::ToolBridge {
+///
+/// Note the `SkillManager` here is never configured through
+/// `seed_skill_discovery`, so its F2S subagent gate sits at the built-in
+/// default set — the same "unconfigured manager still gates" safety net the
+/// production path relies on for a child built straight from `ctx.skills`.
+async fn bridge_with_skill_names(names: &[&str]) -> crate::tools::bridge::ToolBridge {
     let cwd = std::env::temp_dir().join("qidi-subagent-listing-spawn-e2e");
     let fs: std::sync::Arc<dyn AsyncFileSystem> = std::sync::Arc::new(MockFs::new());
     let terminal: std::sync::Arc<dyn TerminalBackend> =
@@ -52,11 +57,7 @@ async fn bridge_with_skills() -> crate::tools::bridge::ToolBridge {
         notification_handle: ToolNotificationHandle::noop(),
         owner_session_id: None,
         parent_scheduler_handle: None,
-        skills: vec![
-            seed_skill("check-work"),
-            seed_skill("bid-write"),
-            seed_skill("random-tool"),
-        ],
+        skills: names.iter().map(|name| seed_skill(name)).collect(),
         state_path: std::env::temp_dir().join("qidi-subagent-listing-spawn-e2e/tool_state.json"),
         memory_backend: None,
         web_search_config: Default::default(),
@@ -80,6 +81,11 @@ async fn bridge_with_skills() -> crate::tools::bridge::ToolBridge {
     )
     .await
     .expect("finalize_builder should succeed")
+}
+
+/// The three-skill fixture the F2 projection tests use.
+async fn bridge_with_skills() -> crate::tools::bridge::ToolBridge {
+    bridge_with_skill_names(&["check-work", "bid-write", "random-tool"]).await
 }
 
 /// Index of the single synthetic `SystemReminder`, if present.
@@ -160,11 +166,17 @@ async fn spawn_path_injects_essential_projection_before_first_user_turn() {
 }
 
 /// `full` injects every skill and keeps the whole runtime set.
+///
+/// The F2S subagent gate is explicitly opened (`subagent_denied_skills = []`)
+/// so this test isolates the F2 `full` projection: `bid-write` is one of the
+/// built-in denied families and would otherwise be projected out. Default-gate
+/// behaviour is covered by `spawn_path_default_gate_blocks_dangerous_skills`.
 #[tokio::test]
 async fn spawn_path_full_listing_lists_and_enables_every_skill() {
     let bridge = bridge_with_skills().await;
     let cfg = SkillsConfig {
         subagent_listing: Some(cf_agent::prompt::skills::SubagentSkillListing::Full),
+        subagent_denied_skills: Some(Vec::new()),
         ..Default::default()
     };
     let mut conv = vec![ConversationItem::system("SP")];
@@ -182,9 +194,95 @@ async fn spawn_path_full_listing_lists_and_enables_every_skill() {
     );
 }
 
-/// `none` injects nothing and leaves the runtime set untouched.
+/// F2S: the built-in default gate keeps the machine-specific dangerous families
+/// out of **both** the child's listing and its activatable set, on the exact
+/// production spawn seam. `bid-write` / `bid-parse` exercise the `bid-` prefix
+/// entry; the other three are the exact-name entries.
 #[tokio::test]
-async fn spawn_path_none_listing_injects_nothing() {
+async fn spawn_path_default_gate_blocks_dangerous_skills() {
+    let bridge = bridge_with_skill_names(&[
+        "check-work",
+        "random-tool",
+        "qwen-image-lowvram",
+        "pdf-to-word-ocr",
+        "seal-extractor",
+        "bid-write",
+        "bid-parse",
+    ])
+    .await;
+    let cfg = SkillsConfig {
+        subagent_listing: Some(cf_agent::prompt::skills::SubagentSkillListing::Full),
+        ..Default::default()
+    };
+    let mut conv = vec![ConversationItem::system("SP")];
+    inject_subagent_baseline_listing(&mut conv, &bridge, &cfg, false).await;
+
+    let idx = reminder_index(&conv).expect("full listing must still inject");
+    let text = conv[idx].text_content();
+    for denied in [
+        "qwen-image-lowvram",
+        "pdf-to-word-ocr",
+        "seal-extractor",
+        "bid-write",
+        "bid-parse",
+    ] {
+        assert!(
+            !text.contains(denied),
+            "the default gate must keep {denied} out of the child listing:\n{text}"
+        );
+    }
+    for kept in ["check-work", "random-tool"] {
+        assert!(
+            text.contains(kept),
+            "the gate must not disturb unrelated skill {kept}:\n{text}"
+        );
+    }
+    assert_eq!(
+        available_skill_names(&bridge).await,
+        vec!["check-work", "random-tool"],
+        "the default gate must also remove the dangerous families from the activatable set"
+    );
+}
+
+/// F2S: an explicit denylist replaces the default set (it does not extend it),
+/// so a user can trade the built-in families for their own.
+#[tokio::test]
+async fn spawn_path_custom_denylist_replaces_the_default_set() {
+    let bridge = bridge_with_skills().await;
+    let cfg = SkillsConfig {
+        subagent_listing: Some(cf_agent::prompt::skills::SubagentSkillListing::Full),
+        subagent_denied_skills: Some(vec!["random-tool".to_owned()]),
+        ..Default::default()
+    };
+    let mut conv = vec![ConversationItem::system("SP")];
+    inject_subagent_baseline_listing(&mut conv, &bridge, &cfg, false).await;
+
+    let idx = reminder_index(&conv).expect("full listing must inject");
+    let text = conv[idx].text_content();
+    assert!(
+        !text.contains("random-tool"),
+        "the configured entry must be denied:\n{text}"
+    );
+    assert!(
+        text.contains("bid-write"),
+        "an explicit denylist replaces the built-in set, so bid-write returns:\n{text}"
+    );
+    assert_eq!(
+        available_skill_names(&bridge).await,
+        vec!["bid-write", "check-work"],
+        "the activatable set must follow the configured denylist"
+    );
+}
+
+/// F2S: `none` still installs the gate-only runtime set.
+///
+/// F2R deliberately left `AvailableSkills` untouched for `none` (a
+/// context-cost argument: no injection ⇒ no override). The gate is a
+/// *permission* boundary instead, so leaving `finalize()`'s unprojected catalog
+/// activatable would make it bypassable with a single `subagent_listing =
+/// "none"`. `none` therefore installs `full - denied`.
+#[tokio::test]
+async fn spawn_path_none_listing_still_installs_the_gate_only_set() {
     let bridge = bridge_with_skills().await;
     let cfg = SkillsConfig {
         subagent_listing: Some(cf_agent::prompt::skills::SubagentSkillListing::None),
@@ -200,8 +298,9 @@ async fn spawn_path_none_listing_injects_nothing() {
     );
     assert_eq!(
         available_skill_names(&bridge).await,
-        vec!["bid-write", "check-work", "random-tool"],
-        "`none` must not override the runtime set"
+        vec!["check-work", "random-tool"],
+        "`none` must still install `full - denied`: the gate is a permission \
+         boundary, independent of the listing knob"
     );
 }
 

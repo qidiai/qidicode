@@ -17,7 +17,7 @@ pub use cf_tools::types::compat::CompatConfig;
 /// allowlist (owned by `cf_tools`, where `SkillManager` lives) so config
 /// consumers can name them via `cf_agent`.
 pub use cf_tools::types::skill_discovery_tracker::{
-    DEFAULT_ESSENTIAL_SKILLS, SkillsMode, SubagentSkillListing,
+    DEFAULT_ESSENTIAL_SKILLS, DEFAULT_SUBAGENT_DENIED_SKILLS, SkillsMode, SubagentSkillListing,
 };
 
 use cf_tools::implementations::skills::discovery::{
@@ -84,6 +84,26 @@ pub struct SkillsConfig {
     /// [`SkillsConfig::subagent_listing_or_default`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subagent_listing: Option<SubagentSkillListing>,
+
+    /// Skills a **subagent** session may not activate (F2S).
+    ///
+    /// `None` (unset) resolves to the built-in dangerous set
+    /// ([`DEFAULT_SUBAGENT_DENIED_SKILLS`]: image generation, document OCR, and
+    /// the `bid-*` office family), so children are gated out of the box. An
+    /// entry matches a skill `name` **exactly or as a prefix** (`"bid-"` covers
+    /// every `bid-*` skill). `Some(vec![])` disables the gate for children
+    /// entirely.
+    ///
+    /// A permission boundary, not a listing projection: denied skills are
+    /// removed from the child's listing *and* its activatable set under every
+    /// [`SubagentSkillListing`] value. The primary session is never gated.
+    ///
+    /// Kept as `Option` so an unset value stays out of the persisted config,
+    /// matching the `mode` / `subagent_listing` precedent; resolution lives in
+    /// `cf_tools`'s `SubagentSkillDenylist` (the single source of truth for
+    /// matching semantics).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_denied_skills: Option<Vec<String>>,
 }
 
 impl SkillsConfig {
@@ -874,6 +894,70 @@ mod tests {
                 "deserialized `{raw}` must resolve to {expected:?}"
             );
         }
+    }
+
+    // ── Subagent skill gate (F2S) ────────────────────────────────────────
+
+    #[test]
+    fn subagent_denied_skills_is_unset_by_default_and_kept_out_of_the_config() {
+        let cfg = SkillsConfig::default();
+        assert!(
+            cfg.subagent_denied_skills.is_none(),
+            "an unset gate must stay None: the built-in default set is resolved \
+             downstream (cf_tools::...::SubagentSkillDenylist), so it is never \
+             pinned to disk"
+        );
+        let serialized = serde_json::to_string(&cfg).unwrap();
+        assert!(
+            !serialized.contains("subagent_denied_skills"),
+            "an unset gate must stay out of the serialized config:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn subagent_denied_skills_round_trips_including_an_explicit_empty_list() {
+        let cfg: SkillsConfig = serde_json::from_str(
+            r#"{"paths":[],"subagent_denied_skills":["bid-","random-tool"]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.subagent_denied_skills,
+            Some(vec!["bid-".to_owned(), "random-tool".to_owned()]),
+            "a configured denylist must round-trip verbatim"
+        );
+
+        let opened: SkillsConfig =
+            serde_json::from_str(r#"{"paths":[],"subagent_denied_skills":[]}"#).unwrap();
+        assert_eq!(
+            opened.subagent_denied_skills,
+            Some(Vec::new()),
+            "`[]` (gate fully open) must be distinct from unset"
+        );
+        assert!(
+            serde_json::to_string(&opened)
+                .unwrap()
+                .contains("subagent_denied_skills"),
+            "an explicit empty denylist must be persisted, not dropped as unset"
+        );
+    }
+
+    #[test]
+    fn default_denied_set_covers_the_documented_dangerous_families() {
+        for exact in ["qwen-image-lowvram", "pdf-to-word-ocr", "seal-extractor"] {
+            assert!(
+                DEFAULT_SUBAGENT_DENIED_SKILLS.contains(&exact),
+                "{exact} must be in the built-in denylist"
+            );
+        }
+        assert!(
+            DEFAULT_SUBAGENT_DENIED_SKILLS.contains(&"bid-"),
+            "the `bid-` prefix entry must be in the built-in denylist so the \
+             whole bid-* family is covered"
+        );
+        assert!(
+            !DEFAULT_SUBAGENT_DENIED_SKILLS.contains(&"check-work"),
+            "core programming skills must never be gated"
+        );
     }
 
     // ── Server-synced skills (injected server_skill_dirs) ────────────────

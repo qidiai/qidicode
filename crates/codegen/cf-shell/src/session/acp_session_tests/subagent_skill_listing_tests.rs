@@ -42,6 +42,12 @@ async fn actor_with(
     spec.prompt_audience = audience;
     spec.skills_config = SkillsConfig {
         subagent_listing: listing,
+        // F2S gate explicitly opened so these tests isolate the F2 listing
+        // projection and the ledger policy: `bid-write` is one of the built-in
+        // denied families. Gate behaviour has its own coverage (the production
+        // spawn path in `subagent_skill_listing_spawn_tests.rs`, plus the
+        // `SkillManager` unit tests).
+        subagent_denied_skills: Some(Vec::new()),
         ..Default::default()
     };
     actor
