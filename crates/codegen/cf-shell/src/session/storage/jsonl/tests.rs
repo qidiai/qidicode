@@ -1891,6 +1891,99 @@ async fn list_sessions_recent_excludes_hidden_sessions() {
     assert_eq!(recent.len(), 1);
     assert_eq!(recent[0].info.id, acp::SessionId::new("visible"));
 }
+
+/// The search path (`list_sessions_including_hidden`) must reach subagent
+/// children — they are hidden by kind, not by an explicit flag — while still
+/// honouring a deliberate `hidden: true`. Otherwise a user could never find a
+/// subagent session, and the two listing flavours would disagree on which
+/// rows a "never show this" marker removes.
+#[tokio::test]
+async fn list_sessions_including_hidden_keeps_subagents_but_not_explicit_hidden() {
+    let tmp = TempDir::new().unwrap();
+    let cwd = crate::util::grok_home::encode_cwd_dirname("/workspace");
+    let now = chrono::Utc::now();
+    write_test_summary(tmp.path(), &cwd, "visible", now, None, None, None);
+    write_test_summary(tmp.path(), &cwd, "hidden-explicit", now, None, Some(true), None);
+    write_test_summary(tmp.path(), &cwd, "subagent", now, None, None, Some("subagent"));
+    write_test_summary(
+        tmp.path(),
+        &cwd,
+        "subagent-resume",
+        now,
+        None,
+        None,
+        Some("subagent_resume"),
+    );
+    let adapter = JsonlStorageAdapter::with_root(tmp.path().to_path_buf());
+
+    let browsing = adapter.list_sessions(Some("/workspace")).await.unwrap();
+    assert_eq!(
+        browsing
+            .iter()
+            .map(|s| s.info.id.0.to_string())
+            .collect::<Vec<_>>(),
+        vec!["visible"],
+        "the browsing list keeps subagent children out"
+    );
+
+    let searching = adapter
+        .list_sessions_including_hidden(Some("/workspace"))
+        .await
+        .unwrap();
+    let mut ids = searching
+        .iter()
+        .map(|s| s.info.id.0.to_string())
+        .collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(
+        ids,
+        vec!["subagent", "subagent-resume", "visible"],
+        "the search list adds subagent children but still drops explicit hidden"
+    );
+}
+
+/// The single summary predicate both listing flavours share must keep the
+/// browsing set a strict superset relation of the search set: everything the
+/// browsing list shows is in the search list, plus the subagent children.
+#[test]
+fn summary_listable_agrees_with_is_hidden() {
+    fn summary(hidden: Option<bool>, kind: Option<&str>) -> Summary {
+        Summary {
+            hidden,
+            session_kind: kind.map(String::from),
+            ..Summary::new(
+                &Info {
+                    id: acp::SessionId::new("s"),
+                    cwd: "/repo".into(),
+                },
+                default_model_id(),
+            )
+            .unwrap()
+        }
+    }
+
+    for (hidden, kind) in [
+        (None, None),
+        (None, Some("subagent")),
+        (None, Some("subagent_resume")),
+        (None, Some("worktree")),
+        (Some(false), Some("subagent")),
+        (Some(true), None),
+        (Some(true), Some("subagent")),
+    ] {
+        let s = summary(hidden, kind);
+        assert_eq!(
+            summary_listable(&s, false),
+            !s.is_hidden(),
+            "browsing list must agree with is_hidden (hidden={hidden:?}, kind={kind:?})"
+        );
+        assert_eq!(
+            summary_listable(&s, true),
+            !hidden.unwrap_or(false),
+            "search list must only drop explicit hidden (hidden={hidden:?}, kind={kind:?})"
+        );
+    }
+}
 #[tokio::test]
 async fn list_sessions_recent_empty_dir() {
     let tmp = TempDir::new().unwrap();

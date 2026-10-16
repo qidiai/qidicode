@@ -600,7 +600,25 @@ pub trait StorageAdapter: Send + Sync {
 
     /// List session summaries, optionally filtered by current working directory.
     /// When `cwd` is `None`, returns summaries for all sessions.
+    ///
+    /// Sessions where [`Summary::is_hidden`] holds (subagent children, or an
+    /// explicit `hidden: true`) are excluded.
     async fn list_sessions(&self, cwd: Option<&str>) -> io::Result<Vec<Summary>>;
+
+    /// [`Self::list_sessions`], but keeping sessions that are hidden purely
+    /// because they are subagent children.
+    ///
+    /// Only an explicit `hidden: true` still excludes a session. Used by the
+    /// session-search path so subagent children stay discoverable while the
+    /// browsing path keeps them out of the list. Implementations that don't
+    /// distinguish the two fall back to [`Self::list_sessions`] (nothing extra
+    /// to offer).
+    async fn list_sessions_including_hidden(
+        &self,
+        cwd: Option<&str>,
+    ) -> io::Result<Vec<Summary>> {
+        self.list_sessions(cwd).await
+    }
 
     /// Permanently delete a session's stored data (all files for the
     /// session). Implementations must treat a missing session as success

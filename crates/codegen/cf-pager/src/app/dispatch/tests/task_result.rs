@@ -1387,6 +1387,7 @@ fn delete_both_session_clears_modal_and_welcome_content_hits() {
         false,
         SourceFilter::All,
         None,
+        true,
     );
     assert!(
         !modal_map
@@ -1413,6 +1414,7 @@ fn delete_both_session_clears_modal_and_welcome_content_hits() {
         false,
         SourceFilter::All,
         None,
+        true,
     );
     assert!(
         !welcome_map

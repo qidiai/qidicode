@@ -489,12 +489,16 @@ pub fn repo_name_from_cwd(cwd: &str) -> String {
 }
 
 /// [`crate::views::session_picker::filter_session_entries`].
+///
+/// `searching` must be `true` iff the live query is non-empty; subagent child
+/// sessions only participate while it is (see the wrapped function).
 pub fn filter_session_entries(
     entries: Option<&[SessionPickerEntry]>,
     query: &str,
     source_filter: SourceFilter,
+    searching: bool,
 ) -> Vec<usize> {
-    crate::views::session_picker::filter_session_entries(entries, query, source_filter)
+    crate::views::session_picker::filter_session_entries(entries, query, source_filter, searching)
 }
 
 /// [`crate::views::session_picker::build_session_entry_data`].

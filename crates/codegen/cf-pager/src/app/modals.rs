@@ -896,6 +896,7 @@ impl AgentView {
                     *content_loading,
                     *source_filter,
                     Some(current_repo.as_str()),
+                    !state.query.trim().is_empty(),
                 );
                 let entry_count = entry_map.len();
                 let non_sel: Vec<bool> = entry_map.iter().map(|e| e.is_none()).collect();
@@ -1924,8 +1925,12 @@ impl AgentView {
                         entries_query.as_deref(),
                     );
                     let entries_data = entries.as_deref().unwrap_or(&[]);
-                    let filtered_indices =
-                        filter_session_entries(entries.as_deref(), filter_query, *source_filter);
+                    let filtered_indices = filter_session_entries(
+                        entries.as_deref(),
+                        filter_query,
+                        *source_filter,
+                        !state.query.trim().is_empty(),
+                    );
                     let built = crate::views::session_picker::build_session_entry_data(
                         entries_data,
                         &filtered_indices,
@@ -2305,6 +2310,7 @@ mod session_picker_delete_tests {
             branch: None,
             repo_name: "repo".into(),
             worktree_label: None,
+            is_subagent: false,
             card_detail: None,
         }
     }

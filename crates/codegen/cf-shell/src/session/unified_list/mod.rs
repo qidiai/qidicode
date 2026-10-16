@@ -81,11 +81,28 @@ pub struct ListReq {
     pub limit: Option<usize>,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Opt in to the subagent-child lane: subagent sessions are hidden from
+    /// history listings, so a client that wants to make them discoverable by
+    /// search asks for them separately. They come back under
+    /// `_meta["x.ai/subagentSessions"]` rather than in `sessions`, so they can
+    /// never displace a user-facing page row.
+    #[serde(default)]
+    pub include_subagents: bool,
     #[serde(default, rename = "_meta")]
     pub meta: Option<serde_json::Value>,
 }
+/// Upper bound on the subagent-discovery rows attached to a list response.
+///
+/// These rows exist so a search can reach a subagent session; they are not a
+/// browsable page, so the cap keeps the payload bounded on a machine with
+/// thousands of subagent children.
+pub const SUBAGENT_ROW_CAP: usize = 100;
 pub struct UnifiedListResult {
     pub rows: Vec<UnifiedRow>,
+    /// Subagent child sessions the browsing list hides, for a client that
+    /// opted in via [`ListReq::include_subagents`]. Never paginated (see
+    /// [`SUBAGENT_ROW_CAP`]) and never overlapping `rows`.
+    pub subagent_rows: Vec<UnifiedRow>,
     pub next_cursor: Option<String>,
     pub facets: FacetSummary,
     pub conversations_partial: Option<PartialReason>,
@@ -174,20 +191,35 @@ pub async fn build_unified_list(
     let exclude_conversations = excludes_conversations(&facet_filters);
     let exclude_build = excludes_build(&facet_filters);
     let over = (limit * 3).max(100);
+    let subagent_over = if req.include_subagents {
+        SUBAGENT_ROW_CAP
+    } else {
+        0
+    };
     let local_fut = async {
         if exclude_build {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
-        crate::session::merge::fetch_merged(
+        let split = crate::session::merge::fetch_merged_split(
             registry_client,
             req.cwd.as_deref(),
             query.as_deref(),
             over,
+            subagent_over,
         )
-        .await
-        .into_iter()
-        .map(|m| merged_session_to_row(m, reg))
-        .collect::<Vec<UnifiedRow>>()
+        .await;
+        (
+            split
+                .sessions
+                .into_iter()
+                .map(|m| merged_session_to_row(m, reg))
+                .collect::<Vec<UnifiedRow>>(),
+            split
+                .subagents
+                .into_iter()
+                .map(|m| merged_session_to_row(m, reg))
+                .collect::<Vec<UnifiedRow>>(),
+        )
     };
     let conv_fut = async {
         if exclude_conversations {
@@ -234,6 +266,7 @@ pub async fn build_unified_list(
         }
     };
     let (local_rows, conv_lane) = tokio::join!(local_fut, conv_fut);
+    let (local_rows, subagent_rows) = local_rows;
     {
         let (conv_lane_status, conv_rows) = match &conv_lane {
             ConvLane::Skipped => ("skipped", 0),
@@ -243,12 +276,17 @@ pub async fn build_unified_list(
         tracing::debug!(
             local_lane_skipped = exclude_build,
             local_rows = local_rows.len(),
+            subagent_rows = subagent_rows.len(),
             conv_lane = conv_lane_status,
             conv_rows,
             "session list lanes"
         );
     }
     let local_rows = reg.apply_in_memory_filters(&facet_filters, local_rows);
+    // The subagent lane rides the same facet filters so a repo/cwd-narrowed
+    // view stays narrow, but it is never paginated: it is a discovery aid for
+    // search, so it can't crowd out a user-facing page row.
+    let subagent_rows = reg.apply_in_memory_filters(&facet_filters, subagent_rows);
     let conv_lane = match conv_lane {
         ConvLane::Page {
             rows,
@@ -272,6 +310,7 @@ pub async fn build_unified_list(
     let facets = reg.summarize_window(&rows);
     UnifiedListResult {
         rows,
+        subagent_rows,
         next_cursor: next_cursor.map(|c| c.encode()),
         facets,
         conversations_partial: partial,
@@ -309,6 +348,15 @@ pub struct ExtListResponseMeta {
     pub facets: FacetSummary,
     #[serde(rename = "x.ai/partial")]
     pub partial: PartialInfo,
+    /// Subagent child sessions (see [`ListReq::include_subagents`]). Kept out
+    /// of `sessions` so a client can render `sessions` alone for a browsing
+    /// view and use these only while searching. Omitted entirely when the
+    /// request did not opt in or no subagent sessions exist.
+    #[serde(
+        rename = "x.ai/subagentSessions",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub subagent_sessions: Vec<ExtSupersetRow>,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct PartialInfo {
@@ -319,6 +367,7 @@ pub struct PartialInfo {
 pub fn ext_list_response(result: UnifiedListResult) -> ExtListResponse {
     let UnifiedListResult {
         rows,
+        subagent_rows,
         next_cursor,
         facets,
         conversations_partial,
@@ -335,6 +384,10 @@ pub fn ext_list_response(result: UnifiedListResult) -> ExtListResponse {
                 conversations: conversations_partial.is_some(),
                 reason: conversations_partial.map(PartialReason::as_str),
             },
+            subagent_sessions: subagent_rows
+                .into_iter()
+                .map(UnifiedRow::into_ext_superset)
+                .collect(),
         },
     }
 }
@@ -428,6 +481,71 @@ mod tests {
         rows.sort_by(super::cursor::cmp_total_order);
         let ids: Vec<&str> = rows.iter().map(|r| r.legacy.session_id.as_str()).collect();
         assert_eq!(ids, ["a", "c", "b"]);
+    }
+
+    /// Wire pin for the subagent lane: the rows ride `_meta`, never `sessions`,
+    /// so a browsing client (the dashboard fallback, older pagers) can't render
+    /// them by accident and they can't consume a page slot. `sessionKind` is
+    /// the marker the pager keys on to hide them until a query is live.
+    #[test]
+    fn ext_list_response_carries_subagent_lane_only_under_meta() {
+        let mut subagent = local("sub-1", "2026-06-19T00:00:00Z");
+        subagent.session_kind = Some("subagent".into());
+        let value = serde_json::to_value(ext_list_response(UnifiedListResult {
+            rows: vec![row("s1", "2026-06-18T20:10:00Z")],
+            subagent_rows: vec![merged_session_to_row(subagent, facet_registry())],
+            next_cursor: None,
+            facets: facet_registry().summarize_window(&[]),
+            conversations_partial: None,
+        }))
+        .expect("serialize");
+
+        assert_eq!(value["sessions"][0]["sessionId"], "s1");
+        assert_eq!(value["sessions"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            value["_meta"]["x.ai/subagentSessions"][0]["sessionId"],
+            "sub-1"
+        );
+        assert_eq!(
+            value["_meta"]["x.ai/subagentSessions"][0]["sessionKind"],
+            "subagent",
+            "the marker the pager hides on must survive serialization"
+        );
+        assert_eq!(
+            value["_meta"]["x.ai/subagentSessions"][0]["source"],
+            "local"
+        );
+    }
+
+    /// No lane opted in (or no subagent sessions exist) ⇒ the key is absent, so
+    /// the payload and existing clients are byte-identical to before.
+    #[test]
+    fn ext_list_response_omits_empty_subagent_lane() {
+        let value = serde_json::to_value(ext_list_response(UnifiedListResult {
+            rows: vec![row("s1", "2026-06-18T20:10:00Z")],
+            subagent_rows: Vec::new(),
+            next_cursor: None,
+            facets: facet_registry().summarize_window(&[]),
+            conversations_partial: None,
+        }))
+        .expect("serialize");
+        assert!(
+            value["_meta"].get("x.ai/subagentSessions").is_none(),
+            "an empty lane must not add a key: {value}"
+        );
+    }
+
+    /// `includeSubagents` is opt-in and defaults off, so every other client of
+    /// `x.ai/session/list` keeps the payload it had.
+    #[test]
+    fn list_req_parses_include_subagents_opt_in() {
+        let off = parse_list_req(r#"{"cwd":"/repo","limit":30}"#).expect("parse");
+        assert!(!off.include_subagents, "absent flag must default off");
+        let explicit_off =
+            parse_list_req(r#"{"cwd":"/repo","includeSubagents":false}"#).expect("parse");
+        assert!(!explicit_off.include_subagents);
+        let on = parse_list_req(r#"{"cwd":"/repo","includeSubagents":true}"#).expect("parse");
+        assert!(on.include_subagents, "the picker's opt-in must parse");
     }
     #[test]
     fn kind_filter_local_keeps_local_rows() {
@@ -766,6 +884,7 @@ mod tests {
         ] {
             let value = serde_json::to_value(ext_list_response(UnifiedListResult {
                 rows: Vec::new(),
+                subagent_rows: Vec::new(),
                 next_cursor: None,
                 facets: facet_registry().summarize_window(&[]),
                 conversations_partial: Some(reason),
@@ -779,6 +898,7 @@ mod tests {
         }
         let healthy = serde_json::to_value(ext_list_response(UnifiedListResult {
             rows: Vec::new(),
+            subagent_rows: Vec::new(),
             next_cursor: None,
             facets: facet_registry().summarize_window(&[]),
             conversations_partial: None,

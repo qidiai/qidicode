@@ -971,13 +971,25 @@ impl Summary {
         })
     }
 
+    /// Whether this session is a subagent child session.
+    ///
+    /// Subagent children (`session_kind` of `"subagent"`, `"subagent_fork"`,
+    /// `"subagent_resume"`, …) are hidden from history listings by default so
+    /// they don't swamp the user's own sessions, but they stay discoverable:
+    /// a *search* over the session list opts back in to them (see
+    /// [`list_summaries_including_hidden`]).
+    pub fn is_subagent(&self) -> bool {
+        self.session_kind
+            .as_deref()
+            .is_some_and(|k| k.starts_with("subagent"))
+    }
+
     /// Whether this session should be excluded from history listings.
+    ///
+    /// An explicit `hidden` flag wins over the inferred subagent kind; when it
+    /// is absent the session is hidden iff it is a subagent child.
     pub fn is_hidden(&self) -> bool {
-        self.hidden.unwrap_or(
-            self.session_kind
-                .as_deref()
-                .is_some_and(|k| k.starts_with("subagent")),
-        )
+        self.hidden.unwrap_or_else(|| self.is_subagent())
     }
 
     /// Preferred display title: `generated_title` if non-empty, else `session_summary`.
@@ -2424,6 +2436,22 @@ pub async fn list_summaries(cwd: Option<&str>) -> io::Result<Vec<Summary>> {
     let root_dir = crate::util::grok_home::grok_home();
     let storage: Box<dyn StorageAdapter> = Box::new(JsonlStorageAdapter::with_root(root_dir));
     storage.list_sessions(cwd).await
+}
+
+/// List session summaries *including* subagent child sessions, for a
+/// caller that is searching rather than browsing.
+///
+/// [`list_summaries`] drops every session where [`Summary::is_hidden`] holds
+/// so subagent children can't swamp the history list. A search must be able to
+/// reach those sessions, so this variant keeps them — it only honours an
+/// explicit `hidden: true` (a deliberate "never show this" marker), which
+/// beats the inferred subagent kind. The caller is responsible for keeping
+/// them out of an unfiltered view (the picker hides them unless a query is
+/// live).
+pub async fn list_summaries_including_hidden(cwd: Option<&str>) -> io::Result<Vec<Summary>> {
+    let root_dir = crate::util::grok_home::grok_home();
+    let storage: Box<dyn StorageAdapter> = Box::new(JsonlStorageAdapter::with_root(root_dir));
+    storage.list_sessions_including_hidden(cwd).await
 }
 
 /// Failure modes of [`delete_session_history`].

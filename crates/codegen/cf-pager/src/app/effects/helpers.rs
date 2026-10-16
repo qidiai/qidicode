@@ -450,15 +450,44 @@ pub(super) fn parse_session_list_partial(
 /// ([`Effect::FetchDashboardSessions`]) so both produce identical labels.
 /// Sessions older than 30 days, and sessions with no usable user prompt
 /// (empty `summary` after fallbacks), are dropped.
+///
+/// Subagent children are *not* in `sessions` — they ride
+/// `_meta["x.ai/subagentSessions"]` (see [`parse_subagent_session_entries`]).
 pub(super) fn parse_session_picker_entries(
     payload: &serde_json::Value,
 ) -> Vec<crate::app::app_view::SessionPickerEntry> {
-    use crate::app::app_view::SessionPickerEntry;
-    let entries: Vec<serde_json::Value> = payload
+    let rows = payload
         .get("sessions")
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+    parse_session_rows(rows)
+}
+
+/// Parse the `_meta["x.ai/subagentSessions"]` array of a
+/// `x.ai/session/list` response.
+///
+/// These are the subagent child sessions the server keeps out of `sessions`
+/// (they must never consume a user-facing page row). The picker appends them
+/// to its entry list but hides them unless a query is live, so a user's own
+/// history stays clean while subagent sessions remain searchable.
+pub(super) fn parse_subagent_session_entries(
+    payload: &serde_json::Value,
+) -> Vec<crate::app::app_view::SessionPickerEntry> {
+    let rows = payload
+        .get("_meta")
+        .and_then(|m| m.get("x.ai/subagentSessions"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    parse_session_rows(rows)
+}
+
+/// Shared row decoder for both the user and subagent session arrays.
+fn parse_session_rows(
+    entries: Vec<serde_json::Value>,
+) -> Vec<crate::app::app_view::SessionPickerEntry> {
+    use crate::app::app_view::SessionPickerEntry;
     let now = chrono::Utc::now();
     let cutoff = now - chrono::Duration::days(30);
     entries
@@ -566,6 +595,16 @@ pub(super) fn parse_session_picker_entries(
                 .and_then(|s| s.as_str())
                 .map(String::from);
             let repo_name = crate::views::session_picker::repo_name_from_cwd(&cwd_str);
+            // `MergedSession.session_kind` is already on the wire (camelCase,
+            // omitted when absent), so a subagent child is recognizable without
+            // a new field on the list contract. Explicit-hidden sessions never
+            // reach a client at all (the server drops them), so kind is the
+            // only marker the picker needs.
+            let is_subagent = v
+                .get("sessionKind")
+                .or_else(|| v.get("session_kind"))
+                .and_then(|s| s.as_str())
+                .is_some_and(|k| k.starts_with("subagent"));
             Some(SessionPickerEntry {
                 id,
                 summary: display,
@@ -580,6 +619,7 @@ pub(super) fn parse_session_picker_entries(
                 branch,
                 repo_name,
                 worktree_label,
+                is_subagent,
                 card_detail: None,
             })
         })

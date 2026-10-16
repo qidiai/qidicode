@@ -462,6 +462,7 @@ pub(in crate::app::dispatch) fn remove_session_from_pickers(
             *content_loading,
             *source_filter,
             Some(current_repo.as_str()),
+            !state.query.trim().is_empty(),
         );
         reanchor_grouped_selection(state, &map);
     }
@@ -484,6 +485,7 @@ pub(in crate::app::dispatch) fn remove_session_from_pickers(
         app.session_picker_content_loading,
         app.session_picker_source_filter,
         Some(welcome_current_repo.as_str()),
+        !app.session_picker_state.query.trim().is_empty(),
     );
     reanchor_grouped_selection(&mut app.session_picker_state, &welcome_map);
 }

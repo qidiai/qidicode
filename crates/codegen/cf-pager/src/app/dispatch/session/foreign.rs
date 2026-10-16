@@ -25,6 +25,23 @@ struct PickerSurface<'a> {
 }
 
 impl PickerSurface<'_> {
+    /// Whether the picker holds any row the default (not-searching) view can
+    /// show. Subagent children only count while a query is live, so a list of
+    /// nothing but subagent rows is still "empty" for notice purposes.
+    fn has_visible_rows(&self) -> bool {
+        let searching = self.searching();
+        self.entries.as_ref().is_some_and(|entries| {
+            entries.iter().any(|entry| !entry.is_subagent || searching)
+        })
+    }
+
+    /// Whether the *live* query is a search in progress. Subagent child
+    /// sessions only become selectable rows while this holds (see
+    /// [`crate::views::session_picker::filter_session_entries`]).
+    fn searching(&self) -> bool {
+        !self.state.query.trim().is_empty()
+    }
+
     fn capture_selection(&self) -> PickerSelectionAnchor {
         capture_picker_selection(
             self.entries.as_deref(),
@@ -35,12 +52,14 @@ impl PickerSurface<'_> {
             *self.content_loading,
             self.source_filter,
             Some(&self.current_repo),
+            self.searching(),
         )
     }
 
     fn restore_selection(&mut self, anchor: PickerSelectionAnchor) {
         let filter_query =
             effective_filter_query(&self.state.query, self.entries_query.as_deref()).to_owned();
+        let searching = self.searching();
         restore_picker_selection(
             anchor,
             self.entries.as_deref(),
@@ -51,6 +70,7 @@ impl PickerSurface<'_> {
             *self.content_loading,
             self.source_filter,
             Some(&self.current_repo),
+            searching,
         );
         self.state.expanded.clear();
     }
@@ -78,7 +98,12 @@ impl PickerSurface<'_> {
         if is_search && self.entries.is_none() {
             *self.entries = Some(Vec::new());
         }
-        let notice = if self.entries.is_none() && !is_search {
+        // The subagent lane can keep `entries` non-empty even when the user has
+        // no sessions of their own. The empty notice must key on rows the
+        // default view can actually show, or an all-subagent directory renders
+        // as a blank list with no explanation.
+        let has_visible_rows = self.has_visible_rows();
+        let notice = if !has_visible_rows && !is_search {
             if self.lanes.foreign_loading {
                 self.lanes.pending_notice = Some(SessionPickerPendingNotice::Empty(empty_notice));
                 None
@@ -130,7 +155,7 @@ impl PickerSurface<'_> {
         let anchor = self.capture_selection();
         crate::app::foreign_sessions::replace_foreign_entries(self.entries, scanned);
         self.lanes.foreign_loading = false;
-        let notice = self.lanes.take_ready_notice(self.entries.is_some());
+        let notice = self.lanes.take_ready_notice(self.has_visible_rows());
         self.restore_selection(anchor);
         notice
     }

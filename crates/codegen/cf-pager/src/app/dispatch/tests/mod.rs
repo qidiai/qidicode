@@ -727,6 +727,7 @@ fn make_picker_entry(id: &str, cwd: &str) -> crate::app::app_view::SessionPicker
         branch: None,
         repo_name: "repo".into(),
         worktree_label: None,
+        is_subagent: false,
         card_detail: None,
     }
 }

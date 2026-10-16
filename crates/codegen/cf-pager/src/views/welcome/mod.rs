@@ -2188,8 +2188,12 @@ pub(crate) fn render_session_picker(
     // (which receives the effective query) on row indices.
     let filter_query =
         crate::views::session_picker::effective_filter_query(&ctx.state.query, ctx.entries_query);
-    let filtered_indices =
-        crate::app::app_view::filter_session_entries(ctx.sessions, filter_query, ctx.source_filter);
+    let filtered_indices = crate::app::app_view::filter_session_entries(
+        ctx.sessions,
+        filter_query,
+        ctx.source_filter,
+        !ctx.state.query.trim().is_empty(),
+    );
 
     let content_width = area.width; // approximate for truncation
     let built = build_session_entry_data(entries_data, &filtered_indices, ctx.state, content_width);
@@ -2521,6 +2525,7 @@ mod tests {
             branch: None,
             repo_name: repo_name.into(),
             worktree_label: None,
+            is_subagent: false,
             card_detail: None,
         }
     }

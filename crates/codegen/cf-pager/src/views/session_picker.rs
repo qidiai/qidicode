@@ -202,6 +202,7 @@ pub(crate) fn capture_picker_selection(
     content_loading: bool,
     source_filter: SourceFilter,
     current_repo: Option<&str>,
+    searching: bool,
 ) -> PickerSelectionAnchor {
     let map = build_entry_map(
         entries,
@@ -211,6 +212,7 @@ pub(crate) fn capture_picker_selection(
         content_loading,
         source_filter,
         current_repo,
+        searching,
     );
     let key = map
         .get(state.selected)
@@ -248,6 +250,7 @@ pub(crate) fn restore_picker_selection(
     content_loading: bool,
     source_filter: SourceFilter,
     current_repo: Option<&str>,
+    searching: bool,
 ) {
     let map = build_entry_map(
         entries,
@@ -257,6 +260,7 @@ pub(crate) fn restore_picker_selection(
         content_loading,
         source_filter,
         current_repo,
+        searching,
     );
     let selected = anchor
         .key
@@ -336,10 +340,19 @@ pub(crate) fn effective_filter_query<'a>(
 /// When the query is empty, all entries match the text filter. The
 /// `source_filter` is always applied (entries whose `source` field
 /// does not pass [`SourceFilter::matches`] are excluded).
+///
+/// `searching` must be `true` iff the *live* picker query is non-empty. It is
+/// separate from `query`, which is the *effective* filter query: for
+/// server-stamped results (see [`effective_filter_query`]) that is empty even
+/// though a search is running, and using it here would hide exactly the rows
+/// the search was meant to surface. Subagent child sessions are only ever
+/// matched while `searching` — they are kept out of the default list so a
+/// user's own history isn't swamped, but a search still reaches them.
 pub(crate) fn filter_session_entries(
     entries: Option<&[SessionPickerEntry]>,
     query: &str,
     source_filter: SourceFilter,
+    searching: bool,
 ) -> Vec<usize> {
     let Some(entries) = entries else {
         return vec![];
@@ -349,7 +362,8 @@ pub(crate) fn filter_session_entries(
         .iter()
         .enumerate()
         .filter(|(_, e)| {
-            source_filter.matches(&e.source)
+            (!e.is_subagent || searching)
+                && source_filter.matches(&e.source)
                 && (query.is_empty()
                     || fuzzy_matches_session(&e.id, &q)
                     || fuzzy_matches_session(&e.summary, &q))
@@ -369,8 +383,9 @@ pub(crate) fn build_virtual_list(
     content_results: Option<&[cf_shell::extensions::session_search::SearchSessionHit]>,
     query: &str,
     source_filter: SourceFilter,
+    searching: bool,
 ) -> Vec<PickerItem> {
-    let fuzzy_indices = filter_session_entries(entries, query, source_filter);
+    let fuzzy_indices = filter_session_entries(entries, query, source_filter, searching);
     let fuzzy_ids: HashSet<&str> = entries
         .map(|ents| {
             fuzzy_indices
@@ -405,6 +420,10 @@ pub(crate) fn build_virtual_list(
 /// non-selectable headers. When `grouped` is true, repo-group headers
 /// are interleaved so indices match what the renderer stores in hit areas.
 /// `current_repo` pins the matching repo group to the top of the list.
+///
+/// `searching` (see [`filter_session_entries`]) decides whether subagent
+/// child sessions are eligible rows at all.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_entry_map(
     entries: Option<&[SessionPickerEntry]>,
     content_results: Option<&[cf_shell::extensions::session_search::SearchSessionHit]>,
@@ -413,10 +432,11 @@ pub(crate) fn build_entry_map(
     content_loading: bool,
     source_filter: SourceFilter,
     current_repo: Option<&str>,
+    searching: bool,
 ) -> Vec<Option<PickerItem>> {
     if grouped {
         let entries_data = entries.unwrap_or(&[]);
-        let filtered = filter_session_entries(entries, query, source_filter);
+        let filtered = filter_session_entries(entries, query, source_filter, searching);
         let mut map: Vec<Option<PickerItem>> = Vec::new();
         {
             let mut groups: IndexMap<&str, Vec<usize>> = IndexMap::new();
@@ -475,7 +495,13 @@ pub(crate) fn build_entry_map(
         } else {
             content_results
         };
-        let virtual_list = build_virtual_list(entries, content_for_flat, query, source_filter);
+        let virtual_list = build_virtual_list(
+            entries,
+            content_for_flat,
+            query,
+            source_filter,
+            searching,
+        );
         let fuzzy_count = virtual_list
             .iter()
             .filter(|i| matches!(i, PickerItem::Fuzzy { .. }))
@@ -837,6 +863,7 @@ mod tests {
                 Some(&entries),
                 effective_filter_query("hit", None),
                 SourceFilter::All,
+                true,
             )
             .is_empty(),
             "unstamped entries keep the local fuzzy filter"
@@ -846,6 +873,7 @@ mod tests {
                 Some(&entries),
                 effective_filter_query("hit", Some("older query")),
                 SourceFilter::All,
+                true,
             )
             .is_empty(),
             "a stale stamp (newer fetch in flight) keeps the local filter"
@@ -857,6 +885,7 @@ mod tests {
                 Some(&entries),
                 effective_filter_query("hit", Some("hit")),
                 SourceFilter::All,
+                true,
             ),
             vec![0],
             "server search results must render even with an unrelated title"
@@ -882,7 +911,19 @@ mod tests {
             branch: None,
             repo_name: repo.into(),
             worktree_label: None,
+            is_subagent: false,
             card_detail: None,
+        }
+    }
+
+    /// [`make_entry`] for a subagent child session: `session_kind` starts with
+    /// `subagent` on the wire, which is what the decoder keys on. The server
+    /// lands these rows in the local lane, so they carry `source = "local"`.
+    fn make_subagent_entry(id: &str, repo: &str) -> SessionPickerEntry {
+        SessionPickerEntry {
+            is_subagent: true,
+            source: "local".into(),
+            ..make_entry(id, repo)
         }
     }
 
@@ -918,6 +959,7 @@ mod tests {
             false,
             SourceFilter::All,
             None,
+            false,
         );
 
         // Expected layout (sorted by repo_name):
@@ -980,6 +1022,7 @@ mod tests {
             false,
             SourceFilter::All,
             None,
+            true,
         );
 
         // Expected:
@@ -1021,6 +1064,7 @@ mod tests {
             /* content_loading */ true,
             SourceFilter::All,
             None,
+            false,
         );
         assert_eq!(map.len(), 2, "repo header + row only, no content header");
         assert!(map[0].is_none(), "repo header");
@@ -1045,6 +1089,7 @@ mod tests {
             false,
             SourceFilter::All,
             None,
+            false,
         );
 
         // Only the repo header + fuzzy entry; no content header/items.
@@ -1072,6 +1117,7 @@ mod tests {
             false,
             SourceFilter::All,
             None,
+            false,
         );
         assert_eq!(map.len(), 2);
         assert!(matches!(
@@ -1092,6 +1138,7 @@ mod tests {
             false,
             SourceFilter::All,
             None,
+            true,
         );
         assert_eq!(map.len(), 4);
         assert!(matches!(
@@ -1121,6 +1168,7 @@ mod tests {
             false,
             SourceFilter::All,
             None,
+            true,
         );
         assert!(matches!(
             flat.as_slice(),
@@ -1139,6 +1187,7 @@ mod tests {
             false,
             SourceFilter::All,
             None,
+            true,
         );
         assert!(matches!(
             grouped.as_slice(),
@@ -1177,10 +1226,10 @@ mod tests {
     /// Empty entries list produces empty map.
     #[test]
     fn empty_entries_produces_empty_map() {
-        let map = build_entry_map(None, None, "", true, false, SourceFilter::All, None);
+        let map = build_entry_map(None, None, "", true, false, SourceFilter::All, None, false);
         assert!(map.is_empty());
 
-        let map = build_entry_map(Some(&[]), None, "", false, false, SourceFilter::All, None);
+        let map = build_entry_map(Some(&[]), None, "", false, false, SourceFilter::All, None, false);
         assert!(map.is_empty());
     }
 
@@ -1226,6 +1275,152 @@ mod tests {
         assert_eq!(SourceFilter::External.label(), "External");
     }
 
+    // ── subagent children: hidden by default, findable by search ────────
+
+    /// The default view (empty query) must drop subagent children while
+    /// keeping every user row — this is the "my history isn't swamped by
+    /// orchestration children" contract.
+    #[test]
+    fn default_view_hides_subagent_entries_and_keeps_user_rows() {
+        let entries = vec![
+            make_entry("user-a", "repo"),
+            make_subagent_entry("sub-a", "repo"),
+            make_entry("user-b", "repo"),
+            make_subagent_entry("sub-b", "repo"),
+        ];
+
+        let filtered = filter_session_entries(Some(&entries), "", SourceFilter::All, false);
+        assert_eq!(
+            filtered,
+            vec![0, 2],
+            "empty query hides both subagent rows and keeps both user rows"
+        );
+    }
+
+    /// A live query must reach subagent children: they match on title/id like
+    /// any other row once the user is searching.
+    #[test]
+    fn search_query_matches_subagent_entries() {
+        let mut sub = make_subagent_entry("sub-auth", "repo");
+        sub.summary = "Refactor auth middleware".into();
+        let entries = vec![make_entry("user-css", "repo"), sub];
+
+        let by_title =
+            filter_session_entries(Some(&entries), "auth middleware", SourceFilter::All, true);
+        assert_eq!(by_title, vec![1], "a subagent title match is searchable");
+
+        let by_id = filter_session_entries(Some(&entries), "sub-auth", SourceFilter::All, true);
+        assert_eq!(by_id, vec![1], "a subagent id match is searchable");
+    }
+
+    /// Searching must not blanket-reveal the lane: a query that doesn't match
+    /// still hides the subagent rows.
+    #[test]
+    fn search_query_does_not_reveal_unmatched_subagent_entries() {
+        let mut sub = make_subagent_entry("sub-auth", "repo");
+        sub.summary = "Refactor auth middleware".into();
+        let entries = vec![make_entry("user-css", "repo"), sub];
+
+        let filtered =
+            filter_session_entries(Some(&entries), "button padding", SourceFilter::All, true);
+        assert!(
+            filtered.is_empty(),
+            "an unrelated query must not surface the subagent row"
+        );
+    }
+
+    /// `searching` is intentionally separate from the effective filter query:
+    /// server-stamped results arrive with an empty effective query while a
+    /// search is running, and the subagent rows the search found must survive
+    /// that pass.
+    #[test]
+    fn subagent_entries_survive_server_stamped_empty_filter_query() {
+        let mut sub = make_subagent_entry("sub-auth", "repo");
+        sub.summary = "Refactor auth middleware".into();
+        let entries = vec![sub];
+
+        let stamped = effective_filter_query("auth", Some("auth"));
+        assert_eq!(stamped, "", "server already filtered: local filter is a no-op");
+        assert_eq!(
+            filter_session_entries(Some(&entries), stamped, SourceFilter::All, true),
+            vec![0],
+            "a searching picker still sees the subagent row it searched for"
+        );
+        assert!(
+            filter_session_entries(Some(&entries), stamped, SourceFilter::All, false).is_empty(),
+            "the same empty effective query with no live search hides the row"
+        );
+    }
+
+    /// SourceFilter must keep its meaning for subagent rows: they are ordinary
+    /// local sessions, so `Local`/`All` pass them while `Remote`/`External`
+    /// still reject them.
+    #[test]
+    fn source_filter_still_applies_to_subagent_entries() {
+        let entries = vec![make_subagent_entry("sub-a", "repo")];
+        assert_eq!(
+            filter_session_entries(Some(&entries), "sub", SourceFilter::All, true),
+            vec![0]
+        );
+        assert_eq!(
+            filter_session_entries(Some(&entries), "sub", SourceFilter::Local, true),
+            vec![0]
+        );
+        assert!(
+            filter_session_entries(Some(&entries), "sub", SourceFilter::Remote, true).is_empty()
+        );
+        assert!(
+            filter_session_entries(Some(&entries), "sub", SourceFilter::External, true).is_empty()
+        );
+    }
+
+    /// Grouped mode: subagent rows produce neither a row nor a repo header by
+    /// default, and join their repo group once searching.
+    #[test]
+    fn grouped_entry_map_hides_subagent_rows_unless_searching() {
+        let mut sub = make_subagent_entry("sub-a", "repo-a");
+        sub.summary = "Coder result one".into();
+        let entries = vec![make_entry("user-b", "repo-b"), sub];
+
+        let browsing = build_entry_map(
+            Some(&entries),
+            None,
+            "",
+            true,
+            false,
+            SourceFilter::All,
+            None,
+            false,
+        );
+        // Only user-b's group: header + row.
+        assert_eq!(browsing.len(), 2, "no empty repo-a group is left behind");
+        assert!(browsing[0].is_none(), "repo-b header");
+        assert!(matches!(
+            browsing[1],
+            Some(PickerItem::Fuzzy { original_index: 0 })
+        ));
+
+        let searching = build_entry_map(
+            Some(&entries),
+            None,
+            "coder",
+            true,
+            false,
+            SourceFilter::All,
+            None,
+            true,
+        );
+        // Only the subagent row matches, so only its repo group is emitted:
+        // a header plus the row (a group is created from its members, so no
+        // empty repo-b group lingers).
+        assert_eq!(searching.len(), 2);
+        assert!(searching[0].is_none(), "repo-a header appears for the match");
+        assert!(matches!(
+            searching[1],
+            Some(PickerItem::Fuzzy { original_index: 1 })
+        ));
+    }
+
     #[test]
     fn source_filter_filters_entries() {
         fn entry_with_source(id: &str, source: &str) -> SessionPickerEntry {
@@ -1242,16 +1437,16 @@ mod tests {
             entry_with_source("s5", "cursor"),
         ];
 
-        let all = filter_session_entries(Some(&entries), "", SourceFilter::All);
+        let all = filter_session_entries(Some(&entries), "", SourceFilter::All, false);
         assert_eq!(all, vec![0, 1, 2, 3, 4, 5]);
 
-        let local = filter_session_entries(Some(&entries), "", SourceFilter::Local);
+        let local = filter_session_entries(Some(&entries), "", SourceFilter::Local, false);
         assert_eq!(local, vec![0, 2]); // local + both
 
-        let remote = filter_session_entries(Some(&entries), "", SourceFilter::Remote);
+        let remote = filter_session_entries(Some(&entries), "", SourceFilter::Remote, false);
         assert_eq!(remote, vec![1, 2]); // remote + both
 
-        let external = filter_session_entries(Some(&entries), "", SourceFilter::External);
+        let external = filter_session_entries(Some(&entries), "", SourceFilter::External, false);
         assert_eq!(external, vec![3, 4, 5]);
     }
 
@@ -1306,15 +1501,15 @@ mod tests {
         ];
 
         // Text query "alpha" + Local filter: only alpha matches both criteria.
-        let result = filter_session_entries(Some(&entries), "alpha", SourceFilter::Local);
+        let result = filter_session_entries(Some(&entries), "alpha", SourceFilter::Local, true);
         assert_eq!(result, vec![0]);
 
         // Text query "alpha" + Remote filter: alpha is local-only, so no matches.
-        let result = filter_session_entries(Some(&entries), "alpha", SourceFilter::Remote);
+        let result = filter_session_entries(Some(&entries), "alpha", SourceFilter::Remote, true);
         assert!(result.is_empty());
 
         // Text query matching all + Local filter: local + both pass.
-        let result = filter_session_entries(Some(&entries), "", SourceFilter::Local);
+        let result = filter_session_entries(Some(&entries), "", SourceFilter::Local, false);
         assert_eq!(result, vec![0, 2]);
     }
 
@@ -1340,6 +1535,7 @@ mod tests {
             false,
             SourceFilter::Local,
             None,
+            false,
         );
         // repo-a header + s0 + repo-b header + s2 = 4
         assert_eq!(map.len(), 4);
@@ -1363,6 +1559,7 @@ mod tests {
             false,
             SourceFilter::Remote,
             None,
+            false,
         );
         assert_eq!(map.len(), 4);
         assert!(map[0].is_none()); // repo-a header
@@ -1396,6 +1593,7 @@ mod tests {
             false,
             SourceFilter::All,
             Some("repo-c"),
+            false,
         );
         // [repo-c hdr, s2, repo-a hdr, s0, repo-b hdr, s1]
         assert_eq!(map.len(), 6);
@@ -1424,6 +1622,7 @@ mod tests {
             false,
             SourceFilter::All,
             Some("repo-zzz"),
+            false,
         );
         assert!(map[0].is_none(), "repo-a header");
         assert!(matches!(

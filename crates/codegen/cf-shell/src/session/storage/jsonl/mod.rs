@@ -39,6 +39,21 @@ impl Default for JsonlStorageAdapter {
         Self::new()
     }
 }
+/// Whether `summary` belongs in a listing.
+///
+/// `include_hidden == false` (the browsing path) keeps only sessions where
+/// [`Summary::is_hidden`] is false. `include_hidden == true` (the search path)
+/// additionally keeps subagent children, which are hidden by kind rather than
+/// by an explicit flag — but never a session explicitly marked `hidden: true`,
+/// since that is a deliberate "never show this" marker.
+fn summary_listable(summary: &Summary, include_hidden: bool) -> bool {
+    if include_hidden {
+        !summary.hidden.unwrap_or(false)
+    } else {
+        !summary.is_hidden()
+    }
+}
+
 impl JsonlStorageAdapter {
     pub fn new() -> Self {
         Self {
@@ -208,6 +223,42 @@ impl JsonlStorageAdapter {
             }
         }
         session_dirs
+    }
+    /// Read every session `summary.json` under `cwd` (all workspaces when
+    /// `None`), newest activity first.
+    ///
+    /// `include_hidden` keeps sessions that [`Summary::is_hidden`] would drop
+    /// for being subagent children; an explicit `hidden: true` always
+    /// excludes. Backs [`StorageAdapter::list_sessions`] (browsing) and
+    /// [`StorageAdapter::list_sessions_including_hidden`] (searching), so both
+    /// order and read the same file set.
+    async fn list_sessions_scoped(
+        &self,
+        cwd: Option<&str>,
+        include_hidden: bool,
+    ) -> io::Result<Vec<Summary>> {
+        let session_dirs = self.scan_session_dirs(cwd);
+        let mut summaries = Vec::new();
+        for session_dir in session_dirs {
+            let summary_path = session_dir.join("summary.json");
+            match std::fs::read(&summary_path) {
+                Ok(bytes) => {
+                    if let Ok(summary) = serde_json::from_slice::<Summary>(&bytes)
+                        && summary_listable(&summary, include_hidden)
+                    {
+                        summaries.push(summary);
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+        summaries.sort_by_cached_key(|s| {
+            (
+                std::cmp::Reverse(s.last_active_at.unwrap_or(s.updated_at)),
+                s.info.id.0.to_string(),
+            )
+        });
+        Ok(summaries)
     }
     /// List the N most recently modified session summaries across all
     /// workspaces.
@@ -1281,28 +1332,14 @@ impl StorageAdapter for JsonlStorageAdapter {
         Ok(summary)
     }
     async fn list_sessions(&self, cwd: Option<&str>) -> io::Result<Vec<Summary>> {
-        let session_dirs = self.scan_session_dirs(cwd);
-        let mut summaries = Vec::new();
-        for session_dir in session_dirs {
-            let summary_path = session_dir.join("summary.json");
-            match std::fs::read(&summary_path) {
-                Ok(bytes) => {
-                    if let Ok(summary) = serde_json::from_slice::<Summary>(&bytes)
-                        && !summary.is_hidden()
-                    {
-                        summaries.push(summary);
-                    }
-                }
-                Err(_) => continue,
-            }
-        }
-        summaries.sort_by_cached_key(|s| {
-            (
-                std::cmp::Reverse(s.last_active_at.unwrap_or(s.updated_at)),
-                s.info.id.0.to_string(),
-            )
-        });
-        Ok(summaries)
+        self.list_sessions_scoped(cwd, false).await
+    }
+
+    async fn list_sessions_including_hidden(
+        &self,
+        cwd: Option<&str>,
+    ) -> io::Result<Vec<Summary>> {
+        self.list_sessions_scoped(cwd, true).await
     }
     async fn delete_session(&self, info: &Info) -> io::Result<()> {
         let dir = self.session_dir(info);

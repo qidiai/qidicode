@@ -134,6 +134,54 @@ fn picker_still_drops_build_row_with_empty_summary() {
     let entries = parse_session_picker_entries(&payload);
     assert!(entries.is_empty(), "empty-summary Build rows stay dropped");
 }
+/// Classification of subagent child sessions: only a `sessionKind` starting
+/// with `subagent` marks a row, and the lane is read from `_meta` (never from
+/// `sessions`, so a browsing client can't pick the rows up by accident).
+///
+/// This flag is what keeps subagent children out of the default list while a
+/// search can still match them, so a `sessionKind` rename must fail here.
+#[test]
+fn picker_classifies_subagent_children_by_session_kind() {
+    // Must stay inside the picker's 30-day recency cutoff.
+    let now = chrono::Utc::now().to_rfc3339();
+    let payload = serde_json::json!(
+        { "sessions" : [
+            { "sessionId" : "user-1", "summary" : "Mine", "cwd" : "/repo",
+              "source" : "local", "updatedAt" : now },
+            { "sessionId" : "wt-1", "summary" : "Worktree", "cwd" : "/repo",
+              "source" : "local", "updatedAt" : now,
+              "sessionKind" : "worktree" } ],
+          "_meta" : { "x.ai/subagentSessions" : [
+            { "sessionId" : "sub-1", "summary" : "Coder result", "cwd" : "/repo",
+              "source" : "local", "updatedAt" : now,
+              "sessionKind" : "subagent" },
+            { "sessionId" : "sub-2", "summary" : "Coder resumed", "cwd" : "/repo",
+              "source" : "local", "updatedAt" : now,
+              "sessionKind" : "subagent_resume" } ] } }
+    );
+
+    let user_rows = parse_session_picker_entries(&payload);
+    assert_eq!(user_rows.len(), 2, "the subagent lane is not in `sessions`");
+    assert!(
+        user_rows.iter().all(|e| !e.is_subagent),
+        "a plain row and a worktree row are not subagent children: {user_rows:?}"
+    );
+
+    let subagents = parse_subagent_session_entries(&payload);
+    assert_eq!(subagents.len(), 2, "both subagent children are decoded");
+    assert!(
+        subagents.iter().all(|e| e.is_subagent),
+        "subagentKind rows must be marked so the default view hides them"
+    );
+    assert_eq!(subagents[0].source, "local");
+
+    // No lane in the payload (older agent, or nothing to hide) ⇒ no rows and
+    // no panic — the picker behaves exactly as before.
+    assert!(
+        parse_subagent_session_entries(&serde_json::json!({ "sessions" : [] })).is_empty(),
+        "a payload without the subagent lane yields no rows"
+    );
+}
 #[test]
 fn session_list_partial_parses_reasons() {
     let payload = |reason: &str| {
@@ -1331,9 +1379,26 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
                     .expect("params JSON");
                 let fail = params.get("query").and_then(|q| q.as_str())
                     == Some("fail-me");
+                let plain_fetch = params.get("query").is_none();
                 captured_for_task.lock().unwrap().push(params);
                 let body = if fail {
                     serde_json::json!({ "error" : "boom" })
+                } else if plain_fetch {
+                    // The plain (unfiltered) fetch is the one that carries the
+                    // subagent lane: a user row plus a subagent child.
+                    let now = chrono::Utc::now().to_rfc3339();
+                    serde_json::json!({ "result" : {
+                        "sessions" : [
+                            { "sessionId" : "user-1", "summary" : "My own session",
+                              "updatedAt" : now, "createdAt" : now,
+                              "cwd" : "/repo", "source" : "local" },
+                        ],
+                        "_meta" : { "x.ai/subagentSessions" : [
+                            { "sessionId" : "sub-1", "summary" : "Coder result",
+                              "updatedAt" : now, "createdAt" : now,
+                              "cwd" : "/repo", "source" : "local",
+                              "sessionKind" : "subagent" },
+                        ] } } })
                 } else {
                     serde_json::json!({ "result" : { "sessions" : [] } })
                 };
@@ -1373,9 +1438,23 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
         seq: 8,
     });
     match tasks.join_next().await.expect("task").expect("no panic") {
-        TaskResult::SessionListLoaded { seq, query, .. } => {
+        TaskResult::SessionListLoaded { sessions, seq, query, .. } => {
             assert_eq!(seq, 8);
             assert_eq!(query, None);
+            // The subagent lane is appended to the user rows and marked, so
+            // the picker can hide it unless a query is live.
+            assert_eq!(sessions.len(), 2, "user row + subagent lane row");
+            let user = sessions.iter().find(|s| s.id == "user-1").expect("user row");
+            assert!(!user.is_subagent, "an ordinary session is not a subagent");
+            let sub = sessions
+                .iter()
+                .find(|s| s.id == "sub-1")
+                .expect("subagent lane row must be decoded");
+            assert!(
+                sub.is_subagent,
+                "sessionKind=subagent must mark the row so the default view hides it"
+            );
+            assert_eq!(sub.source, "local", "subagent rows stay in the local lane");
         }
         other => panic!("expected SessionListLoaded, got {other:?}"),
     }
@@ -1404,6 +1483,14 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
         "plain fetch must not send a query key: {:?}", captured[1]
     );
     assert_eq!(captured[2] ["query"], "fail-me");
+    // Every list fetch opts into the subagent lane: the picker must hold those
+    // rows before the user types anything, or a search could never reach them.
+    for (i, params) in captured.iter().enumerate() {
+        assert_eq!(
+            params["includeSubagents"], true,
+            "fetch {i} must opt into the subagent lane: {params:?}"
+        );
+    }
 }
 /// The debounce arm must echo `query` and `seq` exactly. Awaits the real
 /// 250 ms debounce (tokio's paused clock needs `test-util`, not enabled
@@ -2005,6 +2092,7 @@ fn session_picker_entry_maps_to_dormant_roster_row() {
         branch: None,
         repo_name: "repo-app".to_string(),
         worktree_label: Some("wt".to_string()),
+        is_subagent: false,
         card_detail: None,
     };
     let roster = session_picker_entry_to_roster(&entry);

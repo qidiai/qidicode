@@ -317,6 +317,14 @@ pub struct SessionPickerEntry {
     pub repo_name: String,
     /// Human-readable worktree label (if the session was created in a named worktree).
     pub worktree_label: Option<String>,
+    /// Subagent child session (`sessionKind` starts with `subagent`).
+    ///
+    /// These never appear in `sessions` — the server sends them under
+    /// `_meta["x.ai/subagentSessions"]` — and the picker keeps them out of the
+    /// default list so a user's own history isn't swamped by orchestration
+    /// children. They stay discoverable: a non-empty query matches them like
+    /// any other row (see [`crate::views::session_picker::filter_session_entries`]).
+    pub is_subagent: bool,
     /// Lazy-loaded detail for the expanded card view.
     pub card_detail: Option<CardDetail>,
 }
@@ -2878,6 +2886,7 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             ctx.sp_content_loading,
             source_filter,
             Some(current_repo.as_str()),
+            !ctx.sp_state.query.trim().is_empty(),
         );
         let entry_count = entry_map.len();
         let non_selectable_flags: Vec<bool> = entry_map.iter().map(|e| e.is_none()).collect();
@@ -10330,6 +10339,7 @@ pub(crate) mod tests {
             branch: None,
             repo_name: "r".into(),
             worktree_label: None,
+            is_subagent: false,
             card_detail: None,
         };
         let f_key = Event::Key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));

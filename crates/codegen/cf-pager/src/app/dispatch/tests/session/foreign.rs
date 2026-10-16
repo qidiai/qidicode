@@ -425,6 +425,7 @@ fn modal_selection_survives_native_and_foreign_completion_races() {
         false,
         SourceFilter::All,
         Some("repo"),
+        false,
     );
     let Some(PickerItem::Fuzzy { original_index }) = map[state.selected].as_ref() else {
         panic!("selection must remain on a row");
@@ -456,6 +457,7 @@ fn modal_selection_survives_native_and_foreign_completion_races() {
         false,
         SourceFilter::All,
         Some("repo"),
+        false,
     );
     let Some(PickerItem::Fuzzy { original_index }) = map[state.selected].as_ref() else {
         panic!("selection must remain on a row");
@@ -536,6 +538,7 @@ fn external_filter_clears_and_suppresses_native_content_state() {
         true,
         SourceFilter::External,
         None,
+        false,
     );
     assert_eq!(map.len(), 1);
     let Some(PickerItem::Fuzzy { original_index }) = map[0].as_ref() else {

@@ -692,7 +692,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let mut params = serde_json::json!(
-                        { "cwd" : cwd.to_string_lossy(), "limit" : 30, }
+                        { "cwd" : cwd.to_string_lossy(), "limit" : 30, "includeSubagents" : true, }
                     );
                     if let Some(q) = &query {
                         params["query"] = serde_json::Value::String(q.clone());
@@ -718,7 +718,12 @@ pub(crate) fn execute(
                                 };
                             }
                             let payload = wrapper.get("result").unwrap_or(&wrapper);
-                            let sessions = parse_session_picker_entries(payload);
+                            let mut sessions = parse_session_picker_entries(payload);
+                            // Subagent children ride a separate array so they
+                            // never consume a user-facing page row; they are
+                            // appended here (marked `is_subagent`) and stay
+                            // hidden until the picker has a query to search.
+                            sessions.extend(parse_subagent_session_entries(payload));
                             let partial = parse_session_list_partial(payload);
                             TaskResult::SessionListLoaded {
                                 sessions,

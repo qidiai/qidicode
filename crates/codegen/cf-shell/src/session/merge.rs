@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::agent::session_registry_client::{SessionRecord, SessionRegistryClient};
-use crate::session::persistence::{Summary, list_summaries};
+use crate::session::persistence::{Summary, list_summaries_including_hidden};
 use cf_workspace::session::git::normalize_repo_url;
 
 pub const REMOTE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -53,6 +53,21 @@ pub struct MergedSession {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_kind: Option<String>,
 }
+/// Local history split into the user's own sessions and the subagent child
+/// sessions that history listings hide by default.
+///
+/// The two halves never share a session id (see [`fetch_merged_split`]), so a
+/// client can render `sessions` alone for a browsing view and union both for a
+/// searching one without deduplication.
+#[derive(Debug, Default)]
+pub struct MergedSessionSplit {
+    /// Browsing rows: exactly what [`fetch_merged`] returns.
+    pub sessions: Vec<MergedSession>,
+    /// Subagent children excluded from `sessions`. Empty when the caller
+    /// passes `subagent_limit == 0`.
+    pub subagents: Vec<MergedSession>,
+}
+
 /// Fetch sessions from both local storage and the remote registry,
 /// merge, dedup, and return a sorted list.
 pub async fn fetch_merged(
@@ -61,6 +76,28 @@ pub async fn fetch_merged(
     query: Option<&str>,
     limit: usize,
 ) -> Vec<MergedSession> {
+    fetch_merged_split(client, cwd, query, limit, 0).await.sessions
+}
+
+/// [`fetch_merged`], additionally collecting the subagent child sessions the
+/// browsing list hides.
+///
+/// Local storage is read once with subagent children included, then split: a
+/// session lands in [`MergedSessionSplit::sessions`] unless
+/// [`Summary::is_hidden`] holds, and in [`MergedSessionSplit::subagents`]
+/// when it does. Both halves are merged (and query-filtered) independently so
+/// subagent rows never consume the user-facing `limit` — they are a discovery
+/// aid for search, not page filler. An explicit `hidden: true` still drops a
+/// session entirely.
+///
+/// `subagent_limit == 0` skips the subagent half (`fetch_merged`'s contract).
+pub async fn fetch_merged_split(
+    client: Option<&SessionRegistryClient>,
+    cwd: Option<&str>,
+    query: Option<&str>,
+    limit: usize,
+    subagent_limit: usize,
+) -> MergedSessionSplit {
     let cwd_owned = cwd.map(String::from);
 
     let local_fut = async {
@@ -73,13 +110,12 @@ pub async fn fetch_merged(
         };
         let mut all = Vec::new();
         if cwds.is_empty() {
-            // No CWD or worktree lookup failed — list all
-            if let Ok(v) = list_summaries(cwd_owned.as_deref()).await {
+            if let Ok(v) = list_summaries_including_hidden(cwd_owned.as_deref()).await {
                 all.extend(v);
             }
         } else {
             for c in &cwds {
-                if let Ok(v) = list_summaries(Some(c)).await {
+                if let Ok(v) = list_summaries_including_hidden(Some(c)).await {
                     all.extend(v);
                 }
             }
@@ -116,7 +152,32 @@ pub async fn fetch_merged(
     };
 
     let (local, remote, local_repo_urls) = tokio::join!(local_fut, remote_fut, repo_urls_fut);
-    merge(remote, local, query, &local_repo_urls, limit)
+    // Partition before merging: `merge` dedups local against remote by id, so
+    // hidden rows must be separated first or a subagent child would be merged
+    // into (and could displace) the user-facing row set.
+    let (hidden_local, visible_local) = split_hidden_local(local);
+    let sessions = merge(remote, visible_local, query, &local_repo_urls, limit);
+    let subagents = if subagent_limit == 0 {
+        Vec::new()
+    } else {
+        // Remote results are irrelevant here: subagent children are local-only
+        // (they never sync to the registry), so an id collision is impossible.
+        merge(Vec::new(), hidden_local, query, &[], subagent_limit)
+    };
+    MergedSessionSplit {
+        sessions,
+        subagents,
+    }
+}
+
+/// Split a local listing into its browsing half and the hidden half
+/// (subagent children) that [`fetch_merged_split`] returns separately.
+///
+/// The halves are disjoint, and their union is exactly what a browsing
+/// listing shows — so a client can union them for search without ever
+/// double-listing a session.
+fn split_hidden_local(local: Vec<Summary>) -> (Vec<Summary>, Vec<Summary>) {
+    local.into_iter().partition(|s| s.is_hidden())
 }
 
 /// Merge remote and local results. Local entries are inserted first so
@@ -1151,5 +1212,136 @@ mod tests {
         // 9 local sessions across 3 cwds, limit = 5
         let merged = merge(Vec::new(), local, None, &[], 5);
         assert_eq!(merged.len(), 5);
+    }
+
+    // ── subagent split tests ────────────────────────────────────────────
+
+    fn make_kind_summary(
+        id: &str,
+        title: &str,
+        updated: &str,
+        hidden: Option<bool>,
+        session_kind: Option<&str>,
+    ) -> Summary {
+        Summary {
+            hidden,
+            session_kind: session_kind.map(String::from),
+            ..make_summary(id, title, updated)
+        }
+    }
+
+    /// The split that feeds the picker's "hidden unless searching" contract:
+    /// subagent children land in the second half, and the two halves are
+    /// disjoint so a client can union them for a search without double rows.
+    #[test]
+    fn split_hidden_local_separates_subagents_from_users() {
+        let local = vec![
+            make_kind_summary("user-1", "Fix the picker", "2026-05-01T00:00:00Z", None, None),
+            make_kind_summary(
+                "sub-1",
+                "Coder result",
+                "2026-05-02T00:00:00Z",
+                None,
+                Some("subagent"),
+            ),
+            make_kind_summary(
+                "sub-2",
+                "Coder result",
+                "2026-05-03T00:00:00Z",
+                None,
+                Some("subagent_resume"),
+            ),
+            // Explicit `hidden: false` on a subagent-kind session wins over the
+            // inferred kind, so this one stays browsable (mirrors `is_hidden`).
+            make_kind_summary(
+                "sub-shown",
+                "Shown on purpose",
+                "2026-05-04T00:00:00Z",
+                Some(false),
+                Some("subagent"),
+            ),
+            // Explicit `hidden: true` on a normal session is hidden for good.
+            make_kind_summary("gone", "Never show", "2026-05-05T00:00:00Z", Some(true), None),
+        ];
+
+        let (hidden, visible) = split_hidden_local(local);
+        let mut visible_ids: Vec<&str> = visible.iter().map(|s| s.info.id.0.as_ref()).collect();
+        visible_ids.sort();
+        let mut hidden_ids: Vec<&str> = hidden.iter().map(|s| s.info.id.0.as_ref()).collect();
+        hidden_ids.sort();
+
+        assert_eq!(visible_ids, vec!["sub-shown", "user-1"]);
+        assert_eq!(hidden_ids, vec!["gone", "sub-1", "sub-2"]);
+        // Disjoint halves: unioning them for a search can't duplicate a row.
+        for id in &hidden_ids {
+            assert!(
+                !visible_ids.contains(id),
+                "{id} must not appear in both halves"
+            );
+        }
+    }
+
+    /// A subagent child must never consume a slot in the user-facing page: with
+    /// only 2 user sessions but many newer subagent children, the browsing
+    /// half still lists both user sessions.
+    #[test]
+    fn subagents_never_displace_user_rows_from_the_page() {
+        let users = vec![
+            make_summary("user-1", "Old but mine", "2026-01-01T00:00:00Z"),
+            make_summary("user-2", "Also mine", "2026-01-02T00:00:00Z"),
+        ];
+        let subagents: Vec<Summary> = (0..20)
+            .map(|i| {
+                make_kind_summary(
+                    &format!("sub-{i}"),
+                    "Coder result",
+                    &format!("2026-06-{:02}T00:00:00Z", i + 1),
+                    None,
+                    Some("subagent"),
+                )
+            })
+            .collect();
+        let mut local = users;
+        local.extend(subagents);
+        let (hidden, visible) = split_hidden_local(local);
+
+        let page = merge(Vec::new(), visible, None, &[], 2);
+        assert_eq!(
+            page.iter().map(|s| s.session_id.as_str()).collect::<Vec<_>>(),
+            vec!["user-2", "user-1"],
+            "both user sessions keep their page slots"
+        );
+
+        let lane = merge(Vec::new(), hidden, None, &[], 100);
+        assert_eq!(lane.len(), 20, "every subagent child stays reachable");
+        assert!(lane.iter().all(|s| s.session_id.starts_with("sub-")));
+    }
+
+    /// A search over the subagent half still uses the same local query filter,
+    /// so a client that only unions the halves while searching never shows an
+    /// unrelated subagent row.
+    #[test]
+    fn subagent_half_is_query_filtered() {
+        let local = vec![
+            make_kind_summary(
+                "sub-auth",
+                "Refactor auth middleware",
+                "2026-05-01T00:00:00Z",
+                None,
+                Some("subagent"),
+            ),
+            make_kind_summary(
+                "sub-css",
+                "Tweak button padding",
+                "2026-05-02T00:00:00Z",
+                None,
+                Some("subagent"),
+            ),
+        ];
+        let (hidden, _) = split_hidden_local(local);
+        let hits = merge(Vec::new(), hidden, Some("auth"), &[], 100);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].session_id, "sub-auth");
+        assert_eq!(hits[0].source, "local");
     }
 }
