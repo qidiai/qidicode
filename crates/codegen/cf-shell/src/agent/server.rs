@@ -13,13 +13,15 @@ use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
+use std::time::Instant;
 
 use axum::{
-    Router,
+    Json, Router,
     extract::{
         ConnectInfo, Query, State,
-        ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
@@ -39,6 +41,8 @@ use cf_acp_lib::{
     AcpClientMessage, LineBufferedRead,
 };
 
+use crate::agent::server_rate_limit::AuthRateLimiter;
+
 use crate::agent::config::{Config as AgentConfig, ModelEntry};
 use crate::agent::models::{ModelFetchAuth, prefetch_models_blocking};
 use crate::agent::mvp_agent::MvpAgent;
@@ -55,6 +59,58 @@ type RelayDest = Rc<RefCell<Option<mpsc::UnboundedSender<AcpClientMessage>>>>;
 
 const MAX_BUFFER_SIZE: usize = 8 * 1024 * 1024;
 const KEEPALIVE_INTERVAL_SECS: u64 = 15;
+/// Half-open detection: if no frame (data or pong) is read from the client in
+/// this window, the connection is treated as dead and closed. Derived from
+/// [`KEEPALIVE_INTERVAL_SECS`] (a healthy client pongs every keepalive, so a
+/// 3× margin tolerates one lost ping/pong without killing a live client).
+const READ_TIMEOUT_SECS: u64 = KEEPALIVE_INTERVAL_SECS * 3;
+/// How often the agent thread refreshes the shared active-session gauge that
+/// `/healthz` reports.
+const ACTIVE_SESSIONS_REFRESH_SECS: u64 = 1;
+
+/// WS close code sent to a second, later-arriving client when the single-client
+/// guard rejects it (application-defined 4000-4999 range).
+const REJECT_SECOND_CLIENT_CODE: u16 = 4001;
+const REJECT_SECOND_CLIENT_REASON: &str = "another client is already connected";
+
+/// Guards the "one client at a time" invariant. The simplest semantics: the
+/// first connection owns the slot; a later-arriving connection is rejected with
+/// a clear close reason. Reconnection works because a disconnect releases the
+/// slot before the mobile client's next backoff attempt lands.
+#[derive(Debug, Default)]
+struct SingleClientGuard(AtomicBool);
+
+impl SingleClientGuard {
+    /// Try to claim the single client slot. Returns `true` on success.
+    fn try_acquire(&self) -> bool {
+        self.0
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    fn release(&self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// JSON body for `GET /healthz`.
+#[derive(Debug, serde::Serialize)]
+struct HealthzResponse {
+    status: &'static str,
+    active_sessions: usize,
+    uptime_seconds: u64,
+}
+
+/// Liveness probe: reports the number of live agent sessions plus server uptime.
+/// The session gauge is refreshed periodically by the agent thread, so it is
+/// eventually-consistent (bounded by [`ACTIVE_SESSIONS_REFRESH_SECS`]).
+async fn healthz(State(state): State<Arc<ServerState>>) -> Json<HealthzResponse> {
+    Json(HealthzResponse {
+        status: "ok",
+        active_sessions: state.active_sessions.load(Ordering::Relaxed),
+        uptime_seconds: state.started.elapsed().as_secs(),
+    })
+}
 
 /// Configuration for the agent WebSocket server.
 #[derive(Debug, Clone)]
@@ -73,6 +129,14 @@ struct ServerState {
     /// Lazily initialised on first connection; protected by a tokio Mutex so the
     /// axum handler (which is `Send`) can acquire it.
     agent_conn_tx: tokio::sync::Mutex<Option<mpsc::UnboundedSender<NewConnectionChannels>>>,
+    /// Connection rate limit + failed-auth lockout (single source of params).
+    rate_limiter: Arc<AuthRateLimiter>,
+    /// Number of live agent sessions, refreshed periodically by the agent thread.
+    active_sessions: Arc<AtomicUsize>,
+    /// Server start instant for `/healthz` uptime.
+    started: Instant,
+    /// One-client-at-a-time guard.
+    client_guard: SingleClientGuard,
 }
 
 /// Channels bridging a single WebSocket connection to the agent thread.
@@ -115,9 +179,24 @@ async fn ws_handler(
     headers: HeaderMap,
     Query(query): Query<WsQueryParams>,
 ) -> Response {
+    // Rate-limit every connection attempt; lockout is checked on the next
+    // attempt after the threshold of failed auths has been crossed.
+    state.rate_limiter.record_attempt();
+    if state.rate_limiter.is_locked_out() {
+        warn!("Rejecting locked-out peer {}", addr);
+        return (StatusCode::TOO_MANY_REQUESTS, "Too many failed auth attempts")
+            .into_response();
+    }
+    if state.rate_limiter.connection_throttled() {
+        warn!("Rejecting connection-rate-limited peer {}", addr);
+        return (StatusCode::TOO_MANY_REQUESTS, "Connection rate limit exceeded")
+            .into_response();
+    }
+
     // Validate secret token from header or query param
     if !validate_auth(&headers, &query, &state.secret) {
         warn!("Unauthorized connection attempt from {}", addr);
+        state.rate_limiter.record_failure();
         return (
             StatusCode::UNAUTHORIZED,
             "Invalid or missing authorization token",
@@ -134,8 +213,22 @@ async fn ws_handler(
 /// On first connection, spawns a persistent agent thread that owns the MvpAgent.
 /// On subsequent connections (reconnects), sends new WS channels to the existing
 /// agent thread so that session actors can continue streaming to the new client.
-async fn handle_connection(ws: WebSocket, state: Arc<ServerState>, peer_addr: SocketAddr) {
+async fn handle_connection(mut ws: WebSocket, state: Arc<ServerState>, peer_addr: SocketAddr) {
     info!("New WebSocket connection from {}", peer_addr);
+
+    // Single-client guard: reject a second, later-arriving client with a clear
+    // close reason. A reconnect is unaffected because the previous connection's
+    // teardown (below) releases the slot before the next backoff attempt lands.
+    if !state.client_guard.try_acquire() {
+        warn!("Rejecting second concurrent client from {}", peer_addr);
+        let _ = ws
+            .send(Message::Close(Some(CloseFrame {
+                code: REJECT_SECOND_CLIENT_CODE,
+                reason: REJECT_SECOND_CLIENT_REASON.into(),
+            })))
+            .await;
+        return;
+    }
 
     let (mut ws_write, mut ws_read) = ws.split();
 
@@ -161,6 +254,7 @@ async fn handle_connection(ws: WebSocket, state: Arc<ServerState>, peer_addr: So
             let (conn_tx, conn_rx) = mpsc::unbounded_channel();
 
             let agent_config = state.agent_config.clone();
+            let active_sessions = state.active_sessions.clone();
             let _agent_thread = thread::Builder::new()
                 .name("agent-persistent".to_string())
                 .spawn(move || {
@@ -186,7 +280,8 @@ async fn handle_connection(ws: WebSocket, state: Arc<ServerState>, peer_addr: So
 
                     let local_set = tokio::task::LocalSet::new();
                     local_set.block_on(&rt, async move {
-                        run_persistent_agent(agent_config, conn_rx, prefetched_models).await
+                        run_persistent_agent(agent_config, conn_rx, prefetched_models, active_sessions)
+                            .await
                     });
 
                     warn!("Persistent agent thread exiting");
@@ -209,9 +304,25 @@ async fn handle_connection(ws: WebSocket, state: Arc<ServerState>, peer_addr: So
         }
     }
 
-    // Task: Read from WS, send to agent thread
+    // Task: Read from WS, send to agent thread. A `tokio::time::timeout`
+    // detects half-open connections: a healthy client replies to our keepalive
+    // pings (resetting the timer via `Pong`), a dead one leaves the read idle
+    // until `READ_TIMEOUT_SECS` elapses and we close it.
     let read_task = tokio::spawn(async move {
-        while let Some(msg) = ws_read.next().await {
+        loop {
+            let next = tokio::time::timeout(
+                Duration::from_secs(READ_TIMEOUT_SECS),
+                ws_read.next(),
+            )
+            .await;
+            let msg = match next {
+                Ok(Some(msg)) => msg,
+                Ok(None) => break,
+                Err(_) => {
+                    warn!("WebSocket read timeout from {} (half-open)", peer_addr);
+                    break;
+                }
+            };
             match msg {
                 Ok(Message::Text(text)) => {
                     let text_str: &str = text.as_ref();
@@ -280,6 +391,10 @@ async fn handle_connection(ws: WebSocket, state: Arc<ServerState>, peer_addr: So
         _ = write_task => {}
     }
 
+    // Release the single-client slot so the next (re)connection can acquire it.
+    // Must be paired with the `try_acquire` at the top; otherwise the first
+    // client's disconnect would permanently lock out every subsequent client.
+    state.client_guard.release();
     info!("WebSocket connection ended for {}", peer_addr);
 }
 
@@ -294,6 +409,7 @@ async fn run_persistent_agent(
     agent_config: AgentConfig,
     mut connection_rx: mpsc::UnboundedReceiver<NewConnectionChannels>,
     prefetched_models: Option<IndexMap<String, ModelEntry>>,
+    active_sessions: Arc<AtomicUsize>,
 ) {
     // Persistent gateway channel — the MvpAgent and all session actors hold
     // clones of `gw_tx`. This channel survives across reconnections.
@@ -332,6 +448,20 @@ async fn run_persistent_agent(
         }
     });
 
+    // Refresh the shared active-session gauge that `/healthz` reports. Runs on
+    // the LocalSet because `MvpAgent` is `!Send`; `session_count()` purges dead
+    // session entries as a side effect, keeping the gauge accurate.
+    let refresh_agent = agent.clone();
+    let refresh_gauge = active_sessions.clone();
+    tokio::task::spawn_local(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(ACTIVE_SESSIONS_REFRESH_SECS));
+        loop {
+            interval.tick().await;
+            let count = refresh_agent.activity.session_count();
+            refresh_gauge.store(count, Ordering::Relaxed);
+        }
+    });
+
     // Accept new connections in a loop
     while let Some(channels) = connection_rx.recv().await {
         info!("Agent thread: setting up new ACP connection (reconnect)");
@@ -364,6 +494,9 @@ fn setup_acp_connection(
     // Create a per-connection gateway channel for the GatewayReceiver.
     // The relay task will forward persistent-channel messages here.
     let (conn_gw_tx, conn_gw_rx) = tokio::sync::mpsc::unbounded_channel::<AcpClientMessage>();
+    // Clone kept for the teardown guard below, so it can tell whether the relay
+    // still points at *this* connection's channel (vs a newer reconnect's).
+    let conn_gw_tx_for_guard = conn_gw_tx.clone();
 
     // Point the relay at this new connection's channel
     *relay_dest.borrow_mut() = Some(conn_gw_tx);
@@ -429,10 +562,24 @@ fn setup_acp_connection(
     });
 
     // Run the ACP IO handler — fire-and-forget since we don't block the
-    // connection loop. It completes when the WS disconnects.
+    // connection loop. It completes when the WS disconnects. On completion the
+    // upstream RPC layer drops every pending response sender (cancelling any
+    // in-flight permission/file/terminal reverse request with an error), and we
+    // additionally clear the relay destination if it still points at *this*
+    // connection's channel — so the dead `GatewayReceiver` exits instead of
+    // lingering on the relay-held sender (which would otherwise keep it alive
+    // across reconnects).
+    let relay_dest_for_teardown = relay_dest.clone();
     tokio::task::spawn_local(async move {
         let _ = handle_io.await;
         info!("ACP connection IO handler completed");
+        let is_stale = relay_dest_for_teardown
+            .borrow()
+            .as_ref()
+            .is_some_and(|tx| tx.same_channel(&conn_gw_tx_for_guard));
+        if is_stale {
+            *relay_dest_for_teardown.borrow_mut() = None;
+        }
     });
 }
 
@@ -463,10 +610,15 @@ pub async fn run_agent_server(
         agent_config,
         secret: config.secret,
         agent_conn_tx: tokio::sync::Mutex::new(None),
+        rate_limiter: Arc::new(AuthRateLimiter::new()),
+        active_sessions: Arc::new(AtomicUsize::new(0)),
+        started: Instant::now(),
+        client_guard: SingleClientGuard::default(),
     });
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
+        .route("/healthz", get(healthz))
         .with_state(state);
 
     let listener = TcpListener::bind(config.bind_addr).await?;
@@ -484,4 +636,35 @@ pub async fn run_agent_server(
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_client_guard_blocks_second_then_releases() {
+        let guard = SingleClientGuard::default();
+        // First client acquires the slot.
+        assert!(guard.try_acquire());
+        // A second, later-arriving client is rejected (T2.7 semantics).
+        assert!(!guard.try_acquire());
+        // Once the first disconnects, the slot is free for a reconnect.
+        guard.release();
+        assert!(guard.try_acquire());
+    }
+
+    #[test]
+    fn read_timeout_derives_from_keepalive_constant() {
+        // Half-open detection must reuse KEEPALIVE_INTERVAL_SECS, not invent a
+        // new value (T2.5 red line).
+        assert_eq!(READ_TIMEOUT_SECS, KEEPALIVE_INTERVAL_SECS * 3);
+        assert_eq!(KEEPALIVE_INTERVAL_SECS, 15);
+    }
+
+    #[test]
+    fn reject_second_client_code_is_application_defined() {
+        // WS close codes 4000-4999 are the application-defined range.
+        assert!((4000..=4999).contains(&REJECT_SECOND_CLIENT_CODE));
+    }
 }

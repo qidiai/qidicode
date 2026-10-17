@@ -316,7 +316,23 @@ pub enum AgentCmd {
     Stdio,
     /// Run the agent headlessly over the Grok WebSocket relay
     Headless(HeadlessArgs),
-    /// Run the agent as a WebSocket server
+    /// Run the agent as a WebSocket server.
+    ///
+    /// # Security model
+    ///
+    /// - The server binds to `127.0.0.1:2419` by default (loopback only) and
+    ///   must stay that way — exposing it directly on a LAN/WAN is out of
+    ///   scope. Remote access is via an authenticated reverse tunnel (see
+    ///   `bin/remote/`).
+    /// - The `secret` authenticates clients and doubles as the bearer token in
+    ///   the `?server-key=` query parameter. That URL travels with the secret
+    ///   in plaintext inside any log/QR capture, so treat it as a **credential**:
+    ///   never log it, never commit it, never screenshot a pairing QR into a
+    ///   shared channel. Rotate by deleting `~/.qidi/remote_secret.txt` and
+    ///   restarting.
+    /// - The QR pairing image (printed at startup) embeds the full ws URL and
+    ///   secret — anyone who can see that QR can drive the agent. Keep the
+    ///   terminal out of view when pairing.
     Serve(ServeArgs),
     /// Run as the shared leader process for other clients
     Leader(LeaderArgs),
@@ -350,13 +366,23 @@ impl ServeArgs {
     pub fn get_secret(&self) -> String {
         self.secret
             .clone()
-            .unwrap_or_else(|| generate_random_key(12))
+            .unwrap_or_else(|| generate_random_key(SECRET_RANDOM_BYTES))
     }
 }
-/// Generate a random alphanumeric key of the given length.
+/// Number of cryptographically-random bytes for an auto-generated secret.
+/// 32 bytes hex-encoded → 64 characters (~256 bits of entropy), up from the
+/// previous 12 hex chars (~48 bits) which was brute-forceable in practice.
+const SECRET_RANDOM_BYTES: usize = 32;
+/// Generate a cryptographically-random secret: `len` random bytes, hex-encoded.
+///
+/// Uses [`rand::rng`] (OS-seeded `ThreadRng`), never `uuid` — the old
+/// `uuid::Uuid::new_v4().to_string().replace('-', "")` only drew from the
+/// 16-hex-digit charset (effective entropy < 48 bits for a 12-char slice).
 fn generate_random_key(len: usize) -> String {
-    let raw = uuid::Uuid::new_v4().to_string().replace('-', "");
-    raw.chars().cycle().take(len).collect()
+    use rand::RngCore;
+    let mut bytes = vec![0u8; len];
+    rand::rng().fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 /// Arguments for the `agent leader` subcommand.
 #[derive(Debug, clap::Args, Clone)]
@@ -1198,5 +1224,69 @@ mod tests {
             panic!("expected agent subcommand");
         };
         assert_eq!(agent.reasoning_effort.as_deref(), Some("max"));
+    }
+    #[test]
+    fn serve_secret_auto_generates_full_entropy_hex() {
+        let args = PagerArgs::try_parse_from(["grok", "agent", "serve"]).expect("serve parses");
+        let Some(Command::Agent(agent)) = args.command else {
+            panic!("expected agent subcommand");
+        };
+        let Some(AgentCmd::Serve(serve)) = agent.mode else {
+            panic!("expected serve mode");
+        };
+        let secret = serve.get_secret();
+        // 32 random bytes → 64 hex chars.
+        assert_eq!(secret.len(), 64);
+        // Hex charset only (0-9a-f).
+        assert!(
+            secret.chars().all(|c| c.is_ascii_hexdigit()),
+            "secret must be lowercase hex, got: {secret}"
+        );
+        assert_eq!(secret, secret.to_ascii_lowercase());
+    }
+    #[test]
+    fn serve_secret_auto_generation_is_unique() {
+        let args = PagerArgs::try_parse_from(["grok", "agent", "serve"]).expect("serve parses");
+        let Some(Command::Agent(agent)) = args.command else {
+            panic!("expected agent subcommand");
+        };
+        let Some(AgentCmd::Serve(serve)) = agent.mode else {
+            panic!("expected serve mode");
+        };
+        let a = serve.get_secret();
+        let b = serve.get_secret();
+        assert_ne!(a, b, "two auto-generated secrets must differ");
+    }
+    #[test]
+    fn serve_secret_uses_provided_value_verbatim() {
+        let args = PagerArgs::try_parse_from([
+            "grok",
+            "agent",
+            "serve",
+            "--secret",
+            "custom-secret-token",
+        ])
+        .expect("serve with --secret parses");
+        let Some(Command::Agent(agent)) = args.command else {
+            panic!("expected agent subcommand");
+        };
+        let Some(AgentCmd::Serve(serve)) = agent.mode else {
+            panic!("expected serve mode");
+        };
+        assert_eq!(serve.get_secret(), "custom-secret-token");
+    }
+    #[test]
+    fn serve_default_bind_is_loopback() {
+        let args = PagerArgs::try_parse_from(["grok", "agent", "serve"]).expect("serve parses");
+        let Some(Command::Agent(agent)) = args.command else {
+            panic!("expected agent subcommand");
+        };
+        let Some(AgentCmd::Serve(serve)) = agent.mode else {
+            panic!("expected serve mode");
+        };
+        // Security invariant: auto-generated secrets must never silently widen
+        // the bind to 0.0.0.0. The default stays loopback-only.
+        assert_eq!(serve.bind.to_string(), "127.0.0.1:2419");
+        assert!(serve.bind.ip().is_loopback());
     }
 }

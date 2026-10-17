@@ -16,6 +16,7 @@ pub mod relay;
 pub(crate) mod restore_code;
 pub mod roster;
 pub mod server;
+pub(crate) mod server_rate_limit;
 pub mod session_config;
 pub(crate) mod session_metrics;
 pub mod session_registry_client;

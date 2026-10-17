@@ -44,6 +44,8 @@ tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
 dunce = { workspace = true }
 semver = { workspace = true }
+# QR pairing output for `qidi agent serve` (mobile remote).
+qrcode = "0.14"
 cf-tty-utils = { workspace = true }
 cf-config= { workspace = true }
 cf-sandbox= { path = "../cf-sandbox", default-features = false }

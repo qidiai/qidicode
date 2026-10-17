@@ -45,6 +45,9 @@ use cf_shell::leader::{
     ControlPayload, LeaderClient, LeaderEnvUrls, connect_or_spawn, socket_path_for_ws_url,
 };
 use cf_update::{UpdateConfig, auto_update, enforce_minimum_version_or_exit};
+
+mod serve_qr;
+
 /// Apply headless args to an existing config, only overriding values that are
 /// explicitly set. This allows environment defaults to be preserved when
 /// specific args are not provided.
@@ -97,6 +100,9 @@ fn print_serve_startup_info(bind_addr: SocketAddr, secret: &str) {
         "   WebSocket URL: ws://{}/ws?server-key={}",
         bind_addr, secret
     );
+    eprintln!();
+    eprintln!("   Scan to pair:");
+    eprintln!("{}", serve_qr::render_pairing(bind_addr, secret, serve_qr::detect_tier()));
     eprintln!();
 }
 /// Entrypoint tag for `grok -p`; keys the quiet stderr default in `init_tracing_simple`.
