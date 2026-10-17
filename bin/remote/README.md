@@ -14,7 +14,7 @@
 |---|---|---|
 | `qidi_serve.bat` | 家里电脑的 agent serve 守护 | 计划任务 `QidiServe`（开机自启） |
 | `qidi_tunnel.bat` | 首尔反向隧道（循环重连） | 计划任务 `QidiTunnel`（开机自启） |
-| `qidi_watchdog.bat` | 每 30 分钟巡检，端口不在则拉起对应组件 | 计划任务 `QidiWatchdog` |
+| `qidi_watchdog.bat` | 每 30 分钟巡检 `/healthz` 探活，失败则拉起对应组件 | 计划任务 `QidiWatchdog` |
 | `wss_test.ps1` | 公网 wss + ACP 握手端到端自检 | 手动运行 |
 
 手机端 = 仓库 `mobile/`（浏览器直接用）+ `android/`（WebView APK，GitHub Actions 自动打包）。
@@ -41,6 +41,30 @@
    交互式终端里发现不了这个坑）。
 2. **长驻服务绝不能跑在 CLI 会话的后台任务里**——wrapper 有 10 小时 max_runtime 硬上限
    （`timeout: 0` 参数不能解除），到点强杀。必须用系统计划任务（无时长限制 + 开机自启）。
+
+## 威胁模型（必读）
+
+本套件把「手机 App → 公网 → 家里电脑 agent」串起来，安全边界就压在两处：**密钥**和
+**网络暴露面**。上线前必须理解下面四条，否则等于把家里电脑的 agent 权限交出去。
+
+1. **secret-in-URL 的泄漏面**：鉴权密钥作为 `?server-key=<secret>` query 参数随 URL 走。
+   - 传输中：公网段在 TLS 内加密（nginx → 手机）；本地段走 loopback 不经过网络。
+   - 静止中：**会写进 nginx access log、系统代理日志、浏览器历史、curl -v 输出、调试
+     截图**。任何能读到这些地方的人都能拿到密钥 → 完整控制 agent。
+   - 对策：不把带 key 的 URL 贴进聊天/issue/commit；反向代理侧对 `/ws` 关掉 query
+     日志；密钥**绝不入库**（`remote_secret.txt` 在 `%USERPROFILE%\.qidi\`，git 之外）。
+
+2. **LAN-only 假设**：`qidi agent serve` 默认绑 `127.0.0.1:2419`，**严禁改成 0.0.0.0 或
+   局域网地址**。任何"手机直连家里电脑 IP"的方案都是把未鉴权面（或弱鉴权面）暴露到
+   局域网/公网，属于越界。远程访问唯一通道是 ssh 反向隧道 + 首尔 nginx TLS 反代。
+
+3. **QR = 凭证**：启动时打印的配对二维码内容 = 完整 ws URL + secret。任何看到该 QR 的
+   人（摄像头、肩窥、截图转发、会议投屏）即等于拿到 agent 控制权。配对时保证终端不被
+   录屏/拍照，配对完不传播；已泄漏就改 `remote_secret.txt` 并重启 serve 使旧 key 作废。
+
+4. **一次密钥换全量控制**：密钥通过后即可 `session/new`、`session/prompt`、写/执行工具。
+   只有只读工具默认自动批准（`--yolo-tools read_file,grep`），写/执行类仍需手机端逐次确认
+   ——这层**人工确认是最后防线**，切勿为省事把 yolo 扩到写工具。
 
 ## 运维速查
 

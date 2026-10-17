@@ -3169,6 +3169,9 @@ impl acp::Agent for MvpAgent {
             | "x.ai/sessions/list" => {
                 crate::agent::handlers::session::handle(self, &args).await
             }
+            "qidi/session/list" => {
+                crate::agent::handlers::qidi::handle(self, &args).await
+            }
             "x.ai/workspaces/list" => {
                 crate::agent::handlers::workspaces::handle(self, &args).await
             }

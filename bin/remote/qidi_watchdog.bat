@@ -1,9 +1,11 @@
 @echo off
 rem ============================================================
-rem  qidicode 手机遥控 — 看门狗 (Task Scheduler 每 30 分钟巡检)
-rem  逻辑：端口不在 → 用计划任务拉起对应组件（幂等，服务健康时零动作）
+rem  qidicode mobile remote - watchdog (Task Scheduler every 30 min)
+rem  Logic: GET /healthz fails -> relaunch component (idempotent)
+rem  NOTE: /healthz (HTTP 200 + JSON) is a stronger liveness signal
+rem  than a raw LISTENING port probe - it proves axum is serving.
 rem ============================================================
-netstat -an | findstr /c:":2419 " | findstr /c:"LISTENING" >nul 2>&1
+curl.exe -sf -m 5 http://127.0.0.1:2419/healthz >nul 2>&1
 if errorlevel 1 (
     schtasks /run /tn "QidiServe" >nul 2>&1
 )

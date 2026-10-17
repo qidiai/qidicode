@@ -1636,4 +1636,52 @@ mod tests {
         let outcome = prompter.request(&access, &tool_call_update).await;
         assert!(matches!(outcome, PromptOutcome::Error(_)));
     }
+
+    /// T2.6 red line: a reverse permission request that was **enqueued** to a
+    /// live client and then abandoned (client disconnects without answering)
+    /// must resolve to `PromptOutcome::Error` → `Deny`, never to an `Allow`.
+    /// Dropping the enqueued message drops its `response_tx`, which is exactly
+    /// what the serve teardown does to a disconnect. This proves cancellation
+    /// cannot flip a permission decision to allow.
+    #[tokio::test]
+    async fn mid_flight_disconnect_yields_error_not_allow() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let gateway = GatewaySender::new(tx);
+        let prompter = AcpPrompter::new(
+            acp::SessionId::new(Arc::from("sess-disconnect")),
+            gateway,
+            ClientType::Generic,
+        );
+        let access = AccessKind::Bash("rm -rf /tmp/x".to_owned());
+        let tool_call_update = acp::ToolCallUpdate::new(
+            acp::ToolCallId::new(Arc::from("tc-disc")),
+            acp::ToolCallUpdateFields::default(),
+        );
+
+        let mut request = Box::pin(prompter.request(&access, &tool_call_update));
+
+        // Drive the request concurrently with the "peer": the first poll of
+        // `request` enqueues the reverse request and parks on its response
+        // channel; `rx.recv()` then surfaces that enqueued message.
+        tokio::select! {
+            _ = &mut request => panic!("request resolved before the disconnect was simulated"),
+            msg = rx.recv() => {
+                let msg = msg.expect("permission request must be enqueued");
+                drop(msg); // client disconnects without answering → response_tx dropped
+            }
+        }
+
+        let outcome = request.await;
+        assert!(
+            matches!(outcome, PromptOutcome::Error(_)),
+            "mid-flight disconnect must yield PromptOutcome::Error, got {outcome:?}"
+        );
+        assert!(
+            matches!(
+                permission_decision_for_outcome(&outcome),
+                PermissionDecision::Deny
+            ),
+            "a cancelled/disconnected permission must map to Deny, never Allow"
+        );
+    }
 }
