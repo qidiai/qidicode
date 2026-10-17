@@ -117,6 +117,7 @@
 - 技能 frontmatter 可带 `effort:`（枚举含独立 `Max`，见 §7 分层）与 `model:` 覆盖
 - 创建/修改技能用内置 `/create-skill`
 - **子代理技能面实测（2026-10-16，DeepSeek 子代理 72 次调用深挖；根因经 GLM+step5 双席独立裁决修正）**：**子代理不能调用技能——差两层**。①可见层：子代理技能清单注入 = **0**。真因（双席裁决，早版"账本继承"叙事已证伪）：**子代理 spawn 不经 initialize/rebuild 注入缝**（handle_request.rs 只发 CopyFile/Prompt，conversation 由 install_system_prompt+replace_conversation 直接装配），且 **finalize 预填 announced_names（startup 全量）**使 seed 的 pending 门（`has_skills && announced_names.is_empty()`）不放行 → 工具调用 drain 无货；②激活层：子代理工具面（`default_qidi_build_toolset()`）只有安装型 `deploy_skill`，技能调用工具 `OpenCodeSkillTool`（id=`"skill"`）只存在于 `opencode_toolset()` 未接入——**设计应支持、实现未接通（F1 已接线，commit 362eb07c，审计通过）**；③内容层兜底 ✅：`read_file` 出 workspace 边界被拒，但 `run_terminal_command`+`Get-Content -Encoding UTF8` 可读任意 SKILL.md。子代理需技能时由指挥官把 SKILL.md 要点写进任务书，或待 F2 返工（缝搬子代理真实初始化点）落地
+- **bid-content-diff（标书内容比对，标书技能族配套）**：每一版修改前备份（`bid_backup.py`）、修改后比对（`bid_diff.py`：哪些修改了+有没有修改坏别的内容=数字口径漂移/表格行数/图片引用/禁用词/编号连续/关键数据消失/评审因素标注回归检查）、改坏一键回滚（`bid_restore.py`，回滚前自动安全备份）。**加载规则：仅随标书技能族（bid-write/construction-tender-proposal/hefei-bid-review/bid-drawing）加载；极简模式、非标书任务一律不加载**。铁律：不备份不改内容，每轮修改=备份→修改→比对→(SAFE/REVIEW/BROKEN处置)闭环。2026-10-17 创建并全链路沙箱验证（注入4类损坏全部精准检出）
 - 常用：办公全家桶（office-tools / bid-* / seal-extractor / pdf-to-word-ocr）、编程流程（check-work / auto-bug-fixer / python-refactoring）、编排（dev-orchestra / find-skills）、安全（pre-commit-secret-check / secret-scan / check-secrets）、本地AI生图（qwen-image-lowvram：1660 Ti 低显存 Qwen-Image-2.1 + 标书效果图流水线，含 ComfyUI 部署/踩坑/PIL 叠字/元数据清零全套）
 
 ## 9. 子代理编排（乐团模式，实测有效）
