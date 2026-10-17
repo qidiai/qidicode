@@ -8,7 +8,10 @@
 mod mutations;
 mod queries;
 pub mod reasoning_summary;
-pub(crate) mod request_builder;
+// `pub`（原 pub(crate)）：载荷单价 tap（cf-shell payload_accounting）复用
+// `serialized_json_bytes` / `conversation_body_bytes` 这两个热路径零件——
+// 可见性提升零行为变更，零件仍由本 crate 独占维护。
+pub mod request_builder;
 pub mod state;
 
 #[cfg(test)]
@@ -299,6 +302,12 @@ impl ChatStateActor {
             }
             ChatStateCommand::GetBatchedPruningEnabled { reply } => {
                 let _ = reply.send(self.pruning_config.batched_mode());
+            }
+            ChatStateCommand::GetPruningEnabled { reply } => {
+                // Blind fix 10 (deepseek-flash audit): expose the master
+                // pruning switch so the session-layer pre-generation gate can
+                // stay shut when pruning itself is disabled.
+                let _ = reply.send(self.pruning_config.enabled);
             }
             ChatStateCommand::GetHardClearAgeTurns { reply } => {
                 // M10: single source of truth for the retained hard-clear age —

@@ -1893,6 +1893,16 @@ impl SessionActor {
             if use_backend_search {
                 request.hosted_tools = self.agent.borrow().hosted_tools().to_vec();
             }
+            // ── 载荷单价 tap（推进方案 v2.3 放行版，纯观测件）──
+            // 请求侧 8 类分账 + 前缀哈希 + P1-2 不变量执法，在请求全量装配
+            // 完毕、提交 sampling 之前执行。采样门在 payload_accounting 内
+            // （默认关 / sample 1% / full），返回 None = 零开销零载荷变更。
+            // 主回路与子代理（startup_hints.is_subagent）机械上同 choke point
+            // 覆盖（P1-4，事件带 session-kind 标签）；快照在本轮循环内由下方
+            // usage 侧汇合（P1-3 对账）。
+            let mut payload_tap_pending = self
+                .payload_tap_observe_turn_request(&request, req_id)
+                .await;
             // Model-visible request envelope logging (dsh request_header):
             // hash + tool names + sampling config, appended to updates.jsonl
             // only when the envelope changed since the last recorded one.
@@ -1968,6 +1978,14 @@ impl SessionActor {
             let usage = response.usage.as_ref();
             let prompt_tokens = usage.map(|u| u.prompt_tokens);
             let cached_prompt_tokens = usage.map(|u| u.cached_prompt_tokens);
+            // ── tap usage 侧汇合：并入 provider usage（cached_tokens 透传）、
+            // 计算对账差额（P1-3）、落盘 per-request 事件（搭 unified_log 便车）。
+            if let Some(pending) = payload_tap_pending.take() {
+                super::payload_accounting::complete_turn_with_usage(
+                    pending,
+                    response.usage.as_ref(),
+                );
+            }
             let completion_tokens = usage.map(|u| u.completion_tokens);
             let reasoning_tokens = usage.map(|u| u.reasoning_tokens);
             let ttft_ms = latency.time_to_first_token_ms;

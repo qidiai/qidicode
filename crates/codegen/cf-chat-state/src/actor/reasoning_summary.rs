@@ -117,11 +117,14 @@ fn dedup_preserve_order(items: Vec<String>) -> Vec<String> {
 
 /// Phase C rule extractor (batch 2): produce the deterministic "rule floor"
 /// summary for a reasoning block, or `None` when the block has neither any
-/// numeric/parameter atom nor any assertion sentence.
+/// numeric/parameter atom nor any assertion sentence, **or** when the B-2
+/// byte truncation split a number atom so the truncated floor would violate
+/// the C-1 subset contract (blind fix 5, deepseek-flash audit).
 ///
 /// `None` tells the caller to skip the block entirely: the batched prune
 /// applies never-bare-clear on a table miss, so a block with nothing to
-/// extract must not get a bare/empty summary.
+/// extract — or with a truncation-poisoned floor — must not get a bare/empty
+/// (or contract-violating) summary.
 ///
 /// Output format (verbatim per the design doc):
 /// `[推理摘要|规则抽取] 数字/参数：<…>；断言："<原句1>"、"<原句2>"`
@@ -158,10 +161,23 @@ pub fn rule_extract_summary(text: &str) -> Option<String> {
         sections.push(format!("断言：{}", quoted.join("、")));
     }
     // B-2: byte cap with an ellipsis marker (UTF-8-safe truncation).
-    Some(truncate_summary_bytes(format!(
+    let floor = truncate_summary_bytes(format!(
         "[推理摘要|规则抽取] {}",
         sections.join("；")
-    )))
+    ));
+    // Blind fix 5 (deepseek-flash audit): byte truncation can split the tail
+    // number atom (e.g. `120` → `1`), which violates the C-1 subset contract
+    // at the truncation edge — `summarize_with_guard`'s degrade path returns
+    // this floor verbatim, so a split atom would be written into the
+    // [`crate::types::ReasoningSummaries`] table and later applied. Re-run
+    // the subset check on the *truncated* floor against the original text;
+    // on failure return `None` — the caller skips the block and the batched
+    // prune's table miss (C-1b never-bare-clear) keeps the original.
+    if subset_check(&floor, text) {
+        Some(floor)
+    } else {
+        None
+    }
 }
 
 /// B-2: truncate a rule-floor summary to [`MAX_SUMMARY_BYTES`] bytes on a
@@ -330,5 +346,58 @@ mod tests {
     fn subset_check_empty_summary_numbers_vacuously_passes() {
         assert!(subset_check("没有任何数字", "原始也没有数字"));
         assert!(subset_check("", ""));
+    }
+
+    /// Blind fix 5 (deepseek-flash audit): a byte-boundary cut through a
+    /// number atom (`120` → `1`) must fail the C-1 subset assertion — the
+    /// split atom is absent from the original's number set.
+    #[test]
+    fn subset_check_rejects_a_truncation_split_number_atom() {
+        assert!(
+            !subset_check("数字/参数：1", "处理 120 个"),
+            "盲面5/C-1: a byte-truncation-split number atom (120→1) must fail the subset contract"
+        );
+    }
+
+    /// Blind fix 5 (deepseek-flash audit): byte truncation must never let a
+    /// split number atom past the subset contract. A 503-digit number forces
+    /// the 477-byte cut inside the digit run (the 44-byte header precedes it),
+    /// so the truncated floor carries a *shorter* digit run that is absent
+    /// from the original's number set — the floor must be dropped (`None`):
+    /// the caller skips the block and the batched-prune table miss
+    /// (C-1b never-bare-clear) keeps the original.
+    #[test]
+    fn rule_extract_drops_floor_when_truncation_splits_a_number_atom() {
+        // 503 digits: params section (44-byte header + 503) alone exceeds the
+        // 480-byte cap, and the cut (477) lands inside the ASCII digit run.
+        let num = format!("120{}", "0".repeat(500));
+        let text = format!("参数必须为 {num} 个。");
+
+        let s = rule_extract_summary(&text);
+        assert!(
+            s.is_none(),
+            "盲面5/C-1: a floor whose byte truncation splits a number atom must be dropped (None), got {s:?}"
+        );
+    }
+
+    /// Blind fix 5 control: the same block *without* the truncation pressure
+    /// keeps its floor — the drop is triggered by the truncation edge only,
+    /// not by the digit-heavy content itself.
+    #[test]
+    fn rule_extract_keeps_floor_when_no_truncation_occurs() {
+        let text = "参数必须为 120 个。";
+        let s = rule_extract_summary(text).unwrap();
+        assert!(
+            s.contains("120"),
+            "盲面5/C-1 control: a non-truncated floor must keep its number atom: {s}"
+        );
+        assert!(
+            !s.ends_with(SUMMARY_ELLIPSIS),
+            "盲面5/C-1 control: no truncation marker expected under the byte cap: {s}"
+        );
+        assert!(
+            subset_check(&s, text),
+            "盲面5/C-1 control: the kept floor must satisfy the C-1 subset contract: {s}"
+        );
     }
 }

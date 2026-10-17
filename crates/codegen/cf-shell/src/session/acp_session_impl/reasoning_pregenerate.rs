@@ -21,6 +21,15 @@ fn pregeneration_round_blocks(blocks: &[EligibleReasoningBlock]) -> &[EligibleRe
     &blocks[..take]
 }
 
+/// Blind fix 10 (deepseek-flash audit) pure gate: pre-generation may run only
+/// when BOTH the batched execution mode and the master pruning switch are on.
+/// `batched=true + enabled=false` can never run the batched clear those
+/// summaries serve, so burning LLM summary calls there is pure waste — the
+/// gate must stay shut (no guard claim, no LLM call).
+fn pregeneration_gate_allows(batched_pruning_enabled: bool, pruning_enabled: bool) -> bool {
+    batched_pruning_enabled && pruning_enabled
+}
+
 impl SessionActor {
     /// C-6-gated, non-blocking Reasoning-summary pre-generation trigger.
     ///
@@ -36,10 +45,14 @@ impl SessionActor {
     /// application split: the LLM call stays in this session layer, never in
     /// cf-chat-state.
     pub(super) async fn maybe_pregenerate_reasoning_summaries(self: &Arc<Self>) {
-        // R6: check the batched-mode flag *before* claiming the guard or
-        // spawning, so the per-turn cost when Phase C is off is a single cheap
-        // channel query — not a task spawn that immediately returns.
-        if !self.chat_state_handle.is_batched_pruning_enabled().await {
+        // R6 + blind fix 10 (deepseek-flash audit): check the master `enabled`
+        // switch *and* the batched-mode flag *before* claiming the guard or
+        // spawning — `batched=true + enabled=false` must not burn LLM summary
+        // calls when the batched clear can never run.
+        if !pregeneration_gate_allows(
+            self.chat_state_handle.is_batched_pruning_enabled().await,
+            self.chat_state_handle.is_pruning_enabled().await,
+        ) {
             return;
         }
         // N2 (step-5 第五方审计): cross-run throttle — a completed run buys
@@ -84,6 +97,12 @@ impl SessionActor {
         // C-6 gate: batched pruning off → zero action (re-checked inside the
         // spawn as a belt-and-suspenders against a mid-flight flag change).
         if !self.chat_state_handle.is_batched_pruning_enabled().await {
+            return Ok(());
+        }
+        // Blind fix 10 (deepseek-flash audit): same re-check for the master
+        // `enabled` switch — `batched=true + enabled=false` must not burn LLM
+        // summary calls even if the flag flips after the entry gate.
+        if !self.chat_state_handle.is_pruning_enabled().await {
             return Ok(());
         }
         // Trigger line: utilization ≥ 35%.
@@ -148,6 +167,13 @@ impl SessionActor {
                 _ => continue,
             };
             let summary = summarize_with_guard(&floor, &attribution, &block.text);
+            // Blind fix 5 (deepseek-flash audit): an empty guard result means
+            // even the rule floor violated the subset contract (e.g. byte
+            // truncation split a number atom) — write nothing so the batched
+            // prune's table miss (never-bare-clear) keeps the original block.
+            if summary.is_empty() {
+                continue;
+            }
             summaries.insert(block.fingerprint, summary);
         }
 
@@ -172,7 +198,7 @@ impl SessionActor {
 
 #[cfg(test)]
 mod pregeneration_round_tests {
-    use super::{PREGENERATION_BATCH_LIMIT, pregeneration_round_blocks};
+    use super::{PREGENERATION_BATCH_LIMIT, pregeneration_gate_allows, pregeneration_round_blocks};
     use crate::session::reasoning_summarizer::EligibleReasoningBlock;
 
     fn blocks(n: usize) -> Vec<EligibleReasoningBlock> {
@@ -205,6 +231,29 @@ mod pregeneration_round_tests {
             pregeneration_round_blocks(&few).len(),
             3,
             "B-3: a round shorter than the cap processes all its blocks"
+        );
+    }
+
+    /// Blind fix 10 (deepseek-flash audit): `enabled=false` — even with
+    /// `batched=true` — must close the pre-generation gate: no guard claim and
+    /// no LLM summary call for summaries the batched clear can never apply.
+    #[test]
+    fn gate_stays_shut_when_master_pruning_switch_is_off() {
+        assert!(
+            !pregeneration_gate_allows(true, false),
+            "盲面10/C-6: batched=true + enabled=false must not trigger pre-generation (no LLM summary call)"
+        );
+        assert!(
+            !pregeneration_gate_allows(false, false),
+            "盲面10/C-6: batched=false + enabled=false keeps the gate shut"
+        );
+        assert!(
+            !pregeneration_gate_allows(false, true),
+            "盲面10/C-6: batched=false keeps the gate shut (C-6 flag-off anchor: zero action)"
+        );
+        assert!(
+            pregeneration_gate_allows(true, true),
+            "盲面10/C-6 control: batched=true + enabled=true must allow pre-generation"
         );
     }
 }

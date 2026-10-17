@@ -231,6 +231,16 @@ pub enum ChatStateCommand {
         reply: oneshot::Sender<bool>,
     },
 
+    /// Whether the master pruning switch is on (`PruningConfig.enabled`).
+    /// Blind fix 10 (deepseek-flash audit): the session-layer Reasoning-summary
+    /// pre-generation must check this *alongside* the batched-mode flag —
+    /// `batched=true + enabled=false` can never run the batched clear those
+    /// summaries serve, so burning LLM calls there is pure waste
+    /// (config-consistency anchor).
+    GetPruningEnabled {
+        reply: oneshot::Sender<bool>,
+    },
+
     /// The retained-layer hard-clear age threshold (turns), read from the
     /// live `PruningConfig`. M10: the session-layer Reasoning-summary
     /// pre-generation uses this *same* value as the prune side so the two age
@@ -456,6 +466,9 @@ mod tests {
 
         let (tx, _rx) = oneshot::channel();
         let _ = ChatStateCommand::GetBatchedPruningEnabled { reply: tx };
+
+        let (tx, _rx) = oneshot::channel();
+        let _ = ChatStateCommand::GetPruningEnabled { reply: tx };
 
         let (tx, _rx) = oneshot::channel();
         let _ = ChatStateCommand::GetHardClearAgeTurns { reply: tx };

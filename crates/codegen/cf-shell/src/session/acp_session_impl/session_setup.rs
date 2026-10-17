@@ -681,6 +681,12 @@ impl SessionActor {
                 announcement.server_count,
             ));
         }
+        // ── 载荷单价 tap 域行（P2-6）：tap 观测过才产生行（注册表为空 =
+        // 零行 = /context 零行为变更）；经既有 TokenUsageCategory→LegendRow
+        // 管道直达 /context，cf-pager 泛化渲染零改动。
+        for row in super::payload_accounting::context_rows(self.session_info.id.0.as_ref()) {
+            rows.push(row);
+        }
         rows
     }
 }

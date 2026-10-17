@@ -3747,6 +3747,44 @@ fn reasoning_text(item: &ConversationItem) -> String {
     }
 }
 
+/// Blind fix 10 (deepseek-flash audit): the pre-generation gate must be able
+/// to see the master `enabled` switch through the actor — the exact audit
+/// scenario `batched=true + enabled=false` reports `is_pruning_enabled()==false`
+/// (so the session layer cannot burn LLM summary calls for summaries the
+/// batched clear would never apply) while the batched-mode pair stays intact.
+#[tokio::test]
+async fn get_pruning_enabled_reports_master_switch_through_actor() {
+    // The audit scenario: batched mode ON (flag + watermark), master OFF.
+    let config = crate::types::PruningConfig {
+        batched_pruning: true,
+        low_watermark_percent: Some(40),
+        enabled: false,
+        ..Default::default()
+    };
+    let handle = spawn_batched_handle(config).await;
+    assert!(
+        !handle.is_pruning_enabled().await,
+        "盲面10/C-6: PruningConfig.enabled=false must surface as is_pruning_enabled()==false through GetPruningEnabled"
+    );
+    assert!(
+        handle.is_batched_pruning_enabled().await,
+        "盲面10/C-6 control: batched=true + watermark must keep batched_mode()==true (the pair the audit described)"
+    );
+
+    // Positive control: the same config with the master switch on reports true.
+    let config = crate::types::PruningConfig {
+        batched_pruning: true,
+        low_watermark_percent: Some(40),
+        enabled: true,
+        ..Default::default()
+    };
+    let handle = spawn_batched_handle(config).await;
+    assert!(
+        handle.is_pruning_enabled().await,
+        "盲面10/C-6 control: PruningConfig.enabled=true must surface as is_pruning_enabled()==true through GetPruningEnabled"
+    );
+}
+
 /// C-1b ① (table hit): a non-encrypted Reasoning block aged past the gate and
 /// whose fingerprint is present in the pre-generated table is replaced with a
 /// **visible-text `Assistant` sibling** — never a `Reasoning` item.

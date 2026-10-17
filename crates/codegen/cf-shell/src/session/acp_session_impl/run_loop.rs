@@ -193,7 +193,8 @@ pub(super) async fn run_session(
             trigger_bytes, "reclaim_target_bytes" : reclaim_target_bytes, "inline_images"
             : inline_images, "images_remaining" : inline_images.saturating_sub(evicted),
             "needs_image_compaction" : needs_image_compaction, "evicted" : evicted,
-            })),); } Some(cf_chat_state::ChatStateEvent::PromptIndexChanged { .. }) |
+            })),); } Some(
+            cf_chat_state::ChatStateEvent::PromptIndexChanged { .. }) |
             Some(cf_chat_state::ChatStateEvent::TokensUpdated { .. }) => {} None => {} }
             } maybe_event = event_rx.recv() => { if let Some(event) = maybe_event { match
             event { SessionEvent::Notification(notification) => { let out = replay_buffer

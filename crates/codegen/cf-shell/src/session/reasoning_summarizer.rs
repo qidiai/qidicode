@@ -160,13 +160,20 @@ pub fn compose_summary(rule_floor: &str, attribution: &str) -> String {
 
 /// Compose the summary with the hard subset assertion (Phase C, C-1): if the
 /// LLM attribution introduces any number not present in the original block,
-/// the whole block degrades to the pure rule floor.
+/// the whole block degrades to the pure rule floor. Blind fix 5
+/// (deepseek-flash audit): a floor that *itself* violates the subset contract
+/// (e.g. byte truncation split a number atom, `120` → `1`) must not be
+/// returned as the degrade result — the empty string tells the caller to
+/// write nothing so the batched-prune table miss (never-bare-clear) keeps the
+/// original block.
 pub fn summarize_with_guard(rule_floor: &str, attribution: &str, original: &str) -> String {
     let composed = compose_summary(rule_floor, attribution);
     if cf_chat_state::subset_check(&composed, original) {
         composed
-    } else {
+    } else if cf_chat_state::subset_check(rule_floor, original) {
         rule_floor.to_string()
+    } else {
+        String::new()
     }
 }
 
@@ -491,6 +498,31 @@ mod tests {
         let original = "处理 42 个文件";
         // 128 ∉ {42} → degrade to the pure rule floor.
         assert_eq!(summarize_with_guard(floor, attribution, original), floor);
+    }
+
+    /// Blind fix 5 (deepseek-flash audit): when the attribution pushes the
+    /// composed line out of contract AND the rule floor itself violates the
+    /// contract (a byte-truncation-split atom, `120` → `1`), the degrade path
+    /// must return empty — never write a contract-violating floor; the caller
+    /// skips the write and the table miss (C-1b never-bare-clear) keeps the
+    /// original block.
+    #[test]
+    fn summarize_with_guard_returns_empty_when_floor_itself_violates_subset() {
+        let floor = "数字/参数：1"; // split atom of `120` (byte-truncation class)
+        let attribution = "关键归因：999 个"; // invented number → composed fails
+        let original = "处理 120 个";
+        assert_eq!(
+            summarize_with_guard(floor, attribution, original),
+            "",
+            "盲面5/C-1b: a floor that itself violates the subset contract must degrade to empty, not be written"
+        );
+        // Control: the same poisoned floor with a *clean* attribution must
+        // still degrade to empty — the floor check is unconditional.
+        assert_eq!(
+            summarize_with_guard(floor, "", original),
+            "",
+            "盲面5/C-1b: empty attribution + poisoned floor must degrade to empty as well"
+        );
     }
 
     #[test]

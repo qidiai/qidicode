@@ -44,6 +44,18 @@ pub fn estimate_tool_definitions_tokens(tds: &[cf_sampling_types::ToolDefinition
     tds.iter().map(estimate_tool_definition_tokens).sum()
 }
 
+/// Same estimator for the flat [`cf_sampling_types::ToolSpec`] wire type —
+/// shared by the cf-shell payload per-unit tap (`payload_accounting`) for
+/// its `builtinToolDefs` section: counts exactly what is submitted,
+/// including the conditional `StructuredOutput` synthetic tool (pushed
+/// upstream in cf-shell before `build_request`).
+pub fn estimate_tool_spec_tokens(spec: &cf_sampling_types::ToolSpec) -> u64 {
+    let desc = spec.description.as_deref().unwrap_or("");
+    cf_token_estimation::estimate_tokens_aware(&spec.name)
+        + cf_token_estimation::estimate_tokens_aware(desc)
+        + cf_token_estimation::estimate_tokens_aware(&spec.parameters.to_string())
+}
+
 /// Character-aware estimate for a single [`ConversationItem`]:
 /// text content goes through [`cf_token_estimation::estimate_tokens_aware`]
 /// (bytes/4 for ASCII, ~0.6 token per CJK character), so Chinese-heavy

@@ -358,6 +358,16 @@ pub(crate) async fn generate_session_compact(
     wall_clock_budget_secs: u64,
 ) -> Result<CompactOutput, CompactFailure> {
     let num_messages = chat_history.len();
+    // ── 载荷单价 tap（P2-10）：compaction 摘要请求观测，一处覆盖三后端臂。
+    // 重宣字节一致性由主回路轮次的前缀哈希兜底（compact_system_prompt 为
+    // 静态串，cf-agent/src/agent.rs:117-119）。采样门在 tap 内（默认关）。
+    crate::session::acp_session::payload_accounting::observe_compaction_request(
+        &chat_history,
+        &tools,
+        &hosted_tools,
+        &session_id.to_string(),
+        Some(sampling_config.model.as_str()),
+    );
     let output = match sampling_config.api_backend {
         ApiBackend::ChatCompletions => {
             let chat_messages: Vec<ChatRequestMessage> =

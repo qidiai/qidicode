@@ -416,7 +416,9 @@ impl TokenUsageCategory {
     pub fn skills_listing(text: &str, skill_count: usize) -> Self {
         Self {
             label: "Skills".to_string(),
-            tokens: cf_token_estimation::estimate_tokens(text),
+            // P2-6 caliber ruling: CJK-aware, same estimator as the tap's
+            // reconciliation walk (no more over-reporting CJK listings).
+            tokens: cf_token_estimation::estimate_tokens_aware(text),
             detail: Some(count_detail(skill_count as u64, "skill")),
         }
     }
@@ -426,7 +428,8 @@ impl TokenUsageCategory {
     pub fn mcp_servers(text: &str, server_count: usize) -> Self {
         Self {
             label: "MCP servers".to_string(),
-            tokens: cf_token_estimation::estimate_tokens(text),
+            // P2-6 caliber ruling: see [`TokenUsageCategory::skills_listing`].
+            tokens: cf_token_estimation::estimate_tokens_aware(text),
             detail: Some(count_detail(server_count as u64, "server")),
         }
     }

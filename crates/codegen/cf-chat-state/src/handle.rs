@@ -399,6 +399,20 @@ impl ChatStateHandle {
         .unwrap_or(false)
     }
 
+    /// Whether the master pruning switch (`PruningConfig.enabled`) is on.
+    /// Blind fix 10 (deepseek-flash audit): the session-layer Reasoning-summary
+    /// pre-generation checks this *and* `is_batched_pruning_enabled`, so
+    /// `batched=true + enabled=false` cannot burn LLM summary calls for
+    /// summaries the batched clear would never apply. Fail-closed (`false`,
+    /// zero pre-generation action) when the actor channel is closed.
+    pub async fn is_pruning_enabled(&self) -> bool {
+        self.query("GetPruningEnabled", |reply| {
+            ChatStateCommand::GetPruningEnabled { reply }
+        })
+        .await
+        .unwrap_or(false)
+    }
+
     /// The retained-layer hard-clear age threshold (turns), read from the live
     /// [`PruningConfig`]. M10: the session-layer pre-generation passes this to
     /// `collect_eligible_reasoning_blocks` so both age thresholds share one

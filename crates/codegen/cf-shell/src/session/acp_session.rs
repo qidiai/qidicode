@@ -108,6 +108,10 @@ pub(crate) use laziness::*;
 mod hooks_plugins;
 #[path = "acp_session_impl/mcp.rs"]
 mod mcp;
+// 载荷单价 tap（推进方案 v2.3 放行版）——纯观测层，主回路/子代理/compaction
+// 三路覆盖 + /context 域行。pub(crate)：helpers/session_compact.rs 也要调用。
+#[path = "acp_session_impl/payload_accounting.rs"]
+pub(crate) mod payload_accounting;
 #[path = "acp_session_impl/model_switch.rs"]
 mod model_switch;
 #[path = "acp_session_impl/prompt_queue.rs"]

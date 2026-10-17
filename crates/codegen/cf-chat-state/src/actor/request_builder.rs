@@ -6,7 +6,9 @@ use cf_sampling_types::{
 
 use super::ChatStateActor;
 use crate::events::ChatStateEvent;
-use crate::types::{PruningConfig, PRUNE_WATERMARK_PERCENT};
+use crate::types::{
+    PruningConfig, MEMORY_CONTEXT_OPEN_TAG, PRUNE_WATERMARK_PERCENT,
+};
 
 /// Placeholder inserted when a tool result is hard-cleared.
 ///
@@ -460,7 +462,10 @@ impl std::io::Write for ByteCounter {
 /// Exact JSON-serialized byte length of any value, measured through a
 /// [`ByteCounter`] so no encoded buffer is allocated. JSON quoting and string
 /// escaping are captured precisely (not estimated from field lengths).
-fn serialized_json_bytes<T: serde::Serialize + ?Sized>(value: &T) -> usize {
+///
+/// `pub`（原私有）：载荷单价 tap（cf-shell payload_accounting）在采样轮
+/// 复用本函数做 section 字节计数——热路径零件零新建。
+pub fn serialized_json_bytes<T: serde::Serialize + ?Sized>(value: &T) -> usize {
     let mut counter = ByteCounter::default();
     if let Err(err) = serde_json::to_writer(&mut counter, value) {
         // Serializing in-memory state to a byte sink is infallible in
@@ -520,7 +525,10 @@ pub(crate) struct ImageEvictionOutcome {
 ///
 /// The blanking copy is cheap: image data lives behind `Arc<str>`, so cloning
 /// only bumps refcounts and the blanked clone drops them without copying bytes.
-fn conversation_body_bytes(conversation: &[ConversationItem]) -> usize {
+///
+/// `pub`（原私有）：载荷单价 tap 复用本函数做 items 线上字节总量
+/// （残差 = 总字节 − Σ分账字节的分母）。
+pub fn conversation_body_bytes(conversation: &[ConversationItem]) -> usize {
     let mut blanked = conversation.to_vec();
     let mut image_url_bytes = 0usize;
     for item in &mut blanked {
@@ -630,7 +638,8 @@ pub(crate) fn compact_images_to_byte_budget(
 // Memory reminder injection
 // ============================================================================
 
-use crate::types::MEMORY_CONTEXT_OPEN_TAG;
+// (MEMORY_CONTEXT_OPEN_TAG is imported at the top of this file; the memory
+// reminder injector below is its only consumer in this module.)
 
 /// Upsert a memory reminder into the conversation's system message.
 ///
