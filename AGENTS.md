@@ -53,7 +53,7 @@
 
 ## 3. 办公项目（方案 / 标书 / 审计 / 资料 / 纪要 等非代码交付物）
 
-**统一根：私有库 `github.com/qidiai/qidiwork-docs`（Private），本地工作副本 `G:\qidiwork-docs-local\`。**
+**统一根：私有库 `github.com/qidiai/qidiwork-docs`（Private），本地工作副本 `G:\qidiwork-docs-local\qidiwork-docs\`（2026-10-17 勘误：原写 `G:\qidicode-docs-local\` 实测不存在，真实副本为带 `qidiwork-docs` 子目录的本路径）。**
 一个项目/主题一个子目录，同项目所有文件（含中间稿）都进同一子目录。
 
 | 类型 | 位置 | 命名规范 |
