@@ -474,7 +474,7 @@ var QidiMobileCore = (function () {
   }
 
   /* --------------------------- ws URL 解析 --------------------------- */
-  /* 粘贴降级（扫码配对待后端）：接受 ws/wss/http/https，提取 server-key 与 cwd query。 */
+  /* 配对二维码内容即完整 ws 链接（serve 启动打印）：接受 ws/wss/http/https，提取 server-key 与 cwd query */
   function decodeSafe(s) {
     try { return decodeURIComponent(s.replace(/\+/g, " ")); } catch (e) { return s; }
   }

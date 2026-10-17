@@ -92,7 +92,7 @@
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M3 12h18"/></svg>
           扫码连接
         </button>
-        <p class="scan-hint">扫码配对待后端支持；当前可粘贴 <code>ws://</code> 链接自动解析填入（见扫码面板）。</p>
+        <p class="scan-hint">二维码配对已就绪：电脑端 <code>qidi agent serve</code> 启动时即打印配对二维码，内容 = 完整连接链接（含密钥）。摄像头自动扫码为 P1；当前把该链接（或二维码截图）粘贴过来，同样自动解析填入</p>
       </div>
     </section>
 
@@ -108,7 +108,7 @@
       <button id="scan-close" class="icon-btn" type="button" aria-label="关闭">✕</button>
     </div>
     <div class="sheet-body">
-      <p class="scan-note">📷 摄像头扫码配对待后端支持。当前降级方案：粘贴电脑端给出的 <code>ws://</code>（或 <code>wss://</code>）完整链接，自动解析出地址 / 密钥 / 项目路径。</p>
+      <p class="scan-note">📷 摄像头扫码为 P1。当前方案：serve 启动时打印的配对二维码，内容就是下方所需的完整 <code>ws://</code>（或 <code>wss://</code>）链接——粘贴后自动解析出地址 / 密钥 / 项目路径</p>
       <label for="scan-input">ws:// 链接</label>
       <textarea id="scan-input" rows="3" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="ws://192.168.1.10:2419/ws?server-key=xxxx&cwd=G:%5Cwork%5Cproj"></textarea>
       <div id="scan-error" class="connect-error hidden" role="alert"></div>
