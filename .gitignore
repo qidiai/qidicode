@@ -43,13 +43,12 @@ tools/media-gen-agent/agnes_config.json.*
 *.snap.new
 
 # ---- manhua pipeline media (2026-10-02) ----
-qidiwork-docs/manhua/**/*.png
-qidiwork-docs/manhua/**/*.jpg
-qidiwork-docs/manhua/**/*.jpeg
-qidiwork-docs/manhua/**/*.mp3
-qidiwork-docs/manhua/**/*.wav
-qidiwork-docs/manhua/**/*.mp4
-!qidiwork-docs/manhua/**/*.json
-!qidiwork-docs/manhua/**/*.md
+# 2026-10-17: qidiwork-docs 整体迁出本仓库（公开仓库只放代码）。
+# 文档已迁至私有库 github.com/qidiai/qidiwork-docs，本地工作副本 G:\qidiwork-docs-local\。
+# 此目录绝不再进本仓库；manhua 脚本输出路径已同步改到私有库本地路径。
+qidiwork-docs/
+
+# 个人文档：记忆使用指南，2026-10-17 随 qidiwork-docs 一并清出公开历史
+MEMORY_SCOPE.md
 __pycache__/
 *.py[cod]

@@ -262,7 +262,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="agnes-video-2.5 I2V 批量生成")
     ap.add_argument(
-        "--project-dir", default=r"qidiwork-docs\manhua\proj1")
+        "--project-dir", default=r"G:\qidiwork-docs-local\manhua\proj1")
     ap.add_argument("--only", default=None,
                     help="逗号分隔 shot_id，仅处理指定镜")
     ap.add_argument("--dry-run", action="store_true",

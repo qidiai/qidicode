@@ -248,7 +248,7 @@ def build_ass(sb: dict, seg_durs: list) -> str:
 # ---------------------------------------------------------------- 主流程
 def main() -> int:
     ap = argparse.ArgumentParser(description="合成成片")
-    ap.add_argument("--project-dir", default=r"qidiwork-docs\manhua\proj1")
+    ap.add_argument("--project-dir", default=r"G:\qidiwork-docs-local\manhua\proj1")
     ap.add_argument("--out-name", default="final",
                     help="成片文件名前缀（final_v2 等）")
     args = ap.parse_args()

@@ -60,7 +60,7 @@ def call_vision(session, image_bytes: bytes) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="分镜图抽检")
-    ap.add_argument("--project-dir", default=r"qidiwork-docs\manhua\proj1")
+    ap.add_argument("--project-dir", default=r"G:\qidiwork-docs-local\manhua\proj1")
     ap.add_argument("--seed", type=int, default=42,
                     help="随机种子（可复现）")
     ap.add_argument("--ratio", type=float, default=0.1,

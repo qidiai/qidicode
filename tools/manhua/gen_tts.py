@@ -161,7 +161,7 @@ def process_shot(shot: dict, char_by_id: dict,
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="edge-tts 配音")
-    ap.add_argument("--project-dir", default=r"qidiwork-docs\manhua\proj1")
+    ap.add_argument("--project-dir", default=r"G:\qidiwork-docs-local\manhua\proj1")
     args = ap.parse_args()
 
     proj = Path(args.project_dir)

@@ -30,9 +30,11 @@
 
 **🚫 禁止在仓库根新建任何散文件或散目录。**
 
-根目录白名单：`README.md`、`AGENTS.md`、`Cargo.toml`、`Cargo.lock`、`.gitignore`、`build_release.ps1` 及既有目录（`crates/`、`docs/`、`qidiwork-docs/`、`third_party/`、`tools/`、`bin/`、`prod/` 等）。
+根目录白名单：`README.md`、`AGENTS.md`、`Cargo.toml`、`Cargo.lock`、`.gitignore`、`build_release.ps1` 及既有目录（`crates/`、`docs/`、`third_party/`、`tools/`、`bin/`、`prod/` 等）。
 **白名单之外的一切根级条目均为历史遗留**（见 §6）——不要读它们的结构做参照，不要往里写。
 不确定放哪 → **先问用户，不要猜根目录**。
+
+> **2026-10-17 纪律修订（用户确认）**：`qidiwork-docs/` 已从白名单和本仓库**永久移除**（历史已重写清除）——本仓库是对外公开的代码库，**只放代码与 §2 定义的工程技术文档**；办公/研究/个人文档一律不进本仓库，落位见 §3。
 
 ---
 
@@ -45,28 +47,34 @@
 | 构建产物 | `target/` | 由 cargo 管理，**禁止手工往里塞任何自造文件** |
 | 临时脚本 / 日志 / 沙箱 / 一次性验证 | `target/tmp/<主题>/` 或系统 `%TEMP%` | `cargo clean` 会回收 |
 
-**归属判定**：既涉代码又涉业务的文档——代码评审/技术设计归 `docs/`（权威源），面向业务的交付物归 `qidiwork-docs/`（快照）。`docs/` 与 `qidiwork-docs/` 现有 4 个同名文件，更新时以 `docs/` 版本为权威源并注明。
+**归属判定（2026-10-17 修订）**：`docs/` 仅收**与代码演进直接相关**的技术设计、代码评审、构建/工具链文档。**研究资料、标书、纪要、个人文档、业务交付物一律不得进 `docs/`，更不得进本仓库**——落位见 §3。`docs/` 与已迁出的 `qidiwork-docs/` 曾有 4 个同名文件，以私有库版本为快照。
 
 ---
 
 ## 3. 办公项目（方案 / 标书 / 审计 / 资料 / 纪要 等非代码交付物）
 
-统一根：**`qidiwork-docs/`**。一个项目/主题一个子目录，同项目所有文件（含中间稿）都进同一子目录。
+**统一根：私有库 `github.com/qidiai/qidiwork-docs`（Private），本地工作副本 `G:\qidiwork-docs-local\`。**
+一个项目/主题一个子目录，同项目所有文件（含中间稿）都进同一子目录。
 
 | 类型 | 位置 | 命名规范 |
 |---|---|---|
-| 方案 / 标书 / 投标文件 | `qidiwork-docs/方案标书/<项目名>/` | `YYYY-MM-DD-名称.docx/.pdf` |
-| 审计 / 评审 / 验证报告 | `qidiwork-docs/审计评审/` | `YYYY-MM-DD-主题-类别.md` |
-| 资料 / 参考文献 / 素材 | `qidiwork-docs/资料/<主题>/` | 自描述名 |
-| 会话结论 / 交接纪要 | `qidiwork-docs/会话纪要/` | `YYYY-MM-DD-主题.md` |
+| 方案 / 标书 / 投标文件 | `方案标书/<项目名>/` | `YYYY-MM-DD-名称.docx/.pdf` |
+| 审计 / 评审 / 验证报告 | `审计评审/` | `YYYY-MM-DD-主题-类别.md` |
+| 资料 / 参考文献 / 素材 | `资料/<主题>/` | 自描述名 |
+| 会话结论 / 交接纪要 | `会话纪要/` | `YYYY-MM-DD-主题.md` |
 
-**与现状的衔接**：上表子目录为新增规范，现存 20 个平铺 .md（旧命名 `审计-日期-主题.md` 为历史格式）**不强制迁移**；新文件一律按上表落位。跨会话继续的任务先找已有子目录，不要另开。
+**铁律（2026-10-17 用户确认，源于公开仓库误暴露事故）**：
+- **办公/研究/个人文档绝不进入本公开仓库**（曾因误判远程可见性，157 个文档文件在 GitHub/Gitee 双公开仓库暴露 3 周，已重写历史清除）
+- 文档的 git 工作流在私有库进行：`cd G:\qidiwork-docs-local` 后常规 add/commit/push（remote 为私有库 origin）
+- 文档**不参与**本仓库的双推纪律（§10）——两边是完全不同的仓库
+- 本地副本未 clone 到位时，先在 `G:\qidiwork-docs-local` 执行 `git clone https://github.com/qidiai/qidiwork-docs.git`
+- `.gitignore` 已永久屏蔽 `qidiwork-docs/` 与 `MEMORY_SCOPE.md`，误建该目录也不会被提交
 
 ---
 
 ## 4. 临时文件
 
-一次性脚本、探针、日志 → `target/tmp/<主题>/` 或系统 `%TEMP%`。需要保留的验证证据按 §2/§3 归位后，临时原件可删。**绝不进仓库根、绝不进 qidiwork-docs/。**
+一次性脚本、探针、日志 → `target/tmp/<主题>/` 或系统 `%TEMP%`。需要保留的验证证据按 §2/§3 归位后，临时原件可删。**绝不进仓库根、绝不进文档私有库（`G:\qidiwork-docs-local\`）的提交面。**
 
 ---
 
@@ -74,7 +82,7 @@
 
 - 跨会话要记住的结论/偏好 → `/remember` 或 `/flush`（记忆存于 `C:\Users\ASUS\.qidi\memory\`，与仓库无关，所有项目共享）
 - **文档及时更新（2026-10-04 主理人原则）：结论即时落文档（夜报/纪要/NAS 档案），不依赖会话记忆——记忆会错，文档不会。** 大型任务当日内完成《会话纪要》；审计/裁定/交付当日落 NAS 档案并登记索引
-- 大型任务的方案与最终结论 → 除 memory 外，同时落 `qidiwork-docs/会话纪要/`
+- 大型任务的方案与最终结论 → 除 memory 外，同时落文档私有库 `G:\qidiwork-docs-local\会话纪要\`（git 提交推私有库，见 §3）
 - 换会话/新开会话前若有未沉淀结论 → 先 `/flush`
 - **自动兜底**：compact 出错前会自动落盘（`pre_compact_on_error-*.md`），`/flush` 是主动版
 - **关键安心条款**：`cargo clean` / `git clean` / 仓库清理**物理隔离**于 `C:\Users\ASUS\.qidi\`（记忆、会话、技能、配置都在 C 盘，不受任何仓库清理影响）
@@ -120,7 +128,7 @@
 | 只读探查 | `subagent_type="explore"` / `plan` | 只读侦察 |
 | 隔离 | `isolation="worktree"` | 需要隔离时用（有冷构建代价） |
 
-铁律：指挥官不写码（写规格/审计/质检/提交）；编码手与子代理**禁止 commit**；每项修复必须有对应测试；审计规格须按 **audit-rubrics 技能**执行（先自由审查、后对照清单，适用条目注入 ≤5，报告落 `qidiwork-docs/审计评审/`），返工闭环后教训合入 `docs/audit-rubrics/RUBRICS.md`。
+铁律：指挥官不写码（写规格/审计/质检/提交）；编码手与子代理**禁止 commit**；每项修复必须有对应测试；审计规格须按 **audit-rubrics 技能**执行（先自由审查、后对照清单，适用条目注入 ≤5，报告落文档私有库 `G:\qidiwork-docs-local\审计评审\`，见 §3），返工闭环后教训合入 `docs/audit-rubrics/RUBRICS.md`。
 
 **spawn 路由实测注意（2026-10-11 深挖）**：
 - spawn 子代理的模型调用**与本机 config.toml / auth.json 解耦**（走平台内置目录+独立凭据，细节未全还原）：同模型手动直连 200 而 spawn 可能 401/503（实测：kimi-k2.6 手动 200 / spawn 503 `no usable credential for provider 'intern'`；kimi-k2.7-code 手动 200 / spawn 401 `Invalid token` from api.openai-next.com）——**派活前先 spawn 小任务验连通，勿以手动直连结果为准**
@@ -140,9 +148,10 @@
 
 | 项 | 约定 |
 |---|---|
-| 远程 | `origin`（github）、`gitee`、`upstream`（**SMB 共享基线** `\\192.168.1.222\程序开发\grok-build-upstream`，2026-10-05 起；原本地路径 `C:\Users\ASUS\grok-build` 已不存在） |
+| 远程 | `origin`（github）、`gitee`、`upstream`（**SMB 共享基线** `\\192.168.1.222\程序开发\grok-build-upstream`，2026-10-05 起；原本地路径 `C:\Users\ASUS\grok-build` 已不存在）。⚠️ **2026-10-17 API 实测：origin 与 gitee 均为 PUBLIC（用户确认软件对外公开即为此状态）**——文档私有库是另一个仓库 `github.com/qidiai/qidiwork-docs`（Private），勿混 |
 | GitHub 网络分流 | **origin 推送走首尔 SSH 隧道**（2026-10-14 起）：git 已配域名级代理 `http.https://github.com.proxy = socks5://127.0.0.1:1080`——**仅 github.com 走首尔出口，gitee 等其他全部原网络直连**。隧道=`C:\qidi-proxy\seoul_socks5.py`（SSH 动态转发→首尔 VPS，源自 `\\192.168.1.222\程序开发\clash` 归档），**计划任务 `QidiSeoulProxy` 常驻**（登录自启+无执行时限；勿用 shell Start-Process 拉起——Job Object 会杀）。SOCKS5 1080 / PAC 1081 |
-| 默认推送 | **双推 `origin` + `gitee`**；worktree 分支用 `git push <remote> feat/xxx:main` 直推 main |
+| 默认推送 | **双推 `origin` + `gitee`（仅限代码）**；worktree 分支用 `git push <remote> feat/xxx:main` 直推 main。**文档永不进本仓库双推面**（§3） |
+| 可见性闸门（2026-10-17 事故后新增） | 每次会话首次推送前、以及任何远程配置变更后，跑一次 `curl.exe -s https://api.github.com/repos/qidiai/qidicode` 与 gitee 对应 API，确认可见性与预期一致（公开是预期状态；**若返回 private 或仓库消失，停止推送并报告**）。文档类内容一律推私有库，推完 `gh repo view qidiai/qidiwork-docs --json visibility` 验证 PRIVATE |
 | 提交权 | 编码手/子代理禁止 commit；指挥官质检通过后统一提交 |
 | 提交信息 | `<类型>: <摘要>` + 正文列要点（orchestra 战报格式，见 git log） |
 | 密钥扫描 | ✅ **pre-commit 钩子已生效**（2026-09-30 实测：`git config core.hooksPath` 指向 `pre-commit-secret-check` 技能的 `scripts/hooks` 目录，提交时自动扫描，实测输出 `[Pre-commit] No secrets detected`）。⚠️ 注意 hooksPath 生效后 `.git/hooks/` 整体失效（含原 post-commit Qoder tracker）。敏感提交前仍建议手动复跑 `secret-scan` 技能兜底 |

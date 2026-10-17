@@ -357,7 +357,7 @@ def process_shot(shot: dict, client: ComfyClient,
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="ComfyUI 批量出图")
-    ap.add_argument("--project-dir", default=r"qidiwork-docs\manhua\proj1")
+    ap.add_argument("--project-dir", default=r"G:\qidiwork-docs-local\manhua\proj1")
     ap.add_argument("--dry-run", action="store_true",
                     help="只校验 manifest + 组装 prompt，"
                          "不提交 ComfyUI")

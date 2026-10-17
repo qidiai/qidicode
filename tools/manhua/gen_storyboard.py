@@ -209,7 +209,7 @@ def llm_gen_storyboard(brief: str, model: str) -> dict:
 # ---------------------------------------------------------------- main
 def main() -> int:
     ap = argparse.ArgumentParser(description="生成分镜 storyboard.json")
-    ap.add_argument("--project-dir", default=r"qidiwork-docs\manhua\proj1",
+    ap.add_argument("--project-dir", default=r"G:\qidiwork-docs-local\manhua\proj1",
                     help="项目工作区（ASCII 路径）")
     ap.add_argument("--brief", default="30 秒竖屏漫剧样片：重逢戏，"
                                        "女主人公在雨夜车站等三年未见的恋人",
