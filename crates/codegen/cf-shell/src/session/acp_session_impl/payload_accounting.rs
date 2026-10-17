@@ -540,7 +540,12 @@ pub(crate) fn observe_payload(input: ObserveInputs<'_>) -> TapObservation {
                 history_items += 1;
                 if recent5.contains(&idx) {
                     recent5_bytes += wire;
-                    recent5_tokens += estimate_item_tokens(item);
+                    // R10.5 对称补齐：透镜 est_tokens 与 history 分区行同口径
+                    // 含 TR 图 token——bytes 含图 URL 字节而 est_tokens 漏图，
+                    // 透镜读数会系统性低估。透镜行不进 Σ（est_total_tokens
+                    // 只加分区行），零对账恒等风险，纯读数对称修复。
+                    recent5_tokens += estimate_item_tokens(item)
+                        + estimate_image_tokens(tr.images.len() as u64);
                     recent5_count += 1;
                 }
                 for part in &tr.images {
@@ -1113,6 +1118,8 @@ mod tests {
         assert_eq!(s.unattributed_residual.est_tokens, 1, "unattributedResidual estTokens (6/4)");
         // 透镜：近 5 条 TR（本例 1 条）。
         assert_eq!(obs.lenses.recent5_tool_results.bytes, 59, "recent5ToolResults bytes");
+        // R10.5 对称修复后无图例不变：est_tokens 仍纯 content（4 ascii bytes / 4）。
+        assert_eq!(obs.lenses.recent5_tool_results.est_tokens, 1, "recent5ToolResults estTokens (content-only TR, no images)");
         assert_eq!(obs.lenses.recent5_tool_results.tool_result_count, 1, "recent5ToolResults count");
         assert_eq!(obs.lenses.recent5_tool_results.total_tool_results, 1, "totalToolResults");
         assert_eq!(obs.lenses.attachments.image_count, 0, "attachments images");
@@ -1183,6 +1190,21 @@ mod tests {
             s.conversation_history.est_tokens,
             content_only + cf_token_estimation::IMAGE_TOKEN_ESTIMATE,
             "history partition must include tool-result image tokens (B2)"
+        );
+        // R10.5 对称补齐回归：recent5 透镜 est_tokens 与 history 分区行同口径
+        // 含图 token（本例 2 条 TR 全在近 5 窗口、其中 1 条带图；透镜不进 Σ，
+        // 纯读数对称）。
+        let tr_content_only: u64 = items
+            .iter()
+            .filter_map(|i| match i {
+                ConversationItem::ToolResult(tr) => Some(estimate_tokens_aware(tr.content.as_ref())),
+                _ => None,
+            })
+            .sum();
+        assert_eq!(
+            obs.lenses.recent5_tool_results.est_tokens,
+            tr_content_only + cf_token_estimation::IMAGE_TOKEN_ESTIMATE,
+            "recent5 lens est_tokens must include tool-result image tokens (R10.5 symmetry)"
         );
         // attachments 透镜（per-image 常量）与 history 分区行恢复子集语义。
         assert_eq!(
