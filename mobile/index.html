@@ -1,12 +1,28 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#1e1f24">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#101014">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>qidicode 手机遥控</title>
 <link rel="stylesheet" href="style.css">
+<script>
+/* 主题引导：首屏绘制前定 data-theme，避免闪白/闪黑。
+ * 优先级：localStorage 记录 > 跟随系统 > 深色 */
+(function () {
+  var t = "dark";
+  try {
+    var s = localStorage.getItem("qidiMobile.theme");
+    if (s === "dark" || s === "light") t = s;
+    else t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+  } catch (e) { /* 隐私模式等 */ }
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 </head>
 <body>
 
@@ -15,26 +31,93 @@
 
 <!-- ===================== 视图 1：连接页 ===================== -->
 <section id="view-connect" class="view">
-  <header class="connect-head">
-    <h1>qidicode 手机遥控</h1>
-    <p class="sub">通过 WebSocket 连接电脑上正在运行的 qidicode 会话（ACP v1）</p>
-  </header>
+  <div class="connect-scroll">
 
-  <div class="form">
-    <label for="in-url">服务器地址</label>
-    <input id="in-url" type="text" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="ws://192.168.1.10:2419/ws">
+    <header class="brand">
+      <div class="brand-logo" aria-hidden="true">
+        <svg viewBox="0 0 64 64" width="56" height="56">
+          <rect width="64" height="64" rx="14" fill="var(--accent)"/>
+          <path d="M18 22 L30 32 L18 42" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          <line x1="36" y1="42" x2="48" y2="42" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h1>qidicode 手机遥控</h1>
+      <p class="sub">连接电脑上正在运行的 qidicode 会话（ACP v1）</p>
+    </header>
 
-    <label for="in-secret">访问密钥（Secret）</label>
-    <input id="in-secret" type="password" autocomplete="off" placeholder="服务端 --secret 设置的值">
+    <!-- 最近会话快捷入口 -->
+    <section id="recent-panel" class="panel hidden">
+      <div class="panel-head"><h2>最近会话</h2></div>
+      <div id="recent-items" class="recent-list"></div>
+      <p id="recent-empty" class="panel-empty hidden">暂无最近会话</p>
+    </section>
 
-    <label for="in-cwd">项目路径（cwd）</label>
-    <input id="in-cwd" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="G:\work\proj 或 /home/u/proj">
+    <!-- 已保存的连接 Profile -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>已保存的连接</h2>
+        <button id="btn-profile-add" class="btn tiny" type="button">＋ 新建</button>
+      </div>
+      <div id="profile-items" class="profile-list"></div>
+      <p id="profile-empty" class="panel-empty hidden">还没有保存的连接配置，填写下方表单连接后会自动保存</p>
+    </section>
 
-    <div id="connect-error" class="connect-error hidden" role="alert"></div>
+    <!-- 手动添加 / 编辑表单 -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2 id="form-title">连接信息</h2>
+        <button id="btn-cancel-edit" class="btn tiny ghost hidden" type="button">取消编辑</button>
+      </div>
+      <div class="form">
+        <label for="in-name">名称（可选）</label>
+        <input id="in-name" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="例如：家里台式机 / 公司电脑">
 
-    <button id="btn-connect" class="btn primary" type="button">连接</button>
+        <label for="in-url">服务器地址</label>
+        <input id="in-url" type="text" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="ws://192.168.1.10:2419/ws">
+
+        <label for="in-secret">访问密钥（Secret）</label>
+        <input id="in-secret" type="password" autocomplete="off" placeholder="服务端 --secret 设置的值">
+
+        <label for="in-cwd">项目路径（cwd）</label>
+        <input id="in-cwd" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="G:\work\proj 或 /home/u/proj">
+
+        <div id="connect-error" class="connect-error hidden" role="alert"></div>
+
+        <div class="form-actions">
+          <button id="btn-connect" class="btn primary" type="button">连接</button>
+          <button id="btn-save-profile" class="btn" type="button">保存配置</button>
+        </div>
+
+        <button id="btn-scan" class="btn ghost scan-entry" type="button">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M3 12h18"/></svg>
+          扫码连接
+        </button>
+        <p class="scan-hint">扫码配对待后端支持；当前可粘贴 <code>ws://</code> 链接自动解析填入（见扫码面板）。</p>
+      </div>
+    </section>
+
   </div>
 </section>
+
+<!-- ===================== 扫码 bottom sheet（粘贴降级） ===================== -->
+<div id="scan-sheet" class="sheet hidden">
+  <div id="scan-backdrop" class="sheet-backdrop"></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="扫码连接">
+    <div class="sheet-head">
+      <span class="sheet-title">扫码连接</span>
+      <button id="scan-close" class="icon-btn" type="button" aria-label="关闭">✕</button>
+    </div>
+    <div class="sheet-body">
+      <p class="scan-note">📷 摄像头扫码配对待后端支持。当前降级方案：粘贴电脑端给出的 <code>ws://</code>（或 <code>wss://</code>）完整链接，自动解析出地址 / 密钥 / 项目路径。</p>
+      <label for="scan-input">ws:// 链接</label>
+      <textarea id="scan-input" rows="3" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="ws://192.168.1.10:2419/ws?server-key=xxxx&cwd=G:%5Cwork%5Cproj"></textarea>
+      <div id="scan-error" class="connect-error hidden" role="alert"></div>
+    </div>
+    <div class="sheet-foot">
+      <button id="btn-scan-parse" class="btn primary" type="button">解析并填入</button>
+    </div>
+  </div>
+</div>
 
 <!-- ===================== 视图 2：会话页 ===================== -->
 <section id="view-session" class="view hidden">
@@ -45,24 +128,115 @@
 
   <header class="session-head">
     <div class="head-info">
-      <div id="head-cwd" class="head-cwd">会话</div>
-      <div id="head-sid" class="head-sid">—</div>
-      <div id="head-title" class="head-title hidden"></div>
+      <div class="head-row1">
+        <span id="conn-light" class="light light-off" role="img" aria-label="连接状态"></span>
+        <span id="head-title" class="head-title">会话</span>
+      </div>
+      <div class="head-row2">
+        <span id="head-cwd" class="head-cwd">会话</span>
+        <span id="head-sid" class="head-sid">—</span>
+        <span id="head-model" class="head-model" title="模型切换：待后端支持">默认模型 · 待后端</span>
+      </div>
     </div>
-    <button id="btn-menu" class="icon-btn" type="button" aria-label="菜单">⋮</button>
-    <div id="menu" class="menu hidden">
-      <button id="menu-new" class="menu-item" type="button">新会话</button>
-      <button id="menu-disconnect" class="menu-item" type="button">断开连接</button>
-    </div>
+    <button id="btn-menu" class="icon-btn" type="button" aria-label="菜单">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+    </button>
   </header>
 
-  <main id="messages" class="messages" aria-live="polite"></main>
+  <main id="messages" class="messages" aria-live="polite">
+    <div id="msg-flow"></div>
+    <!-- 空状态引导：新会话显示 -->
+    <div id="empty-state" class="empty-state hidden">
+      <div class="empty-card">
+        <div class="empty-title">新会话已就绪 👋</div>
+        <p class="empty-text">Agent 在你的电脑上执行，手机只是遥控器。在下方输入框开始对话。</p>
+        <div class="empty-chips">
+          <span class="chip">读代码</span>
+          <span class="chip">改代码</span>
+          <span class="chip">跑命令</span>
+          <span class="chip">查资料</span>
+          <span class="chip">写测试</span>
+        </div>
+        <p class="empty-note">提示：Ctrl/⌘ + Enter 发送；写 / 执行类工具会弹权限确认。</p>
+      </div>
+    </div>
+  </main>
 
   <footer class="composer">
+    <button id="btn-at" class="icon-btn composer-btn" type="button" aria-label="引用文件（待后端支持）" title="@ 文件引用（待后端支持）">@<i class="todo-dot" aria-hidden="true"></i></button>
+    <button id="btn-slash" class="icon-btn composer-btn" type="button" aria-label="斜杠命令（待后端支持）" title="/ 斜杠命令（待后端支持）">/<i class="todo-dot" aria-hidden="true"></i></button>
+    <button id="btn-image" class="icon-btn composer-btn" type="button" aria-label="发送图片（待后端支持）" title="图片发送（待后端支持）">
+      <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+      <i class="todo-dot" aria-hidden="true"></i>
+    </button>
     <textarea id="input" rows="1" placeholder="输入消息…（Ctrl/⌘+Enter 发送）"></textarea>
-    <button id="btn-send" class="btn send" type="button">发送</button>
+    <button id="btn-send" class="btn send" type="button">
+      <svg class="ic-send" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+      <svg class="ic-stop" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+      <span class="send-label" id="send-label">发送</span>
+    </button>
   </footer>
 </section>
+
+<!-- ===================== 抽屉（右上角菜单升级） ===================== -->
+<div id="drawer" class="drawer hidden">
+  <div id="drawer-backdrop" class="drawer-backdrop"></div>
+  <aside class="drawer-panel" role="dialog" aria-modal="true" aria-label="菜单">
+    <header class="drawer-head">
+      <div class="drawer-head-info">
+        <div id="drawer-title" class="drawer-title">会话</div>
+        <div id="drawer-cwd" class="drawer-sub"></div>
+        <div id="drawer-sid" class="drawer-sub mono">—</div>
+      </div>
+      <button id="btn-close-drawer" class="icon-btn" type="button" aria-label="关闭菜单">✕</button>
+    </header>
+    <div class="drawer-body">
+      <div class="drawer-actions">
+        <button id="btn-new-session" class="btn" type="button">新会话</button>
+        <button id="btn-disconnect" class="btn ghost" type="button">断开连接</button>
+      </div>
+
+      <section class="drawer-sec">
+        <h3>最近会话</h3>
+        <div id="drawer-recent-items" class="drawer-recent"></div>
+        <p id="drawer-recent-empty" class="panel-empty hidden">暂无本地会话记录</p>
+      </section>
+
+      <section class="drawer-sec">
+        <h3>会话能力</h3>
+        <button id="drawer-model" class="row" type="button">
+          <span class="row-label">模型切换</span>
+          <span class="row-val">默认 · 待后端</span>
+        </button>
+        <button id="drawer-commands" class="row" type="button">
+          <span class="row-label">斜杠命令面板</span>
+          <span class="row-val">待后端</span>
+        </button>
+      </section>
+
+      <section class="drawer-sec">
+        <h3>设置</h3>
+        <div class="theme-group" id="theme-group" role="group" aria-label="主题">
+          <button type="button" data-theme-val="dark">深色</button>
+          <button type="button" data-theme-val="light">浅色</button>
+          <button type="button" data-theme-val="system">跟随系统</button>
+        </div>
+        <button id="btn-clear-data" class="row row-danger" type="button">
+          <span class="row-label">清空本地数据</span>
+          <span class="row-val">配置 / 会话记录 / 主题</span>
+        </button>
+        <button id="btn-about" class="row" type="button">
+          <span class="row-label">关于 / 版本</span>
+          <span class="row-val" id="app-version">v—</span>
+        </button>
+        <div id="about-box" class="about-box hidden">
+          <p>qidicode 手机遥控 <span class="mono">v2.0.0-mobile-ui</span> · ACP over WebSocket 瘦客户端。</p>
+          <p>PWA 分层：<code>file://</code> 核心可用；<code>http(s)</code> 下自动注册 Service Worker 缓存静态壳，可"添加到主屏幕"。</p>
+        </div>
+      </section>
+    </div>
+  </aside>
+</div>
 
 <!-- ===================== 权限 bottom sheet ===================== -->
 <div id="perm-sheet" class="sheet hidden">
