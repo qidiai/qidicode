@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#1e1f24">
+<meta name="theme-color" content="#0b0d13">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>qidicode 手机遥控</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -16,6 +18,11 @@
 <!-- ===================== 视图 1：连接页 ===================== -->
 <section id="view-connect" class="view">
   <header class="connect-head">
+    <div class="logo-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M13.2 2 4.6 13.6h5.6L9.1 22l9.3-11.9h-5.7L13.2 2z" fill="#ffffff"/>
+      </svg>
+    </div>
     <h1>qidicode 手机遥控</h1>
     <p class="sub">通过 WebSocket 连接电脑上正在运行的 qidicode 会话（ACP v1）</p>
   </header>
