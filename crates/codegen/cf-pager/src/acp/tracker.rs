@@ -6041,7 +6041,7 @@ mod tests {
     #[test]
     fn tier_restricted_media_shows_upsell_text_not_error() {
         let upsell = "Image generation is a SuperGrok feature. Upgrade at \
-             https://grok.com/supergrok?referrer=cf-tools";
+             https://qidiai.ltd/superqidi?referrer=cf-tools";
         let output = ToolOutput::Text(cf_tools::types::output::TextOutput::from(upsell));
         let tc = acp::ToolCall::new(
             acp::ToolCallId::new(Arc::from("tier-restricted-img")),

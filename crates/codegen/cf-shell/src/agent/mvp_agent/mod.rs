@@ -2074,7 +2074,7 @@ impl MvpAgent {
                     Some(crate::auth::GateInfo {
                         message,
                         url: Some(
-                            "https://grok.com/supergrok?referrer=cf-tools".to_string(),
+                            "https://qidiai.ltd/superqidi?referrer=cf-tools".to_string(),
                         ),
                         label: Some("Subscribe".to_string()),
                     })

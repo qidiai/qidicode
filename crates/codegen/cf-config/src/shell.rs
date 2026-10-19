@@ -281,9 +281,43 @@ pub struct ShellInvocation {
 }
 
 /// Build `(program, args, env)` for running `command` in the detected shell.
+///
+/// For PowerShell shells the command gains an exit-code epilogue (see
+/// [`with_native_exit_code`]) so the process exit status mirrors the last
+/// native command instead of PowerShell's lossy 0/1 summary.
 #[cfg(not(unix))]
 pub fn shell_command_argv(command: &str) -> ShellInvocation {
-    invocation_for(detect_windows_shell(), command)
+    let shell = detect_windows_shell();
+    invocation_for(shell, &with_native_exit_code(command, shell))
+}
+
+/// Append a PowerShell epilogue that propagates the last native command's
+/// real exit code.
+///
+/// `powershell.exe -Command` (and `pwsh -Command`) reports only 0/1 for the
+/// whole script: a native child's status is collapsed into `$?`. That turns
+/// `cmd /c exit 3` into 1, and `cmd /c exit 42; Write-Output done` into 0.
+/// Appending `exit $LASTEXITCODE` restores the native status while leaving
+/// the historical behaviour intact when no native command ran (0 on success,
+/// 1 on a failing PowerShell statement).
+///
+/// `GitBash` and `Cmd` already propagate the last command's status natively,
+/// so their command line is unchanged.
+#[cfg(not(unix))]
+fn with_native_exit_code(command: &str, shell: &WindowsShell) -> String {
+    match shell {
+        // Newline first so a trailing `# comment` cannot swallow the epilogue.
+        // Precedence: a non-zero native status wins (it survives a following
+        // successful `Write-Output`); otherwise the usual `$?` verdict applies,
+        // so a failing PowerShell statement is still 1 even after a successful
+        // native command.
+        WindowsShell::Pwsh | WindowsShell::PowerShell => format!(
+            "{command}\n\
+             if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }} \
+             elseif ($?) {{ exit 0 }} else {{ exit 1 }}"
+        ),
+        WindowsShell::GitBash(_) | WindowsShell::Cmd => command.to_string(),
+    }
 }
 
 /// Build `(program, args, env)` for running a **hook command** on Windows.
@@ -701,6 +735,104 @@ mod tests {
         assert!(inv
             .env
             .contains(&("PYTHONIOENCODING", "utf-8:surrogateescape")));
+    }
+
+    /// PowerShell hosts collapse a native child's status to 0/1. The terminal
+    /// wrapper appends an epilogue so the process exit code mirrors
+    /// `$LASTEXITCODE`; Git Bash and cmd already propagate it natively.
+    #[cfg(not(unix))]
+    #[test]
+    fn terminal_command_gains_native_exit_code_epilogue_on_powershell_only() {
+        let git_bash = WindowsShell::GitBash("C:\\Program Files\\Git\\bin\\bash.exe".into());
+        for shell in [WindowsShell::Pwsh, WindowsShell::PowerShell] {
+            let wrapped = with_native_exit_code("cmd /c exit 3", &shell);
+            assert!(
+                wrapped.contains("exit $LASTEXITCODE"),
+                "PowerShell terminal command must surface $LASTEXITCODE (shell={shell:?}, got {wrapped:?})"
+            );
+            assert!(
+                wrapped.starts_with("cmd /c exit 3"),
+                "original command must be preserved verbatim (shell={shell:?}, got {wrapped:?})"
+            );
+        }
+        for shell in [git_bash, WindowsShell::Cmd] {
+            assert_eq!(
+                with_native_exit_code("cmd /c exit 3", &shell),
+                "cmd /c exit 3",
+                "non-PowerShell shells already propagate exit codes; command must be untouched (shell={shell:?})"
+            );
+        }
+    }
+
+    /// End-to-end: the wrapped invocation really returns the native status.
+    /// Windows-only; exercises whichever shell this host detects.
+    #[cfg(windows)]
+    #[test]
+    fn shell_command_argv_propagates_native_exit_codes() {
+        let shell = detect_windows_shell();
+        let cases: &[(&str, i32)] = match shell {
+            WindowsShell::Pwsh | WindowsShell::PowerShell => &[
+                ("cmd /c exit 3", 3),
+                ("cmd /c exit 42; Write-Output done", 42),
+                ("cmd /c exit 0", 0),
+                // A failing PowerShell statement keeps the historical 1 even
+                // after a successful native command left LASTEXITCODE=0.
+                ("cmd /c exit 0; Get-Item qidi_missing_path_98765", 1),
+            ],
+            WindowsShell::GitBash(_) => &[
+                ("cmd /c exit 3", 3),
+                ("cmd /c exit 42; echo done", 42),
+                ("cmd /c exit 0", 0),
+            ],
+            WindowsShell::Cmd => &[
+                ("cmd /c exit 3", 3),
+                ("cmd /c exit 42 & echo done", 42),
+                ("cmd /c exit 0", 0),
+            ],
+        };
+
+        for (command, expected) in cases {
+            let inv = invocation_for(shell, &with_native_exit_code(command, shell));
+            let mut cmd = std::process::Command::new(&inv.program);
+            cmd.args(&inv.args)
+                .envs(inv.env)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+            cf_tty_utils::detach_std_command(&mut cmd);
+            let output = cmd
+                .output()
+                .unwrap_or_else(|e| panic!("failed to spawn {command:?} via {shell:?}: {e}"));
+            assert_eq!(
+                output.status.code(),
+                Some(*expected),
+                "command {command:?} via {shell:?} must exit {expected}; \
+                 stdout={:?} stderr={:?}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+        }
+
+        // A missing command must still fail non-zero with a visible error.
+        let missing = "qidi_definitely_not_a_command_98765";
+        let inv = invocation_for(shell, &with_native_exit_code(missing, shell));
+        let mut cmd = std::process::Command::new(&inv.program);
+        cmd.args(&inv.args)
+            .envs(inv.env)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        cf_tty_utils::detach_std_command(&mut cmd);
+        let output = cmd.output().expect("spawn missing-command probe");
+        assert!(
+            output.status.code().is_some_and(|code| code != 0),
+            "missing command must exit non-zero, got {:?}",
+            output.status.code()
+        );
+        assert!(
+            !output.stdout.is_empty() || !output.stderr.is_empty(),
+            "missing command must explain itself, but produced no output"
+        );
     }
 
     /// GitBash keeps its pre-existing MSYS2 path-translation guards in addition

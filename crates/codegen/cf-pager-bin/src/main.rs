@@ -186,7 +186,7 @@ async fn run_setup_command(json: bool) {
                 println!("{out}");
                 if !report.configured {
                     eprintln!(
-                        "Your team doesn't have a managed configuration yet. A team admin can set one up at console.x.ai."
+                        "Your team doesn't have a managed configuration yet. A team admin can set one up at console.qidiai.ltd."
                     );
                 }
             }
@@ -201,7 +201,7 @@ async fn run_setup_command(json: bool) {
         SetupOutcome::Installed => eprintln!("Applied managed configuration."),
         SetupOutcome::NothingConfigured => {
             eprintln!(
-                "Your team doesn't have a managed configuration yet. A team admin can set one up at console.x.ai."
+                "Your team doesn't have a managed configuration yet. A team admin can set one up at console.qidiai.ltd."
             );
         }
         SetupOutcome::Failed(e) => {
@@ -829,7 +829,7 @@ fn shutdown_and_flush_telemetry(exit_code: i32) -> ! {
 }
 /// Emitted by both leader guards (server mode and leader-connect) so the two sites
 /// can't drift.
-const PLUGIN_DIR_LEADER_WARNING: &str = "grok: --plugin-dir is ignored in leader mode; run with --no-leader to \
+const PLUGIN_DIR_LEADER_WARNING: &str = "qidi: --plugin-dir is ignored in leader mode; run with --no-leader to \
      load per-process plugins";
 /// Run the `agent` subcommand, dispatching to the appropriate mode.
 async fn run_agent_command(
@@ -915,7 +915,7 @@ async fn run_agent_command(
         None,
     );
     if let Some(warning) = launch_yolo.blocked_warning {
-        eprintln!("grok: {warning}");
+        eprintln!("qidi: {warning}");
     }
     agent_config.default_yolo_mode = launch_yolo.yolo;
     // B5: seed the launch-scoped YOLO tool allowlist (`--yolo-tools`) so every
@@ -927,7 +927,7 @@ async fn run_agent_command(
     if let Some(msg) =
         cf_shell::util::config::yolo_launch_refusal(launch_yolo.yolo, agent_args.ack_no_sandbox)
     {
-        eprintln!("grok: {msg}");
+        eprintln!("qidi: {msg}");
         std::process::exit(1);
     }
     agent_config.default_auto_mode = cf_shell::util::config::effective_auto_for_launch(
@@ -1884,7 +1884,7 @@ async fn async_main() -> Result<()> {
             None,
         );
         if let Some(warning) = launch_yolo.blocked_warning {
-            eprintln!("grok: {warning}");
+            eprintln!("qidi: {warning}");
         }
         // B5: same launch-scoped YOLO allowlist + startup guard as the agent
         // subcommand path. Headless is unattended, so an unrestricted --yolo
@@ -1893,7 +1893,7 @@ async fn async_main() -> Result<()> {
         if let Some(msg) =
             cf_shell::util::config::yolo_launch_refusal(launch_yolo.yolo, args.ack_no_sandbox)
         {
-            eprintln!("grok: {msg}");
+            eprintln!("qidi: {msg}");
             std::process::exit(1);
         }
         let json_schema = args

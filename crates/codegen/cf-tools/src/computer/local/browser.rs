@@ -33,6 +33,52 @@ const MAX_CONTENT_CHARS: usize = 40_000;
 /// Cap for the interactive-element listing.
 const MAX_REFS: usize = 400;
 
+/// Extra attempts for a CDP call that lost a race with a navigation's
+/// execution-context swap (see [`retry_stale_context`]).
+const CONTEXT_RETRY_LIMIT: usize = 2;
+/// First backoff step; doubles each retry (25ms, 50ms).
+const CONTEXT_RETRY_BASE_DELAY_MS: u64 = 25;
+
+/// Whether an error is Chromium's "execution context is gone" signal.
+///
+/// A cross-document navigation destroys the old JS execution context and
+/// registers the new one asynchronously. The first `Runtime.evaluate` after
+/// `goto` can therefore hit the retired context and fail with
+/// `Cannot find context with specified id`, even though the page itself
+/// loaded and the very next attempt succeeds.
+fn is_stale_context_error(err: &ComputerError) -> bool {
+    let msg = err.to_string();
+    msg.contains("Cannot find context with specified id")
+        || msg.contains("Cannot find context with specified ID")
+}
+
+/// Run `op`, retrying **only** stale-execution-context failures.
+///
+/// Bounded at [`CONTEXT_RETRY_LIMIT`] retries with exponential backoff
+/// (25ms, 50ms). Every other error surfaces on the first attempt, so
+/// unrelated failures keep their current behaviour. The CDP calls wrapped
+/// here are either reads or evaluate calls that did not run (the context was
+/// already gone when Chromium rejected them), so a retry cannot duplicate a
+/// side effect.
+async fn retry_stale_context<T, F, Fut>(mut op: F) -> Result<T, ComputerError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, ComputerError>>,
+{
+    let mut attempt = 0usize;
+    loop {
+        match op().await {
+            Ok(value) => return Ok(value),
+            Err(err) if attempt < CONTEXT_RETRY_LIMIT && is_stale_context_error(&err) => {
+                let delay = CONTEXT_RETRY_BASE_DELAY_MS << attempt;
+                attempt += 1;
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
 struct Inner {
     /// Keep the browser handle alive for the process lifetime.
     _browser: chromiumoxide::Browser,
@@ -82,14 +128,19 @@ impl LocalBrowserBackend {
         }
         // Pure number -> snapshot ref.
         if selector.chars().all(|c| c.is_ascii_digit()) && selector != "0" {
-            let lookup: Option<String> = page
-                .evaluate_expression(format!(
+            // A stale execution context can only be observed here; the map
+            // lookup itself is read-only, so retrying is safe.
+            let lookup: Option<String> = retry_stale_context(|| async {
+                page.evaluate_expression(format!(
                     "(() => {{ const e = window.__qidiRefs && window.__qidiRefs[{selector}]; \
                      return e ? e.css_path : null; }})()"
                 ))
                 .await
-                .ok()
-                .and_then(|r| r.into_value().ok());
+                .map_err(|e| ComputerError::io(format!("ref lookup failed: {e}")))
+            })
+            .await
+            .ok()
+            .and_then(|r| r.into_value().ok());
             if let Some(css) = lookup {
                 if let Ok(el) = page.find_element(&css).await {
                     return Ok(el);
@@ -134,12 +185,15 @@ impl LocalBrowserBackend {
             #[serde(default)]
             title: String,
         }
-        let probe: UrlTitle = page
-            .evaluate_expression("(() => ({url: location.href, title: document.title}))()")
-            .await
-            .map_err(|e| ComputerError::io(format!("url/title probe failed: {e}")))?
-            .into_value()
-            .map_err(|e| ComputerError::io(format!("url/title decode failed: {e}")))?;
+        // First call after a navigation: tolerate the execution-context swap.
+        let probe: UrlTitle = retry_stale_context(|| async {
+            page.evaluate_expression("(() => ({url: location.href, title: document.title}))()")
+                .await
+                .map_err(|e| ComputerError::io(format!("url/title probe failed: {e}")))?
+                .into_value()
+                .map_err(|e| ComputerError::io(format!("url/title decode failed: {e}")))
+        })
+        .await?;
         Ok((probe.url, probe.title))
     }
 
@@ -149,12 +203,14 @@ impl LocalBrowserBackend {
         &self,
         page: &chromiumoxide::Page,
     ) -> Result<Vec<BrowserElementRef>, ComputerError> {
-        let res: String = page
-            .evaluate_expression(format!("(() => {{ {COLLECT_REFS_JS} }})()"))
-            .await
-            .map_err(|e| ComputerError::io(format!("snapshot refs failed: {e}")))?
-            .into_value()
-            .map_err(|e| ComputerError::io(format!("snapshot refs decode failed: {e}")))?;
+        let res: String = retry_stale_context(|| async {
+            page.evaluate_expression(format!("(() => {{ {COLLECT_REFS_JS} }})()"))
+                .await
+                .map_err(|e| ComputerError::io(format!("snapshot refs failed: {e}")))?
+                .into_value()
+                .map_err(|e| ComputerError::io(format!("snapshot refs decode failed: {e}")))
+        })
+        .await?;
         // The JS returns JSON.stringify(...) -- a string holding the array.
         let arr: Vec<BrowserElementRef> = serde_json::from_str(&res)
             .map_err(|e| ComputerError::io(format!("snapshot refs parse failed: {e}")))?;
@@ -237,16 +293,21 @@ impl BrowserBackend for LocalBrowserBackend {
             // Clear document.activeElement via JS: the element API has no
             // clear in 0.9, and this covers inputs, textareas, and
             // contenteditable alike.
-            page.evaluate_expression(
-                "(() => { const el = document.activeElement; if (!el) return false; \
-                 if (typeof el.value === 'string') { el.value = ''; \
-                 el.dispatchEvent(new Event('input', {bubbles:true})); return true; } \
-                 if (el.isContentEditable) { el.textContent = ''; \
-                 el.dispatchEvent(new Event('input', {bubbles:true})); return true; } \
-                 return false; })()",
-            )
-            .await
-            .map_err(|e| ComputerError::io(format!("clear failed: {e}")))?;
+            // The evaluate either ran in a live context or was rejected before
+            // executing, so retrying a stale-context failure cannot double-clear.
+            retry_stale_context(|| async {
+                page.evaluate_expression(
+                    "(() => { const el = document.activeElement; if (!el) return false; \
+                     if (typeof el.value === 'string') { el.value = ''; \
+                     el.dispatchEvent(new Event('input', {bubbles:true})); return true; } \
+                     if (el.isContentEditable) { el.textContent = ''; \
+                     el.dispatchEvent(new Event('input', {bubbles:true})); return true; } \
+                     return false; })()",
+                )
+                .await
+                .map_err(|e| ComputerError::io(format!("clear failed: {e}")))
+            })
+            .await?;
         }
         if request.text.is_ascii() {
             // ASCII path: native key events, so site key handlers see them.
@@ -260,9 +321,12 @@ impl BrowserBackend for LocalBrowserBackend {
             // any text on the focused field and fires the input event. The
             // builder keeps the payload pure ASCII and single-line so it
             // survives the CDP Runtime.evaluate round-trip unchanged.
-            page.evaluate_expression(build_insert_text_expression(request.text.as_str()))
-                .await
-                .map_err(|e| ComputerError::io(format!("insertText failed: {e}")))?;
+            retry_stale_context(|| async {
+                page.evaluate_expression(build_insert_text_expression(request.text.as_str()))
+                    .await
+                    .map_err(|e| ComputerError::io(format!("insertText failed: {e}")))
+            })
+            .await?;
         }
         let mut detail = format!("typed into `{}`", request.selector.trim());
         if request.submit {
@@ -289,10 +353,14 @@ impl BrowserBackend for LocalBrowserBackend {
             }
             Some(selector) => {
                 let element = self.resolve_element(page, &selector).await?;
-                let text: Option<String> = element
-                    .inner_text()
-                    .await
-                    .map_err(|e| ComputerError::io(format!("inner_text failed: {e}")))?;
+                // Read-only: safe to retry across a context swap.
+                let text: Option<String> = retry_stale_context(|| async {
+                    element
+                        .inner_text()
+                        .await
+                        .map_err(|e| ComputerError::io(format!("inner_text failed: {e}")))
+                })
+                .await?;
                 truncate_chars(text.unwrap_or_default().trim(), MAX_CONTENT_CHARS)
             }
         };
@@ -594,5 +662,100 @@ mod tests {
             .await
             .expect("read");
         assert!(read.content.contains("done"), "content: {}", read.content);
+    }
+
+    fn stale_context_error() -> ComputerError {
+        ComputerError::io("snapshot refs failed: Cannot find context with specified id")
+    }
+
+    /// A stale-context failure is retried (bounded) and the second attempt
+    /// succeeds. This pins the retry contract without a real browser: the
+    /// CDP error text is what Chromium emits when a navigation replaces the
+    /// execution context between `goto` and the next `Runtime.evaluate`.
+    #[tokio::test]
+    async fn retry_stale_context_recovers_within_the_bound() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let attempts = AtomicUsize::new(0);
+        let result: Result<u32, ComputerError> = retry_stale_context(|| {
+            let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if attempt < 2 {
+                    Err(stale_context_error())
+                } else {
+                    Ok(7)
+                }
+            }
+        })
+        .await;
+        assert_eq!(result.expect("retry should recover"), 7);
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            3,
+            "must succeed on the third attempt (2 retries)"
+        );
+    }
+
+    /// Non-context errors are never retried: unrelated failures keep their
+    /// previous behaviour (one attempt, original error).
+    #[tokio::test]
+    async fn retry_stale_context_leaves_other_errors_alone() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let attempts = AtomicUsize::new(0);
+        let result: Result<(), ComputerError> = retry_stale_context(|| {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            async {
+                Err(ComputerError::io(
+                    "navigation failed: net::ERR_NAME_NOT_RESOLVED",
+                ))
+            }
+        })
+        .await;
+        let err = result.expect_err("non-context error must propagate");
+        assert!(
+            err.to_string().contains("ERR_NAME_NOT_RESOLVED"),
+            "original error must survive: {err}"
+        );
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            1,
+            "non-context errors get exactly one attempt"
+        );
+    }
+
+    /// A persistent stale-context error is retried at most
+    /// `CONTEXT_RETRY_LIMIT` extra times, then surfaces unchanged.
+    #[tokio::test]
+    async fn retry_stale_context_is_bounded() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let attempts = AtomicUsize::new(0);
+        let result: Result<(), ComputerError> = retry_stale_context(|| {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            async { Err(stale_context_error()) }
+        })
+        .await;
+        assert!(result.is_err(), "exhausted retries must surface the error");
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            CONTEXT_RETRY_LIMIT + 1,
+            "total attempts must be bounded to limit + 1"
+        );
+    }
+
+    /// Both spellings Chromium uses for the retired execution context are
+    /// recognized; unrelated messages are not.
+    #[test]
+    fn stale_context_error_detection_is_specific() {
+        assert!(is_stale_context_error(&ComputerError::io(
+            "Cannot find context with specified id"
+        )));
+        assert!(is_stale_context_error(&ComputerError::io(
+            "Cannot find context with specified ID"
+        )));
+        assert!(!is_stale_context_error(&ComputerError::io(
+            "Cannot find element with selector `#missing`"
+        )));
     }
 }

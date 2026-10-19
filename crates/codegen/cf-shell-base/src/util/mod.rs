@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn test_is_cli_chat_proxy_url_accepts_proxy_subpath() {
         assert!(is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com/v1/chat/completions"
+            "https://api.qidiai.ltd/v1/chat/completions"
         ));
     }
     #[test]
@@ -237,7 +237,7 @@ mod tests {
         ));
         assert!(is_first_party_xai_url("https://x.ai"));
         assert!(is_first_party_xai_url(
-            "https://cli-chat-proxy.grok.com/v1/chat/completions"
+            "https://api.qidiai.ltd/v1/chat/completions"
         ));
         assert!(!is_first_party_xai_url("https://api.openai.com/v1"));
         assert!(!is_first_party_xai_url("https://api.anthropic.com/v1"));

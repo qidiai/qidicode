@@ -1566,7 +1566,7 @@ fn gate_refreshed_emits_check_subscription_on_gate_lift() {
     // User starts gated (no subscription).
     app.gate = Some(cf_shell::auth::GateInfo {
         message: "SuperGrok subscription required".into(),
-        url: Some("https://grok.com/supergrok".into()),
+        url: Some("https://qidiai.ltd/superqidi".into()),
         label: Some("Subscribe".into()),
     });
     assert!(!app.has_access());

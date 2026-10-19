@@ -479,7 +479,7 @@ mod tests {
     fn usage_manage_returns_open_url() {
         match run_usage("manage") {
             CommandResult::Action(Action::OpenUrl(url)) => {
-                assert_eq!(url, "https://grok.com/?_s=usage");
+                assert_eq!(url, "https://qidiai.ltd/?_s=usage");
             }
             other => panic!("expected Action(OpenUrl), got {other:?}"),
         }
@@ -511,7 +511,7 @@ mod tests {
     fn usage_manage_with_leading_whitespace() {
         match run_usage("  manage  ") {
             CommandResult::Action(Action::OpenUrl(url)) => {
-                assert_eq!(url, "https://grok.com/?_s=usage");
+                assert_eq!(url, "https://qidiai.ltd/?_s=usage");
             }
             other => panic!("expected Action(OpenUrl), got {other:?}"),
         }

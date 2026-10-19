@@ -6516,7 +6516,7 @@ pub(crate) mod tests {
         let mut app = test_app();
         app.gate = Some(cf_shell::auth::GateInfo {
             message: "Subscribe to use QIDI Code".into(),
-            url: Some("https://grok.com/supergrok?referrer=cf-tools".into()),
+            url: Some("https://qidiai.ltd/superqidi?referrer=cf-tools".into()),
             label: None,
         });
         assert!(app.is_access_blocked());

@@ -13,8 +13,15 @@ pub struct QidiBuildEndpoints {
     pub ws_origin: &'static str,
 }
 const PRODUCTION_ENDPOINTS: QidiBuildEndpoints = QidiBuildEndpoints {
-    cli_chat_proxy_base_url: "https://cli-chat-proxy.grok.com/v1",
-    asset_server_url: "https://assets.grok.com",
+    // Aligned with `cf_shell::agent::config::CLI_CHAT_PROXY_BASE_URL_DEFAULT`
+    // so `is_cli_chat_proxy_url` recognizes the platform base (rebrand
+    // completion, 2026-10-19).
+    cli_chat_proxy_base_url: "https://api.qidiai.ltd/v1",
+    asset_server_url: "https://assets.qidiai.ltd",
+    // Relay/gateway hosts are live infrastructure, not just branding: no qidi
+    // equivalent exists in the tree yet, and guessing one would silently
+    // redirect auth/leader traffic. Left on the upstream hosts, overridable
+    // via QIDI_PRODUCTION_WS_* env vars, pending operator confirmation.
     relay_ws_url: "wss://code.grok.com/ws/code-agent",
     gateway_ws_url: "wss://grok.com/ws/gw/",
     ws_origin: "https://grok.com",

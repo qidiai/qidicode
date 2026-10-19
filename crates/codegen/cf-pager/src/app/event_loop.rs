@@ -659,10 +659,12 @@ pub(crate) async fn run(
             };
         } else {
             // --force-login: find the grok.com method from the advertised list
+            // Accept both the canonical `qidi.com` id and the legacy
+            // `grok.com` spelling (pre-rebrand sessions/peers).
             let grok_com = connection
                 .auth_methods
                 .iter()
-                .find(|m| m.id().0.as_ref() == "grok.com");
+                .find(|m| cf_shell::agent::auth_method::is_qidi_com_method_id(m.id().0.as_ref()));
             if let Some(method) = grok_com {
                 app.login_label = Some(method.name().to_string());
                 app.login_method_id = Some(method.id().clone());

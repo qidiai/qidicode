@@ -38,10 +38,10 @@ pub(super) fn is_max_tier(subscription_tier: Option<&str>) -> bool {
 }
 
 /// URL for upgrading the subscription tier.
-pub(crate) const UPSELL_URL_UPGRADE: &str = "https://grok.com/supergrok?referrer=cf-tools";
+pub(crate) const UPSELL_URL_UPGRADE: &str = "https://qidiai.ltd/superqidi?referrer=cf-tools";
 
 /// URL for managing pay-as-you-go / on-demand spending / purchasing credits.
-pub(crate) const UPSELL_URL_PAYG: &str = "https://grok.com?_s=usage";
+pub(crate) const UPSELL_URL_PAYG: &str = "https://qidiai.ltd?_s=usage";
 
 /// Billing mode for credit-limit upsell copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,7 +120,7 @@ pub(crate) fn acp_error_is_free_usage_exhausted(err: &agent_client_protocol::Err
 /// User-facing message for free-usage exhaustion. Shown by headless mode and
 /// `format_acp_error` in place of auth-aware rate-limit copy. Deliberately
 /// promises no reset duration — the quota window is backend-config-driven.
-pub(crate) const FREE_USAGE_USER_MESSAGE: &str = "You\u{2019}ve reached your free QIDI Code usage limit for now. Get SuperGrok for much higher limits, or try again later: https://grok.com/supergrok?referrer=cf-tools";
+pub(crate) const FREE_USAGE_USER_MESSAGE: &str = "You\u{2019}ve reached your free QIDI Code usage limit for now. Get SuperGrok for much higher limits, or try again later: https://qidiai.ltd/superqidi?referrer=cf-tools";
 
 /// Open the credit-limit upsell on the given agent.
 ///
@@ -586,7 +586,7 @@ pub(super) fn dispatch_open_supergrok_url(app: &mut AppView) -> Vec<Effect> {
         .gate
         .as_ref()
         .and_then(|g| g.url.as_deref())
-        .unwrap_or("https://grok.com/supergrok?referrer=cf-tools");
+        .unwrap_or("https://qidiai.ltd/superqidi?referrer=cf-tools");
     // Funnel attribution: tag CLI-originated SuperGrok upsell clicks
     // with `referrer=cf-tools`, matching the OAuth consent flow and
     // x.ai/cli marketing links. Applied even when the URL came from

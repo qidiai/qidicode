@@ -44,17 +44,17 @@ pub fn section_key(section: &McpSectionId) -> String {
     }
 }
 
-/// Display label for a section header, e.g. `"Managed by grok.com (3)"`.
+/// Display label for a section header, e.g. `"Managed by QIDI (3)"`.
 pub fn section_label(section: &McpSectionId, count: usize) -> String {
     match section {
-        McpSectionId::Managed => format!("Managed by grok.com ({count})"),
+        McpSectionId::Managed => format!("Managed by QIDI ({count})"),
         McpSectionId::Plugin(name) => format!("Plugin: {name} ({count})"),
         McpSectionId::Local => format!("Local ({count})"),
     }
 }
 
-/// Base grok.com connectors URL (no team). Prefer [`managed_connectors_url`] when opening.
-pub const MANAGED_SECTION_CONNECTORS_URL: &str = "https://grok.com/connectors";
+/// Base QIDI connectors URL (no team). Prefer [`managed_connectors_url`] when opening.
+pub const MANAGED_SECTION_CONNECTORS_URL: &str = "https://qidiai.ltd/connectors";
 
 /// Connectors deep link, appending percent-encoded `teamId` when the session is a team principal.
 pub fn managed_connectors_url(team_id: Option<&str>) -> String {
@@ -405,22 +405,22 @@ mod tests {
             lines[0]
         );
         // URL sits alone on the second line, scheme-stripped and bracket-highlighted.
-        assert_eq!(lines[1], "[grok.com/connectors]");
+        assert_eq!(lines[1], "[qidiai.ltd/connectors]");
         assert!(
             !lines[1].contains("https://"),
             "displayed URL should drop the scheme: {}",
             lines[1]
         );
         let with_team = section_description_lines(&McpSectionId::Managed, Some("team-1"));
-        assert_eq!(with_team[1], "[grok.com/connectors?teamId=team-1]");
+        assert_eq!(with_team[1], "[qidiai.ltd/connectors?teamId=team-1]");
     }
 
     #[test]
     fn managed_connectors_url_display_strips_scheme() {
-        assert_eq!(managed_connectors_url_display(None), "grok.com/connectors");
+        assert_eq!(managed_connectors_url_display(None), "qidiai.ltd/connectors");
         assert_eq!(
             managed_connectors_url_display(Some("team-uuid-1")),
-            "grok.com/connectors?teamId=team-uuid-1"
+            "qidiai.ltd/connectors?teamId=team-uuid-1"
         );
     }
 

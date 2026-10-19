@@ -585,7 +585,7 @@ impl AuthMethodKind {
 
             CACHED_TOKEN_AUTH_METHOD_ID => Self::CachedToken,
 
-            QIDI_COM_METHOD_ID => Self::GrokCom,
+            QIDI_COM_METHOD_ID | LEGACY_QIDI_COM_METHOD_ID => Self::GrokCom,
 
             OIDC_METHOD_ID => Self::Oidc,
 
@@ -879,11 +879,24 @@ pub fn cached_token_auth_method() -> acp::AuthMethod {
 
 
 
-pub const QIDI_COM_METHOD_ID: &str = "grok.com";
+pub const QIDI_COM_METHOD_ID: &str = "qidi.com";
+
+/// Legacy ACP id written by pre-rebrand builds. **Format compatibility only**:
+/// never advertise or persist it, but keep parsing it so existing sessions,
+/// cached `auth_method` values, and older peers continue to authenticate.
+pub const LEGACY_QIDI_COM_METHOD_ID: &str = "grok.com";
+
+/// Whether `id` names the interactive QIDI account method under either the
+/// canonical or the legacy (pre-rebrand) spelling.
+pub fn is_qidi_com_method_id(id: &str) -> bool {
+    id == QIDI_COM_METHOD_ID || id == LEGACY_QIDI_COM_METHOD_ID
+}
 
 
 
-/// xAI OAuth2/OIDC auth. Method id `"grok.com"` kept for ACP wire-compat.
+/// QIDI account OAuth2/OIDC auth. Advertises the canonical id
+/// [`QIDI_COM_METHOD_ID`]; the legacy `"grok.com"` spelling is still accepted
+/// on input via [`is_qidi_com_method_id`].
 
 pub fn grok_com_auth_method(
 
@@ -893,7 +906,7 @@ pub fn grok_com_auth_method(
 
 ) -> acp::AuthMethod {
 
-    let name = label.unwrap_or("Grok");
+    let name = label.unwrap_or("QIDI");
 
     let meta = if has_auth_provider_command {
 
@@ -1090,6 +1103,46 @@ mod tests {
     }
 
 
+
+    /// Rebrand migration: new builds advertise/persist `qidi.com`, but the
+    /// legacy `grok.com` id must keep parsing so existing sessions and older
+    /// ACP peers are not logged out.
+    #[test]
+    fn legacy_grok_com_method_id_still_parses() {
+        let canonical = acp::AuthMethodId::new(QIDI_COM_METHOD_ID);
+        let legacy = acp::AuthMethodId::new(LEGACY_QIDI_COM_METHOD_ID);
+
+        assert_eq!(
+            QIDI_COM_METHOD_ID, "qidi.com",
+            "canonical id must be the qidi spelling"
+        );
+        assert_eq!(
+            LEGACY_QIDI_COM_METHOD_ID, "grok.com",
+            "legacy id is pinned so migration tests cannot drift"
+        );
+        assert_eq!(
+            AuthMethodKind::from_id(&canonical),
+            AuthMethodKind::GrokCom,
+            "canonical qidi.com id must map to the interactive method"
+        );
+        assert_eq!(
+            AuthMethodKind::from_id(&legacy),
+            AuthMethodKind::GrokCom,
+            "legacy grok.com id must keep mapping to the interactive method"
+        );
+        assert!(
+            is_qidi_com_method_id("qidi.com") && is_qidi_com_method_id("grok.com"),
+            "both spellings must be recognized as the interactive method"
+        );
+        assert!(
+            !is_qidi_com_method_id("oidc"),
+            "unrelated ids must not match"
+        );
+        assert!(
+            AuthMethodKind::from_id(&legacy).needs_interactive_login(),
+            "legacy sessions must still be routed to interactive login"
+        );
+    }
 
     use cf_test_support::EnvGuard;
 

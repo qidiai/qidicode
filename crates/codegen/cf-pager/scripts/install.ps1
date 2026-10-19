@@ -289,7 +289,7 @@ if (-not (Test-Path $ConfigFile)) {
 # --- Fetch deployment config (deployment key only) ---
 
 if ($env:GROK_DEPLOYMENT_KEY) {
-    $ProxyUrl = if ($env:QIDI_PROXY_URL) { $env:QIDI_PROXY_URL } else { 'https://cli-chat-proxy.grok.com/v1' }
+    $ProxyUrl = if ($env:QIDI_PROXY_URL) { $env:QIDI_PROXY_URL } else { 'https://api.qidiai.ltd/v1' }
     Write-Host '  Fetching deployment config...' -ForegroundColor DarkGray
     try {
         $headers = @{ 'Authorization' = "Bearer $($env:GROK_DEPLOYMENT_KEY)" }

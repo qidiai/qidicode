@@ -49,7 +49,11 @@ pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://api.qidiai.ltd/v1";
 /// Rebrand completion (2026-10-16): ApiKey-mode inference base + `/models` source now point at the qidiai platform; env/config overrides still win.
 pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.qidiai.ltd/v1";
 /// Default base URL for the asset server (profile images, etc.).
-pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.grok.com";
+///
+/// Rebrand completion (2026-10-19): qidiai sibling host of the platform API.
+/// `QIDI_ASSET_SERVER_URL` still overrides it; the exact asset host is pending
+/// operator confirmation (no pre-existing qidi asset endpoint in the tree).
+pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.qidiai.ltd";
 /// One or more environment variable names that may hold a model API key.
 ///
 /// Serde `untagged`: accepts a string or an array in TOML/JSON.

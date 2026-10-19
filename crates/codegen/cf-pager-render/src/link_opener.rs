@@ -386,39 +386,39 @@ mod tests {
 
     #[test]
     fn ensure_query_param_appends_when_missing() {
-        let out = ensure_query_param("https://grok.com/supergrok", "referrer", "cf-tools");
-        assert_eq!(out, "https://grok.com/supergrok?referrer=cf-tools");
+        let out = ensure_query_param("https://qidiai.ltd/superqidi", "referrer", "cf-tools");
+        assert_eq!(out, "https://qidiai.ltd/superqidi?referrer=cf-tools");
     }
 
     #[test]
     fn ensure_query_param_preserves_existing_value() {
         let out = ensure_query_param(
-            "https://grok.com/supergrok?referrer=other",
+            "https://qidiai.ltd/superqidi?referrer=other",
             "referrer",
             "cf-tools",
         );
-        assert_eq!(out, "https://grok.com/supergrok?referrer=other");
+        assert_eq!(out, "https://qidiai.ltd/superqidi?referrer=other");
     }
 
     #[test]
     fn ensure_query_param_keeps_other_query_pairs() {
         let out = ensure_query_param(
-            "https://grok.com/supergrok?heavy=1",
+            "https://qidiai.ltd/superqidi?heavy=1",
             "referrer",
             "cf-tools",
         );
         assert_eq!(
             out,
-            "https://grok.com/supergrok?heavy=1&referrer=cf-tools"
+            "https://qidiai.ltd/superqidi?heavy=1&referrer=cf-tools"
         );
     }
 
     #[test]
     fn ensure_query_param_preserves_fragment() {
         // The current remote settings value uses a hash fragment for client-side
-        // routing (`grok.com/#supergrok`); we still want the referrer attached.
-        let out = ensure_query_param("https://grok.com/#supergrok", "referrer", "cf-tools");
-        assert_eq!(out, "https://grok.com/?referrer=cf-tools#supergrok");
+        // routing (`qidiai.ltd/#superqidi`); we still want the referrer attached.
+        let out = ensure_query_param("https://qidiai.ltd/#superqidi", "referrer", "cf-tools");
+        assert_eq!(out, "https://qidiai.ltd/?referrer=cf-tools#superqidi");
     }
 
     #[test]
@@ -429,8 +429,8 @@ mod tests {
 
     #[test]
     fn ensure_query_param_url_encodes_value() {
-        let out = ensure_query_param("https://grok.com/supergrok", "referrer", "grok build");
-        assert_eq!(out, "https://grok.com/supergrok?referrer=grok+build");
+        let out = ensure_query_param("https://qidiai.ltd/superqidi", "referrer", "grok build");
+        assert_eq!(out, "https://qidiai.ltd/superqidi?referrer=grok+build");
     }
 
     #[test]

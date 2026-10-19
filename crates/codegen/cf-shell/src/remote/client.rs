@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 const QIDI_CODE_BACKEND_URL: &str = "https://code.grok.com";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-const QIDI_CODE_WEB_URL: &str = "https://grok.com";
+const QIDI_CODE_WEB_URL: &str = "https://qidiai.ltd";
 /// Build a share URL from a permission ID
 pub fn share_url(permission_id: &str) -> String {
     let web_url =
