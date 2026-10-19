@@ -1559,14 +1559,22 @@ impl FinalizedToolset {
     }
     /// Resolve canonical [`ToolIdentity`] (kind, namespace, presentation label)
     /// for a tool by its client-facing wire name. Drives the first-party
-    /// `x.ai/*` tool `_meta` contract (tool normalization). Returns `None` for
-    /// unknown tools (e.g. uninitialized MCP, backend-only tools).
+    /// `x.ai/*` tool `_meta` contract (tool normalization). Accepts the
+    /// canonical name or its relay-sanitized underscore form (`:` → `_`), with
+    /// the same ambiguity rules as dispatch. Returns `None` for unknown or
+    /// ambiguous names (e.g. uninitialized MCP, backend-only tools).
     pub fn tool_identity(&self, tool_name: &str) -> Option<crate::normalization::ToolIdentity> {
-        self.tools
-            .read()
-            .iter()
-            .find(|t| t.client_name == tool_name)
-            .map(|t| crate::normalization::tool_identity_of(t.metadata.as_ref()))
+        // Resolve through the same colon↔underscore-tolerant lookup dispatch
+        // uses: relays rewrite `:` to `_`, so a call can arrive as
+        // `qidi_build_SchedulerCreate` while the registered name is
+        // `qidi_build:SchedulerCreate`. Exact names short-circuit inside
+        // `find_for_dispatch` (zero behavior change); ambiguous wire names
+        // resolve to `None` rather than guessing.
+        let tools = self.tools.read();
+        let tool = Self::find_for_dispatch(&tools, tool_name)?;
+        Some(crate::normalization::tool_identity_of(
+            tool.metadata.as_ref(),
+        ))
     }
     fn tool_not_found_error(tool_name: &str) -> cf_tool_runtime::ToolError {
         let tid = cf_tool_protocol::ToolId::new(tool_name)
@@ -2603,6 +2611,47 @@ mod tests {
             identity.read_only,
             "get_task_output overrides is_read_only to true despite its action kind"
         );
+    }
+    /// P1-2 follow-up: `tool_identity` must resolve relay-sanitized wire names
+    /// (`qidi_build_SchedulerCreate`). `merge_tool_meta` is fed wire names, so
+    /// the old exact-match lookup missed the colon-family tool and silently
+    /// skipped the `x.ai/tool` stamp. The resolved identity must agree with
+    /// the canonical colon name.
+    #[tokio::test]
+    async fn tool_identity_resolves_underscored_wire_name() {
+        let config = ToolServerConfig {
+            tools: vec![ToolConfig::for_tool::<qidi_build::SchedulerCreateTool>()],
+            behavior_preset: None,
+        };
+        let tmp = TempDir::new().unwrap();
+        let toolset = ToolRegistryBuilder::new()
+            .finalize(config, test_session_context(&tmp))
+            .expect("scheduler toolset should finalize");
+        let canonical = toolset
+            .tool_identity("qidi_build:SchedulerCreate")
+            .expect("canonical colon name resolves");
+        let wire = toolset
+            .tool_identity("qidi_build_SchedulerCreate")
+            .expect("underscored wire name resolves");
+        assert_eq!(wire.tool_kind, canonical.tool_kind);
+        assert_eq!(wire.namespace, canonical.namespace);
+        assert_eq!(wire.presentation_name, canonical.presentation_name);
+        assert_eq!(wire.read_only, canonical.read_only);
+    }
+    /// Unknown wire names still resolve to `None` (never a guess), so
+    /// `merge_tool_meta` keeps `_meta` untouched for unregistered tools.
+    #[tokio::test]
+    async fn tool_identity_unknown_wire_name_is_none() {
+        let config = ToolServerConfig {
+            tools: vec![ToolConfig::for_tool::<qidi_build::SchedulerCreateTool>()],
+            behavior_preset: None,
+        };
+        let tmp = TempDir::new().unwrap();
+        let toolset = ToolRegistryBuilder::new()
+            .finalize(config, test_session_context(&tmp))
+            .expect("scheduler toolset should finalize");
+        assert!(toolset.tool_identity("qidi_build_NoSuchTool").is_none());
+        assert!(toolset.tool_identity("not_a_registered_tool").is_none());
     }
     /// `ToolConfig::kind` parsing: known kinds map, unknown strings sink into
     /// `Other` (with a warn, not an error), absent stays `None`.
