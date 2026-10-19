@@ -39,6 +39,11 @@ python $S/canvas.py mark 图.png --box 50,50,300,150 --label "1:缺少第3周条
 # 4. 整改清单转精修任务(交 bid-perfect 精修子代理逐条落地,禁批量替换)
 # 5. 改完验证:
 python $S/canvas.py verify 方案.docx        # 批注是否全部响应(内容已改/已答复)
+
+# 5.5 整改后 craft 自查(替代部分 WPS COM 截图):
+python $S/craft_verify.py render 方案.docx --pages 1,mid,last --out ./_craft_check   # 关键页 PNG(agent 目视)
+python $S/craft_verify.py inspect 方案.docx                                        # 结构回读(页数/段落/表格)
+python $S/craft_verify.py text 方案.docx                                           # 文本回读+修订风险标注
 ```
 
 ## 整改清单格式（collect 输出，喂给精修子代理）
@@ -58,10 +63,12 @@ python $S/canvas.py verify 方案.docx        # 批注是否全部响应(内容�
 2. 每条批注按"原文位置/原文内容/修改方向/预期效果"四要素拆解
 3. 落地后 `verify` 检查批注锚定文本是否已修改；未改的退回重做
 4. 全部响应后在 `progress.md` 记录：N 条批注 → 改了什么 → 原文→新文对照
+5. **craft 自查**：`craft_verify.py render` 生成的 PNG 由 agent（多模态）目视核对关键页内容/表格是否落地；`inspect` 回读页数/段落/表格结构；`text` 回读纯文本确认批注锚定文本已改（与 `verify` 的 OOXML 检查互补）。**警告**：`text` 输出的 `revision_risk` 非零表示文档含未接受修订，wordcraft 可能把已删文本一并返回，此时结论以 python-docx / `canvas.py verify` 为准。
 
 ## 依赖
 
 - python-docx ≥1.1（comments part 读写，1.2.0 已验证）
+- wordcraft-cli（ArtCraft，安装于 `G:\程序开发\artcraft\bin\`，脚本按 `wordcraft-*-windows-x64-portable` 通配解析、版本无关；可用 `WORDCRAFT_CLI` 环境变量覆盖）
 - pywin32 + WPS（KWPS.Application，已验证）或 Word（Word.Application）
 - PIL（图片标注）
 
@@ -70,3 +77,4 @@ python $S/canvas.py verify 方案.docx        # 批注是否全部响应(内容�
 - 批注读取基于 OOXML zip 直读，WPS/Word 双端兼容
 - 用户批注未保存/文件被占用时 `collect` 会提示，等保存后重试
 - 图片"画布"当前是标注图+改图脚本两步走；WPS COM 内实时圈选标注属 P3 增强
+- craft 渲染仅供结构/内容自查（R22：wordcraft 排版与 WPS 存在系统性度量偏差，打印级排版比对仍走 WPS COM）

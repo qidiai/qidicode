@@ -137,7 +137,7 @@ TARGET=极致达标  MAX_ROUNDS=5  当前轮次=0
 
 **禁止用脚本批量替换文档内容**。批量脚本无法判断语义上下文，会引入负值、断句、逻辑错误等新问题（庐江项目教训）。
 
-**人工批注入口（2026-08-31 新增，与差距清单合流）**：用户在 WPS/Word 里对产物直接加批注后，先运行 `python ~/.qidi/skills/office-canvas/scripts/canvas.py collect <docx>` 读取批注整改清单（含定位+引用原文），与 AI 审计差距清单**同格式合并**后一起进入本步精修；改完用 `canvas.py verify` 检查响应。图片类反馈用 `canvas.py mark <png> --box x,y,w,h --label "N:说明"` 生成标注图作改图依据。
+**人工批注入口（2026-08-31 新增，与差距清单合流）**：用户在 WPS/Word 里对产物直接加批注后，先运行 `python ~/.qidi/skills/office-canvas/scripts/canvas.py collect <docx>` 读取批注整改清单（含定位+引用原文），与 AI 审计差距清单**同格式合并**后一起进入本步精修；改完用 `canvas.py verify` 检查响应。图片类反馈用 `canvas.py mark <png> --box x,y,w,h --label "N:说明"` 生成标注图作改图依据。结构/文本自查可用 `office-canvas/scripts/craft_verify.py`（render/inspect/text，详见该 skill）。
 
 正确做法：
 1. 主 Agent 把差距清单按"段落级别"拆解成任务项，每项包含：
