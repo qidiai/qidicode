@@ -42,6 +42,27 @@ pub(super) fn task_model_override_error(
         is_session_auth,
     )
 }
+/// Post-`insert_pending` failure: record the specific reason on the pending
+/// guard **and** answer the caller's oneshot.
+///
+/// `send_failure` alone reaches only the oneshot. Background-mode callers have
+/// already stopped listening on it, so the failure record came from
+/// `PendingGuard::drop`'s generic "Subagent failed during initialization" and
+/// the real reason (still running, not found, identity conflict, bad cwd,
+/// missing source model, resume-copy abort) was lost. `set_error` is what makes
+/// the single completion summary the parent surfaces carry the true message
+/// instead of the fallback.
+///
+/// Only valid after `insert_pending`: pre-spawn failures go through
+/// `send_pre_spawn_failure`, which records its own synthetic completion.
+fn fail_post_pending(
+    request: SubagentRequest,
+    pending_guard: &mut PendingGuard<'_>,
+    msg: String,
+) {
+    pending_guard.set_error(msg.clone());
+    send_failure(request, &msg);
+}
 /// This is a free async function, NOT a method on MvpAgent. It receives
 /// a `SubagentSpawnContext` with everything it needs, and a mutable
 /// reference to the coordinator for tracking.
@@ -200,7 +221,7 @@ pub(crate) async fn handle_subagent_request(
                  Wait for it to complete before resuming."
             );
             drop(coord);
-            send_failure(request, &msg);
+            fail_post_pending(request, &mut pending_guard, msg);
             return;
         }
         match coord
@@ -216,7 +237,7 @@ pub(crate) async fn handle_subagent_request(
                      The subagent may have been evicted or the ID is invalid."
                 );
                 drop(coord);
-                send_failure(request, &msg);
+                fail_post_pending(request, &mut pending_guard, msg);
                 return;
             }
         }
@@ -236,7 +257,7 @@ pub(crate) async fn handle_subagent_request(
             request.runtime_overrides.persona.as_deref(),
             source,
         ) {
-            send_failure(request, &e.to_string());
+            fail_post_pending(request, &mut pending_guard, e.to_string());
             return;
         }
     }
@@ -384,7 +405,7 @@ pub(crate) async fn handle_subagent_request(
                         } else {
                             format!("cwd \"{cwd_path}\" does not exist")
                         };
-                        send_failure(request, &msg);
+                        fail_post_pending(request, &mut pending_guard, msg);
                         return;
                     }
                 }
@@ -489,7 +510,7 @@ pub(crate) async fn handle_subagent_request(
                  is no longer available in the model catalogue.",
                 source.subagent_id,
             );
-            send_failure(request, &msg);
+            fail_post_pending(request, &mut pending_guard, msg);
             return;
         }
     }
@@ -557,7 +578,7 @@ pub(crate) async fn handle_subagent_request(
                 subagent_id = % request.id, error = % msg,
                 "Resume-copy failed, aborting subagent spawn"
             );
-            send_failure(request, &msg);
+            fail_post_pending(request, &mut pending_guard, msg);
             return;
         }
     };

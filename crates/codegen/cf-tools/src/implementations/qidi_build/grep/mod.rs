@@ -33,7 +33,7 @@ pub mod ripgrep;
 
 // Re-export the shared GrokIntegerSchema from types module
 pub use crate::types::GrokIntegerSchema;
-use ripgrep::rg_path;
+use ripgrep::{RG_UNAVAILABLE_NOTICE, rg_path};
 #[cfg(test)]
 use ripgrep::ripgrep_available;
 
@@ -851,8 +851,14 @@ async fn prepare_grep_with_rg(
             // render shows `stdout`, so a missing rg binary looked exactly
             // like "no matches". Mirror the exit_code==2 path below and
             // put the error in `stdout`.
+            //
+            // The raw spawn error says nothing actionable ("program not
+            // found"), so append the shared notice: this spawn failure is
+            // almost always a missing/blocked `rg`, and the caller needs the
+            // `git grep` fallback spelled out to unblock itself.
             return Ok(GrepStep::Early(GrepSearchOutput {
-                stdout: format!("Error calling tool: {}", e).into_bytes(),
+                stdout: format!("Error calling tool: {}\n\n{}", e, RG_UNAVAILABLE_NOTICE)
+                    .into_bytes(),
                 stderr: Vec::new(),
                 exit_code: -1,
                 match_count: 0,
@@ -1713,6 +1719,18 @@ mod tests {
         assert!(
             stdout.contains("Error calling tool:"),
             "spawn error must be visible in stdout (R-003), got: {stdout:?}"
+        );
+        // NIT: the raw spawn error is not actionable on its own. The result
+        // must name the missing piece (`ripgrep`) and the supported fallback
+        // (`git grep`) so the model can recover without a retry loop.
+        assert!(
+            stdout.contains("ripgrep") && stdout.contains("git grep"),
+            "spawn error must name ripgrep and the `git grep` fallback, got: {stdout:?}"
+        );
+        assert!(
+            stdout.contains(RG_UNAVAILABLE_NOTICE),
+            "spawn error must reuse the shared RG_UNAVAILABLE_NOTICE verbatim, \
+             got: {stdout:?}"
         );
         assert!(
             out.stderr.is_empty(),

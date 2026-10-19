@@ -2656,6 +2656,197 @@ async fn blocking_not_allowed_type_does_not_push_completion_summary() {
         )
         .await;
 }
+/// B1: a failure *after* `insert_pending` must record its own reason on the
+/// pending guard. `send_failure` alone only reaches the oneshot, which
+/// background callers have already dropped: they see the failure solely
+/// through the completion summary and the `get_task_output` snapshot. Without
+/// `PendingGuard::set_error` both fall back to the generic
+/// "Subagent failed during initialization", hiding the real cause.
+///
+/// Covers both spawn modes, because the two reach the operator differently:
+/// the blocking call returns the oneshot error, the background one does not.
+async fn assert_post_pending_failure(
+    ctx: SubagentSpawnContext,
+    coordinator: &std::cell::RefCell<SubagentCoordinator>,
+    request: SubagentRequest,
+    result_rx: oneshot::Receiver<SubagentResult>,
+    expected_error_substring: &str,
+) {
+    let subagent_id = request.id.clone();
+    let mode = if request.run_in_background { "background" } else { "foreground" };
+    // Seeding fixtures (e.g. a completed resume source) may leave summaries of
+    // their own; only the summaries from *this* spawn are under test.
+    coordinator.borrow_mut().drain_pending_completions();
+    let gateway = test_gateway();
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            Box::pin(handle_subagent_request(request, ctx, coordinator, &gateway)).await;
+        })
+        .await;
+
+    // 1. The oneshot carries the reason (foreground tool result).
+    let result = result_rx.await.expect("should receive result");
+    assert!(! result.success, "{mode}: failure must report success=false");
+    let err = result.error.as_deref().unwrap_or("");
+    assert!(
+        err.contains(expected_error_substring),
+        "{mode}: oneshot error {err:?} must contain {expected_error_substring:?}",
+    );
+
+    // 2. The recorded failure must carry the SAME reason. This is the B1
+    //    regression: without `set_error`, `PendingGuard::drop` stamps the
+    //    generic fallback and this assertion fails.
+    let snapshot = match coordinator.borrow().lookup(&subagent_id) {
+        Some(SnapshotLookup::Ready(snap)) => snap,
+        _ => panic!("{mode}: expected a Ready snapshot for {subagent_id}"),
+    };
+    let recorded = match & snapshot.status {
+        SubagentSnapshotStatus::Failed { error } => error.clone(),
+        other => panic!("{mode}: expected a Failed snapshot, got {other:?}"),
+    };
+    assert!(
+        ! recorded.contains("Subagent failed during initialization"),
+        "{mode}: recorded failure fell back to the generic drop message: {recorded:?}",
+    );
+    assert!(
+        recorded.contains(expected_error_substring),
+        "{mode}: recorded failure {recorded:?} must contain \
+         {expected_error_substring:?}",
+    );
+
+    // 3. Exactly one completion summary, flagged failed: the failure is
+    //    surfaced once, not duplicated (and never zero times for background).
+    let summaries = coordinator.borrow_mut().drain_pending_completions();
+    assert_eq!(
+        summaries.len(),
+        1,
+        "{mode}: expected exactly one completion summary, got {summaries:?}",
+    );
+    assert_eq!(summaries[0].subagent_id, subagent_id);
+    assert!(! summaries[0].success, "{mode}: summary must be flagged failed");
+}
+/// Seed an already-finished subagent so `resume_from` resolves against the
+/// in-memory `completed` map (parent session aligned with the spawn context,
+/// otherwise the lookup falls through to the not-found branch under test).
+fn seed_completed_subagent(
+    coordinator: &mut SubagentCoordinator,
+    id: &str,
+    parent_session_id: &str,
+    subagent_type: &str,
+) {
+    coordinator.insert(dummy_tracker(id, parent_session_id, subagent_type, "source task"));
+    let _ = coordinator.move_to_completed(
+        id,
+        "source task".into(),
+        subagent_type.into(),
+        SubagentResult {
+            success: true,
+            subagent_id: id.into(),
+            child_session_id: id.into(),
+            ..Default::default()
+        },
+    );
+}
+async fn assert_resume_failure(
+    subagent_type: &str,
+    resume_from: &str,
+    seed: impl FnOnce(&mut SubagentCoordinator, &str, &str),
+    run_in_background: bool,
+    expected_error_substring: &str,
+) {
+    let ctx = ctx_with_toggle(HashMap::new());
+    let coordinator = std::cell::RefCell::new(SubagentCoordinator::new());
+    {
+        let mut coord = coordinator.borrow_mut();
+        seed(&mut coord, resume_from, ctx.parent_session_id.as_str());
+    }
+    let (mut request, result_rx) = make_request(subagent_type);
+    request.run_in_background = run_in_background;
+    request.surface_completion = true;
+    request.resume_from = Some(resume_from.to_string());
+    assert_post_pending_failure(
+            ctx,
+            &coordinator,
+            request,
+            result_rx,
+            expected_error_substring,
+        )
+        .await;
+}
+#[tokio::test]
+async fn post_pending_resume_still_running_records_reason_foreground() {
+    assert_resume_failure(
+        "general-purpose",
+        "source-still-running",
+        |coord, id, parent| {
+            coord.insert(dummy_tracker(id, parent, "general-purpose", "source task"));
+        },
+        false,
+        "it is still running",
+    )
+    .await;
+}
+#[tokio::test]
+async fn post_pending_resume_still_running_records_reason_background() {
+    assert_resume_failure(
+        "general-purpose",
+        "source-still-running",
+        |coord, id, parent| {
+            coord.insert(dummy_tracker(id, parent, "general-purpose", "source task"));
+        },
+        true,
+        "it is still running",
+    )
+    .await;
+}
+#[tokio::test]
+async fn post_pending_resume_not_found_records_reason_foreground() {
+    assert_resume_failure(
+        "general-purpose",
+        "no-such-subagent-id-9f3a",
+        |_coord, _id, _parent| {},
+        false,
+        "not found",
+    )
+    .await;
+}
+#[tokio::test]
+async fn post_pending_resume_not_found_records_reason_background() {
+    assert_resume_failure(
+        "general-purpose",
+        "no-such-subagent-id-9f3a",
+        |_coord, _id, _parent| {},
+        true,
+        "not found",
+    )
+    .await;
+}
+/// The reported case: resuming with a different `subagent_type` than the
+/// source. `validate_resume_identity` rejects it, and the rejection must reach
+/// the completion record rather than the generic drop message.
+#[tokio::test]
+async fn post_pending_resume_identity_conflict_records_reason_foreground() {
+    assert_resume_failure(
+        "general-purpose",
+        "source-was-explore",
+        |coord, id, parent| seed_completed_subagent(coord, id, parent, "explore"),
+        false,
+        "Cannot resume with subagent_type",
+    )
+    .await;
+}
+#[tokio::test]
+async fn post_pending_resume_identity_conflict_records_reason_background() {
+    assert_resume_failure(
+        "general-purpose",
+        "source-was-explore",
+        |coord, id, parent| seed_completed_subagent(coord, id, parent, "explore"),
+        true,
+        "Cannot resume with subagent_type",
+    )
+    .await;
+}
 #[tokio::test]
 async fn background_failure_summary_includes_description() {
     let ctx = ctx_with_toggle(HashMap::new());
