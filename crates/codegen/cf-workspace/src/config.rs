@@ -225,6 +225,11 @@ impl WorkspaceBindConfig {
                     return ResolvedToolset::InvalidToolConfig(err);
                 }
             }
+            if let Err(err) =
+                cf_tools::types::config_validation::validate_wire_name_collisions(&cfg.tools)
+            {
+                return ResolvedToolset::InvalidToolConfig(err);
+            }
             return ResolvedToolset::Toolset(ResolvedTools::full(cfg.clone()));
         }
         if let Some(tools) = &self.tools {
@@ -242,6 +247,11 @@ impl WorkspaceBindConfig {
                     Ok(tc) => served.push(tc),
                     Err(err) => return ResolvedToolset::InvalidToolConfig(err),
                 }
+            }
+            if let Err(err) =
+                cf_tools::types::config_validation::validate_wire_name_collisions(&served)
+            {
+                return ResolvedToolset::InvalidToolConfig(err);
             }
             unserved_tool_ids.sort_unstable();
             if !unserved_tool_ids.is_empty() {

@@ -149,6 +149,24 @@ pub trait SubagentCapabilityModeExt {
 
     /// Return the set of `ToolKind`s allowed under this capability mode.
     fn allowed_tool_kinds(self) -> &'static [crate::types::tool::ToolKind];
+
+    /// Whether this capability mode permits write-capable tools.
+    ///
+    /// This is the single source of truth the subagent spawn path uses to
+    /// decide whether the agent builder may inject its default write tool.
+    /// Filtering `tool_config` alone is not enough: the builder re-adds
+    /// `OpenCodeWriteTool` when it sees no write tool, so the caller must
+    /// also propagate this verdict as `write_file_enabled = false`.
+    ///
+    /// Contract: `ReadOnly` and `Execute` forbid writes; `ReadWrite` and
+    /// `All` permit them.
+    fn allows_write(self) -> bool
+    where
+        Self: Sized,
+    {
+        self.allowed_tool_kinds()
+            .contains(&crate::types::tool::ToolKind::Write)
+    }
 }
 
 /// Prune background-task lifecycle tools (`get_task_output` / `kill_task`) when
@@ -1017,6 +1035,77 @@ mod tests {
             config.tools.is_empty(),
             "execute tools should still be filtered out"
         );
+    }
+
+    /// Contract matrix (batch 2 / F4): capability mode × action kind.
+    ///
+    /// `write` must never survive `ReadOnly` or `Execute`. This is the
+    /// filtering half of the fix; the other half (the agent builder must not
+    /// re-inject a default write tool) is asserted in `cf-agent`'s
+    /// `builder::tests::write_tool_not_reinjected_when_write_disabled`.
+    #[test]
+    fn capability_mode_action_matrix_matches_contract() {
+        use SubagentCapabilityMode::*;
+
+        // (mode, read allowed, write allowed, execute allowed)
+        let matrix = [
+            (ReadOnly, true, false, false),
+            (ReadWrite, true, true, false),
+            (Execute, true, false, true),
+            (All, true, true, true),
+        ];
+
+        for (mode, read_expected, write_expected, exec_expected) in matrix {
+            let mut config = ToolServerConfig {
+                tools: vec![
+                    tc("cf_tools::read_file", ToolKind::Read),
+                    tc("cf_tools::write", ToolKind::Write),
+                    tc("cf_tools::run_terminal_cmd", ToolKind::Execute),
+                ],
+                behavior_preset: None,
+            };
+
+            mode.filter_tool_config(&mut config);
+
+            let has = |kind: ToolKind| config.tools.iter().any(|tc| tc.kind == Some(kind));
+            assert_eq!(
+                has(ToolKind::Read),
+                read_expected,
+                "{mode:?}: read_file availability must be {read_expected}"
+            );
+            assert_eq!(
+                has(ToolKind::Write),
+                write_expected,
+                "{mode:?}: write availability must be {write_expected}"
+            );
+            assert_eq!(
+                has(ToolKind::Execute),
+                exec_expected,
+                "{mode:?}: run_terminal_cmd availability must be {exec_expected}"
+            );
+            assert_eq!(
+                mode.allows_write(),
+                write_expected,
+                "{mode:?}: allows_write must agree with the filtered write tool"
+            );
+        }
+    }
+
+    #[test]
+    fn only_read_write_and_all_allow_writes() {
+        use SubagentCapabilityMode::*;
+        for mode in [ReadOnly, Execute] {
+            assert!(
+                !mode.allows_write(),
+                "{mode:?} must forbid write-capable tools"
+            );
+        }
+        for mode in [ReadWrite, All] {
+            assert!(
+                mode.allows_write(),
+                "{mode:?} must permit write-capable tools"
+            );
+        }
     }
 
     #[test]

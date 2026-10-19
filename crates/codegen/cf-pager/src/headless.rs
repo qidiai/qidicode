@@ -838,24 +838,111 @@ fn headless_materialize_ctx(has_worktree: bool) -> crate::app::session_startup::
     }
 }
 
-/// F3 guard: reject `--worktree` in headless single-turn mode.
+/// Validate `--worktree` combinations in headless single-turn mode.
 ///
-/// The flag is plumbed through `SessionStartupFlags` / `MaterializeCtx` as a
-/// boolean (`has_worktree`) but the single-turn path never creates a worktree
-/// — without this check the run silently proceeds in the plain cwd (exit 0,
-/// unchanged cwd, no `git worktree` entry). Fail loudly instead. The
-/// root-cause fix (worktree creation for headless) is tracked as a separate
-/// batch-2 item in docs/fix-plans/2026-10-19-缺陷修复方案.md (F3 根治).
-fn validate_headless_worktree_flag(worktree: Option<&str>) -> Result<(), String> {
-    if worktree.is_some() {
-        Err(
-            "--worktree is not yet supported in headless single-turn mode; \
-             run without --worktree (TUI supports worktree dispatch)"
+/// A new session creates a real worktree through the same ACP extension the
+/// TUI uses (`x.ai/git/worktree/create_from_worktree_sync`). Resume /
+/// continue / fork have their own cwd-discovery paths and are not wired to
+/// worktree creation here yet, so reject those combinations loudly instead
+/// of silently running in the source cwd.
+fn validate_headless_worktree_flag(
+    worktree: Option<&str>,
+    resume_like: bool,
+) -> Result<(), String> {
+    match worktree {
+        None => Ok(()),
+        Some(_) if resume_like => Err(
+            "--worktree combined with --resume/--continue/--fork-session is not supported in \
+             headless single-turn mode; retry with only one of them"
                 .to_string(),
-        )
-    } else {
-        Ok(())
+        ),
+        Some(_) => Ok(()),
     }
+}
+
+/// Request payload for the worktree-creation extension. Mirrors the TUI's
+/// `Effect::CreateWorktreeSession` payload (same ACP route, same fields).
+fn worktree_create_params(
+    source_cwd: &Path,
+    new_session_id: &str,
+    label: Option<&str>,
+) -> serde_json::Value {
+    let mut params = serde_json::json!({
+        "sourceWorktreePath": source_cwd.to_string_lossy(),
+        "newSessionId": new_session_id,
+        "copyMode": "dirty",
+    });
+    if let Some(lbl) = label.filter(|s| !s.is_empty()) {
+        params["label"] = serde_json::Value::String(lbl.to_string());
+    }
+    params
+}
+
+/// Map the source cwd into the new worktree, preserving subdirectory depth.
+///
+/// The extension returns the worktree root plus the source git root; a cwd
+/// nested below the repo root must stay nested (`repo/crates/foo` →
+/// `worktree/crates/foo`).
+fn session_cwd_in_worktree(
+    source_cwd: &Path,
+    worktree_root: &Path,
+    source_git_root: Option<&str>,
+) -> PathBuf {
+    let Some(git_root) = source_git_root else {
+        return worktree_root.to_path_buf();
+    };
+    let cwd_str = source_cwd.to_string_lossy();
+    let Some(relative) = cwd_str.strip_prefix(git_root) else {
+        return worktree_root.to_path_buf();
+    };
+    let relative = relative.trim_start_matches(['/', '\\']);
+    if relative.is_empty() {
+        worktree_root.to_path_buf()
+    } else {
+        worktree_root.join(relative)
+    }
+}
+
+/// Create a worktree for a headless new session via the shared ACP route.
+///
+/// Returns `(worktree_root, session_cwd)`.
+async fn create_headless_worktree(
+    acp_tx: &AcpAgentTx,
+    source_cwd: &Path,
+    label: Option<&str>,
+    new_session_id: &str,
+) -> anyhow::Result<(PathBuf, PathBuf)> {
+    let params = worktree_create_params(source_cwd, new_session_id, label);
+    let req = acp::ExtRequest::new(
+        "x.ai/git/worktree/create_from_worktree_sync",
+        serde_json::value::to_raw_value(&params)
+            .expect("serialize worktree params")
+            .into(),
+    );
+    let resp: acp::ExtResponse = acp_send(req, acp_tx)
+        .await
+        .map_err(|e| anyhow::anyhow!("couldn't create worktree: {e}"))?;
+    let value: serde_json::Value = serde_json::from_str(resp.0.get())
+        .map_err(|e| anyhow::anyhow!("couldn't create worktree: {e}"))?;
+    if let Some(err) = value.get("error").filter(|v| !v.is_null()) {
+        let msg = err
+            .as_str()
+            .map(String::from)
+            .unwrap_or_else(|| err.to_string());
+        anyhow::bail!("couldn't create worktree: {msg}");
+    }
+    let result = value.get("result").unwrap_or(&value);
+    let worktree_root = result
+        .get("worktreePath")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("couldn't create worktree: response missing worktreePath"))?;
+    let worktree_root = PathBuf::from(worktree_root);
+    let session_cwd = session_cwd_in_worktree(
+        source_cwd,
+        &worktree_root,
+        result.get("sourceGitRoot").and_then(|v| v.as_str()),
+    );
+    Ok((worktree_root, session_cwd))
 }
 
 /// Run a headless single-turn prompt.
@@ -878,10 +965,12 @@ pub async fn run_single_turn(
 
     let mut emitter = HeadlessEmitter::new(options.output_format, options.json_schema.is_some());
 
-    // F3: fail fast (before spawning the shell) when --worktree was passed —
-    // headless single-turn has no worktree-creation path, so accepting the
-    // flag would silently run in the plain cwd.
-    if let Err(msg) = validate_headless_worktree_flag(options.worktree.as_deref()) {
+    // F3: `--worktree` is supported for new sessions; the resume-like
+    // combinations are rejected up front (they never create a worktree).
+    let resume_like = options.resume.is_some()
+        || options.continue_last_session
+        || options.fork_session;
+    if let Err(msg) = validate_headless_worktree_flag(options.worktree.as_deref(), resume_like) {
         emitter.on_error(&msg);
         anyhow::bail!("{msg}");
     }
@@ -1020,6 +1109,46 @@ pub async fn run_single_turn(
         "headless: authenticate complete"
     );
 
+    // F3 root fix: create the worktree before opening the session, through
+    // the same ACP extension the TUI dispatch path uses
+    // (`x.ai/git/worktree/create_from_worktree_sync`). The returned root is
+    // mapped back to the caller's subdirectory, then used as the session cwd.
+    let mut session_cwd = cwd.clone();
+    if options.worktree.is_some() {
+        let worktree_id = options.session_id.clone().unwrap_or_else(|| {
+            format!(
+                "pager-{}",
+                &uuid::Uuid::new_v4().simple().to_string()[..12]
+            )
+        });
+        match create_headless_worktree(
+            &acp_tx,
+            &cwd,
+            options.worktree.as_deref(),
+            &worktree_id,
+        )
+        .await
+        {
+            Ok((root, wt_cwd)) => {
+                eprintln!(
+                    "Worktree: {} (session cwd: {})",
+                    root.display(),
+                    wt_cwd.display()
+                );
+                tracing::info!(
+                    worktree = %root.display(), session_cwd = %wt_cwd.display(),
+                    "headless: created worktree"
+                );
+                session_cwd = wt_cwd;
+            }
+            Err(e) => {
+                emitter.on_error(&e.to_string());
+                cancel.cancel();
+                return Err(e);
+            }
+        }
+    }
+
     // Same intent + materialize path as interactive (shared SSOT).
     use crate::app::session_startup::{self, MaterializedStartup, SessionStartupFlags};
     let has_resume_id = options.resume.as_deref().filter(|s| !s.is_empty());
@@ -1034,7 +1163,7 @@ pub async fn run_single_turn(
     })
     .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let cwd_str = cwd.to_string_lossy().to_string();
+    let cwd_str = session_cwd.to_string_lossy().to_string();
     let materialized = session_startup::materialize_startup_for_cwd(
         headless_materialize_ctx(options.worktree.is_some()),
         intent,
@@ -1046,9 +1175,9 @@ pub async fn run_single_turn(
     let restore_code = options.restore_code.then_some(true);
     let t_session = Instant::now();
     let opened = match materialized {
-        MaterializedStartup::NewAuto => open_session(&acp_tx, &cwd, None, None).await,
+        MaterializedStartup::NewAuto => open_session(&acp_tx, &session_cwd, None, None).await,
         MaterializedStartup::NewWithId { session_id } => {
-            open_session_with_id(&acp_tx, &cwd, &session_id).await
+            open_session_with_id(&acp_tx, &session_cwd, &session_id).await
         }
         MaterializedStartup::Resume {
             session_id,
@@ -1945,33 +2074,96 @@ mod tests {
         }
     }
 
-    /// F3: `--worktree=<x>` must be rejected with the explicit "not yet
-    /// supported" message — never silently ignored.
+    /// F3 root fix: a plain `--worktree=<x>` on a new session is supported
+    /// and must pass validation.
     #[test]
-    fn worktree_flag_rejected_with_explicit_message() {
-        let err = super::validate_headless_worktree_flag(Some("x"))
-            .expect_err("--worktree=x must be rejected");
+    fn worktree_flag_new_session_is_ok() {
         assert!(
-            err.contains("--worktree is not yet supported"),
-            "message must name --worktree: got {err:?}"
+            super::validate_headless_worktree_flag(Some("x"), false).is_ok(),
+            "new-session --worktree is supported"
+        );
+    }
+
+    /// F3: resume-like combinations are rejected loudly (they have no
+    /// worktree-creation path yet) instead of silently ignoring the flag.
+    #[test]
+    fn worktree_flag_with_resume_rejected_with_explicit_message() {
+        let err = super::validate_headless_worktree_flag(Some("x"), true)
+            .expect_err("--worktree + --resume must be rejected");
+        assert!(
+            err.contains("--worktree combined with"),
+            "message must name the unsupported combination: got {err:?}"
         );
     }
 
     /// F3: no flag → no error (byte-identical to pre-fix behavior).
     #[test]
     fn worktree_flag_absent_is_ok() {
-        assert!(super::validate_headless_worktree_flag(None).is_ok());
+        assert!(super::validate_headless_worktree_flag(None, false).is_ok());
+        assert!(super::validate_headless_worktree_flag(None, true).is_ok());
     }
 
-    /// F3: `run_single_turn` bails before spawning the shell when
-    /// `--worktree` is set, so the process exits non-zero (anyhow main)
-    /// with the explicit message instead of silently running in the cwd.
+    /// F3: the worktree root is mapped back onto the caller's subdirectory.
+    #[test]
+    fn worktree_session_cwd_preserves_subdirectory() {
+        let root = std::path::Path::new("/wt/feat");
+        assert_eq!(
+            super::session_cwd_in_worktree(
+                std::path::Path::new("/repo"),
+                root,
+                Some("/repo"),
+            ),
+            std::path::PathBuf::from("/wt/feat"),
+            "repo root cwd maps to the worktree root"
+        );
+        assert_eq!(
+            super::session_cwd_in_worktree(
+                std::path::Path::new("/repo/crates/foo"),
+                root,
+                Some("/repo"),
+            ),
+            root.join("crates/foo"),
+            "nested cwd keeps its subdirectory inside the worktree"
+        );
+        assert_eq!(
+            super::session_cwd_in_worktree(std::path::Path::new("/repo"), root, None),
+            std::path::PathBuf::from("/wt/feat"),
+            "missing sourceGitRoot falls back to the worktree root"
+        );
+    }
+
+    /// F3: the creation payload mirrors the TUI effect (same route/fields).
+    #[test]
+    fn worktree_create_params_match_tui_effect_shape() {
+        let params = super::worktree_create_params(
+            std::path::Path::new("/repo"),
+            "pager-abc123",
+            Some("feat"),
+        );
+        assert_eq!(params["sourceWorktreePath"], "/repo");
+        assert_eq!(params["newSessionId"], "pager-abc123");
+        assert_eq!(params["copyMode"], "dirty");
+        assert_eq!(params["label"], "feat");
+        let bare = super::worktree_create_params(
+            std::path::Path::new("/repo"),
+            "pager-abc123",
+            Some(""),
+        );
+        assert!(
+            bare.get("label").is_none(),
+            "empty label must be omitted (auto-generated worktree name)"
+        );
+    }
+
+    /// F3: `run_single_turn` bails before spawning the shell when an
+    /// unsupported worktree combination is requested, so the process exits
+    /// non-zero with the explicit message.
     #[tokio::test]
-    async fn run_single_turn_rejects_worktree_before_spawn() {
+    async fn run_single_turn_rejects_worktree_with_resume_before_spawn() {
         let tmp = tempfile::tempdir().unwrap();
         let options = super::HeadlessOptions {
             session_id: None,
-            resume: None,
+            resume: Some("some-session".to_string()),
             cwd: Some(tmp.path().to_path_buf()),
             yolo: false,
             trust: false,
@@ -2004,9 +2196,9 @@ mod tests {
         let prompt = super::HeadlessPrompt::from_text("hi").expect("prompt must parse");
         let err = super::run_single_turn(prompt, false, options)
             .await
-            .expect_err("--worktree must fail the run");
+            .expect_err("--worktree + --resume must fail the run");
         assert!(
-            err.to_string().contains("--worktree is not yet supported"),
+            err.to_string().contains("--worktree combined with"),
             "error must carry the explicit message: got {err}"
         );
     }

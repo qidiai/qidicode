@@ -598,8 +598,9 @@ pub struct DashboardState {
     /// model. Sticky across dispatches; reset to `None` on every
     /// dashboard-open (alongside `pending_mode`).
     pub pending_model: Option<PendingDispatchModel>,
-    /// F8: agent type chosen for the *next* agent spawned from the dispatch
-    /// input, set by `/agent <name>` (intercepted in
+    /// F8: agent type applied to every subsequent agent spawned from the
+    /// dispatch input (sticky until an empty `/agent` resets it), set by
+    /// `/agent <name>` (intercepted in
     /// `dispatch_dashboard_dispatch_slash`; empty `/agent` clears back to the
     /// default resolution). `None` → spawn with the shell's default agent
     /// resolution — byte-identical to pre-F8 behavior (no `_meta.agentName`
@@ -1063,8 +1064,9 @@ pub struct AgentTypeCandidate {
 /// Lists the types new dashboard dispatches can spawn as: the built-ins
 /// (`general-purpose`, `explore`, `plan`, …) plus discovered
 /// `.qidi/agents/*.md` definitions. Confirming a row stages
-/// `DashboardState::pending_agent_type`, which the next dispatch sends as
-/// `_meta.agentName`; Esc closes without touching the staging.
+/// `DashboardState::pending_agent_type`, which every subsequent dispatch
+/// sends as `_meta.agentName` until an empty `/agent` resets it; Esc closes
+/// without touching the staging.
 pub struct AgentTypePickerState {
     pub picker: crate::views::picker::PickerState,
     pub window: crate::views::modal_window::ModalWindowState,

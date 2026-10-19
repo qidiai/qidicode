@@ -1546,8 +1546,8 @@ fn stage_dashboard_model(
 }
 
 /// Stage (`/agent <name>`) or clear (bare `/agent`) the agent type applied to
-/// the NEXT agent spawned from the dispatch input — the agent-type sibling of
-/// [`stage_dashboard_model`]. Validation is best-effort UX against the same
+/// every subsequent agent spawned from the dispatch input until reset — the
+/// agent-type sibling of [`stage_dashboard_model`]. Validation is best-effort UX against the same
 /// discovery chain the shell runs (built-ins + `.qidi/agents/` +
 /// `~/.qidi/agents/`); the shell's `session/new` handler stays the source of
 /// truth and fails with `invalid_params` on names that slip through.
@@ -1572,7 +1572,9 @@ pub(super) fn stage_dashboard_agent_type(app: &mut AppView, name: String) -> Vec
         Ok(()) => {
             d.pending_agent_type = Some(name.clone());
             d.error_toast =
-                Some(format!("✓ agent type: {name} (applies to next dispatched agent)"));
+                Some(format!(
+                    "✓ agent type: {name} (applies to subsequent dispatches until reset)"
+                ));
         }
         Err(msg) => {
             d.set_error_toast(&msg);

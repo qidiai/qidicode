@@ -1557,6 +1557,21 @@ impl FinalizedToolset {
             .find(|t| t.client_name == tool_name)
             .map(|t| t.metadata.clone())
     }
+    /// Look up a tool's metadata by wire name, tolerating the
+    /// colon↔underscore drift relays introduce (`qidi_build_X` vs
+    /// `qidi_build:X`). Exact `client_name` matches win; ambiguous wire
+    /// names resolve to `None` rather than guessing.
+    ///
+    /// Dispatch already uses [`Self::find_for_dispatch`]; this exposes the
+    /// same resolution to kind-based consumers (e.g. the read-only check in
+    /// `tool_calls.rs`).
+    pub fn get_tool_metadata_for_dispatch(
+        &self,
+        tool_name: &str,
+    ) -> Option<Arc<dyn ToolMetadata>> {
+        let tools = self.tools.read();
+        Self::find_for_dispatch(&tools, tool_name).map(|t| t.metadata.clone())
+    }
     /// Resolve canonical [`ToolIdentity`] (kind, namespace, presentation label)
     /// for a tool by its client-facing wire name. Drives the first-party
     /// `x.ai/*` tool `_meta` contract (tool normalization). Accepts the
@@ -1786,7 +1801,12 @@ impl FinalizedToolset {
         tool_call_id: &str,
         cwd_override: Option<std::path::PathBuf>,
     ) -> Result<DispatchParts, cf_tool_runtime::ToolError> {
-        let (registry_id, output_converter, reverse_params) = {
+        // Read the contract version off the entry `find_for_dispatch` already
+        // resolved. Looking it up again by the raw wire name would miss the
+        // colon↔underscore-tolerant match: a call arriving as
+        // `qidi_build_SchedulerCreate` would silently dispatch without its
+        // `BehaviorVersion` once that colon-family tool is managed.
+        let (registry_id, output_converter, reverse_params, contract_version) = {
             let tools = self.tools.read();
             let entry = Self::find_for_dispatch(&tools, tool_name)
                 .ok_or_else(|| Self::tool_not_found_error(tool_name))?;
@@ -1794,6 +1814,7 @@ impl FinalizedToolset {
                 entry.registry_id.clone(),
                 entry.output_converter.clone(),
                 entry.reverse_params.clone(),
+                entry.contract_version.clone(),
             )
         };
         let canonical_params = if reverse_params.is_empty() {
@@ -1810,7 +1831,6 @@ impl FinalizedToolset {
         } else {
             None
         };
-        let contract_version = self.get_contract_version(tool_name);
         let rt_call_id = cf_tool_protocol::ToolCallId::new(tool_call_id)
             .unwrap_or_else(|_| cf_tool_protocol::ToolCallId::new_v7());
         let mut ctx = cf_tool_runtime::ToolCallContext::new(rt_call_id);
@@ -5018,6 +5038,103 @@ mod tests {
             "unknown-tool error must say 'Tool not found', got: {err}"
         );
     }
+    /// P2-A regression: dispatch must carry the `BehaviorVersion` of the
+    /// tool `find_for_dispatch` resolved, even when the call arrives with the
+    /// relay-sanitized underscore wire name. Before the fix,
+    /// `prepare_dispatch` re-looked-up the contract version by the raw wire
+    /// name (exact match only), so colon-family tools would silently lose
+    /// their behavior version once managed.
+    ///
+    /// The test stamps a contract version directly on the finalized entry —
+    /// it must not mutate the production `MANAGED_TOOLS` table.
+    #[tokio::test]
+    async fn prepare_dispatch_carries_contract_version_for_wire_name() {
+        let tmp = TempDir::new().unwrap();
+        let builder = ToolRegistryBuilder::new();
+        let config = ToolServerConfig {
+            tools: vec![ToolConfig::for_tool::<qidi_build::SchedulerCreateTool>()],
+            behavior_preset: None,
+        };
+        let toolset = builder
+            .finalize(config, test_session_context(&tmp))
+            .expect("SchedulerCreate toolset should finalize");
+
+        // Simulate "this colon-family tool is version-managed".
+        {
+            let mut tools = toolset.tools.write();
+            let entry = tools
+                .iter_mut()
+                .find(|t| t.id.ends_with("SchedulerCreate"))
+                .expect("SchedulerCreate must be finalized");
+            entry.contract_version = Some("legacy-contract-test".to_string());
+        }
+
+        let toolset = Arc::new(toolset);
+        let parts = toolset
+            .prepare_dispatch(
+                "qidi_build_SchedulerCreate",
+                serde_json::json!({ "interval" : "60s", "prompt" : "noop" }),
+                "version-call",
+                None,
+            )
+            .expect("underscored wire name must resolve in prepare_dispatch");
+        let version = parts
+            .ctx
+            .extensions
+            .get::<cf_tool_runtime::BehaviorVersion>()
+            .expect("resolved entry's BehaviorVersion must be stamped on the ctx");
+        assert_eq!(
+            version.0, "legacy-contract-test",
+            "BehaviorVersion must come from the dispatch-resolved entry"
+        );
+    }
+
+    /// P2-C: two entries whose client_name/id canonicalize to the same wire
+    /// name must be rejected as ambiguous instead of dispatching to a guess.
+    /// Exact `client_name` matches still win (documented lookup order).
+    #[tokio::test]
+    async fn find_for_dispatch_rejects_ambiguous_normalized_names() {
+        let tmp = TempDir::new().unwrap();
+        let toolset = ToolRegistryBuilder::new()
+            .finalize(
+                ToolServerConfig {
+                    tools: vec![
+                        ToolConfig::for_tool::<qidi_build::ReadFileTool>(),
+                        ToolConfig::for_tool::<qidi_build::ListDirTool>(),
+                    ],
+                    behavior_preset: None,
+                },
+                test_session_context(&tmp),
+            )
+            .expect("fixture toolset should finalize");
+        // Two entries canonicalize to the same wire name: one via its
+        // client_name (`foo_bar`), one via its id (`foo:bar`). Registration
+        // helpers derive both from one string, so shape the finalized
+        // entries directly.
+        {
+            let mut tools = toolset.tools.write();
+            tools[0].client_name = "foo_bar".to_string();
+            tools[0].id = "foo_bar".to_string();
+            tools[1].client_name = "bar_baz".to_string();
+            tools[1].id = "foo:bar".to_string();
+        }
+
+        let tools = toolset.tools.read();
+        // Not an exact client_name; canonical form matches `foo_bar`
+        // (client_name) and `bar_baz`'s id (`foo:bar`) -> ambiguous.
+        assert!(
+            FinalizedToolset::find_for_dispatch(&tools, "foo:bar").is_none(),
+            "ambiguous wire name must resolve to None (Tool not found), never a guess"
+        );
+        // Exact client_name wins, even though its canonical form collides.
+        let exact = FinalizedToolset::find_for_dispatch(&tools, "foo_bar")
+            .expect("exact client_name must still resolve");
+        assert_eq!(
+            exact.client_name, "foo_bar",
+            "exact match must win over canonical collisions"
+        );
+    }
+
     /// F1: end-to-end dispatch with the advertised (underscored) name —
     /// SchedulerCreate with harmless params (no fire_immediately, 60s
     /// interval) then SchedulerDelete cleans it up. Asserts the full

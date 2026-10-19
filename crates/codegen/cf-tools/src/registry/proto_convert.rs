@@ -62,6 +62,9 @@ pub fn tool_server_config_from_entries(
         .enumerate()
         .map(|(idx, entry)| tool_config_from_entry(idx, entry))
         .collect::<Result<Vec<_>, _>>()?;
+    // Cross-entry check: `:`→`_` folding can make two valid entries
+    // indistinguishable on the wire (`foo:bar` id vs `foo_bar` override).
+    crate::types::config_validation::validate_wire_name_collisions(&tools)?;
     Ok(ToolServerConfig {
         tools,
         behavior_preset: None,
@@ -205,6 +208,28 @@ mod tests {
         assert_eq!(cfg.tools.len(), 2);
         assert_eq!(cfg.tools[0].name_override.as_deref(), Some("search"));
         assert_eq!(cfg.tools[1].name_override, None);
+    }
+
+    /// P2-E: an override that only differs from another entry's id by the
+    /// colon↔underscore fold would be indistinguishable to the model.
+    #[test]
+    fn server_config_rejects_colon_folded_name_collision() {
+        let mut overridden = entry("cf_tools::grep");
+        overridden.name_override = Some("foo_bar".to_owned());
+        let err =
+            tool_server_config_from_entries(vec![overridden, entry("foo:bar")]).unwrap_err();
+        assert_eq!(
+            err.index, 1,
+            "the entry whose folded name collides must be reported"
+        );
+        assert!(
+            matches!(
+                err.kind,
+                ToolConfigEntryErrorKind::NameOverrideInvalid { .. }
+            ),
+            "folded collision must surface as a name-override error, got {:?}",
+            err.kind
+        );
     }
 
     #[test]

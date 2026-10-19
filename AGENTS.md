@@ -86,7 +86,7 @@
 - 换会话/新开会话前若有未沉淀结论 → 先 `/flush`
 - **自动兜底**：compact 出错前会自动落盘（`pre_compact_on_error-*.md`），`/flush` 是主动版
 - **关键安心条款**：`cargo clean` / `git clean` / 仓库清理**物理隔离**于 `C:\Users\ASUS\.qidi\`（记忆、会话、技能、配置都在 C 盘，不受任何仓库清理影响）
-- 测试绿门基线见记忆：`reference-qidicode-green-gates`（**2026-10-19 批次1修复后实测：cf-tools 2666 passed / 0 failed / 7 ignored；cf-pager 7055 passed / 0 failed / 6 ignored；cf-shell 全量被既有测试事故中断（见 §12 cf-shell 行注），改动面过滤 `mvp_agent::` 185 passed / 1 failed（既有 flaky）**；`cargo check --workspace` 0 errors）——先对照基线再判断"是不是我跑挂了"
+- 测试绿门基线见记忆：`reference-qidicode-green-gates`（**2026-10-19 批次2修复后实测：cf-tools 2674 passed / 0 failed / 7 ignored；cf-pager 7060 passed / 0 failed / 6 ignored；cf-shell 全量（跳 10 项既有环境失败，见 §12 行注）5630 passed，改动面过滤 `mvp_agent::` 185 passed / 1 failed（既有 flaky）**；`cargo check --workspace` 0 errors）——先对照基线再判断"是不是我跑挂了"
 
 ---
 
@@ -183,7 +183,7 @@
 |---|---|---|
 | 出产品 exe | `cargo build --release -p cf-pager-bin --bin qidi -j 4` | 冷 30-90 分钟；有缓存快；**运行中的 qidi.exe 无法覆盖 → 先改名旧 exe（Windows 允许改名不允许覆盖）** |
 | cf-memory 测试 | `cargo test -p cf-memory --lib` | ~2-10 分钟 |
-| **cf-shell 测试** | `$env:CARGO_TARGET_DIR='C:\qidi-cfshell-test'; $env:CARGO_PROFILE_DEV_DEBUG='0'; cargo test -p cf-shell --lib -j 4` | **热缓存全量 ~2.5 分钟**；`DEBUG=0`+串行是内存 OOM 的解药（本机 16GB，cf-shell 测试二进制直跑必 OOM）。⚠️ **2026-10-19 实测：全量跑不绿属既有问题（非回归）**——① `acp_session::cancel_running_task_tests::persist_ack_waits_for_disk_flush_before_success` 栈溢出（Windows 测试线程 2MB 栈）会**中断整个 harness**；② `auth_method::tests::enterprise_byok_config_does_not_require_login` 因本机预置多枚 API key（ANTHROPIC/OPENAI/DEEPSEEK/MOONSHOT/ZHIPU/ARK/AGNES）必败；③ `drain_finished_thread_returns_immediately` 负载敏感 flaky。**跑法：按名称跳过这三项，或 `cargo test -p cf-shell --lib mvp_agent::` 过滤跑（基线 185/186）** |
+| **cf-shell 测试** | `$env:CARGO_TARGET_DIR='C:\qidi-cfshell-test'; $env:CARGO_PROFILE_DEV_DEBUG='0'; cargo test -p cf-shell --lib -j 4` | **热缓存全量 ~2.5 分钟**；`DEBUG=0`+串行是内存 OOM 的解药（本机 16GB，cf-shell 测试二进制直跑必 OOM）。⚠️ **2026-10-19 实测：全量跑不绿属既有问题（非回归），共 10 项已知失败**——① `acp_session::cancel_running_task_tests::persist_ack_waits_for_disk_flush_before_success` 栈溢出（Windows 测试线程 2MB 栈）会**中断整个 harness**；② `auth_method::tests::enterprise_byok_config_does_not_require_login`、`agent::config::tests::has_own_credentials_guards_session_vs_external_key`、`cli_models::tests::resolve_{deployment_key,model_api_key_byok,model_credentials_uses_first_catalog_key,model_env_key_byok,not_authenticated,priority_byok_over_deployment}` 共 8 项因本机预置多枚 API key（ANTHROPIC/OPENAI/DEEPSEEK/MOONSHOT/ZHIPU/ARK/AGNES）必败（kimi-k3-moonshot 条目 env 探针翻转，测试自己的注释记载了该机制）；③ `drain_finished_thread_returns_immediately` 负载敏感 flaky。**跑法：按名称跳过这 10 项（全量基线 5630 passed/7 env-failed，批次2 QC 实测），或 `cargo test -p cf-shell --lib mvp_agent::` 过滤跑（基线 185/186）** |
 | cf-chat-state 测试 | `cargo test -p cf-chat-state --lib`（G 盘直跑）；历史注记：2026-10-04 曾报 G 盘链接确定性挂起（link.exe ~369MB 零 I/O 冻结，两次复现），**2026-10-09 复测未复现**——冷编 21m22s + link.exe 活跃推进（工作集 5.4GB，非冻结特征）+ 链接正常完成 + 测试 0.53s；若再现挂起，改用 C 盘热 target 方案（同 cf-shell 行） | G 盘冷编（禁 sccache）~21 分钟；基线 345 passed / 0 failed（2026-10-09，较 2026-10-04 基线 343 +2 = B1-6 新增 cache_read_ratio 两测试，数目自洽） |
 | **cf-pager 测试** | ⚠️ G 盘冷链**严重偏离旧记载**（2026-10-04 实测 >90 分钟未完成，pdb 1.6GB 链接为瓶颈）→ **一律用 C 盘热 target 方案**（同 cf-shell 行） | C 盘热缓存 ~40 分钟；基线 **7055 passed + 6 ignored / 0 failed**（2026-10-19 批次1修复后实测，7061 总数；旧值 7033 作废）——**必须加 `$env:QIDI_FORCE_LEGACY_CONSOLE='0'`**：旧记载"53 预先存在字形失败"已作废（根因=legacy OEM 代码页遗留，非环境字体）；另注意既有 flaky：`needs_animation_gates_prompt_history_tick_delivery`（时序敏感，隔离重跑即过） |
 | 快速全局校验 | `cargo check --workspace` | 0 errors 为过 |

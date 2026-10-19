@@ -146,6 +146,10 @@ fn init_tracing_simple(app_entrypoint: &'static str) {
             },
         ),
     );
+    // F2b: probe ripgrep once at startup. Its absence makes the built-in
+    // grep return no matches, which reads as "nothing found" unless we say
+    // otherwise up front.
+    cf_shell::tools::warn_if_ripgrep_unavailable();
 }
 /// `grok setup`: rendering + exit codes only; fetch logic lives in `cf_shell::managed_config`.
 /// `json` prints the served configuration instead of installing it.

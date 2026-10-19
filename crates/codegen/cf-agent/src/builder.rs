@@ -1780,6 +1780,52 @@ mod tests {
         .await
         .unwrap()
     }
+    /// F4 regression: the default write-tool fallback must honour
+    /// `write_file_enabled`. A read-only/execute subagent has its write tool
+    /// filtered out of `tool_config` by capability mode; before this fix the
+    /// builder saw "no write tool" and re-injected `OpenCodeWriteTool`.
+    #[tokio::test]
+    async fn write_tool_not_reinjected_when_write_disabled() {
+        use cf_tools::computer::local::LocalTerminalBackend;
+        use cf_tools::notification::ToolNotificationHandle;
+
+        let build_names = |write_enabled: bool| async move {
+            let def = crate::config::AgentDefinition::default_qidi_build();
+            let agent = AgentBuilder::new(
+                std::env::temp_dir(),
+                Arc::new(LocalTerminalBackend::new()),
+                ToolNotificationHandle::noop(),
+            )
+            .from_definition(def)
+            .with_write_file_enabled(write_enabled)
+            .build()
+            .await
+            .unwrap();
+            agent
+                .tool_definitions()
+                .await
+                .iter()
+                .map(|d| d.function.name.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let enabled = build_names(true).await;
+        assert!(
+            enabled.iter().any(|n| n == "write"),
+            "default agent with write_file_enabled=true must expose the write tool: {enabled:?}"
+        );
+
+        let disabled = build_names(false).await;
+        assert!(
+            !disabled.iter().any(|n| n == "write"),
+            "write tool must not be re-injected when write_file_enabled=false: {disabled:?}"
+        );
+        assert!(
+            disabled.iter().any(|n| n == "read_file"),
+            "disabling writes must not remove unrelated read tools: {disabled:?}"
+        );
+    }
+
     /// Build a default agent under a session allowlist + the agent's own
     /// allowlist, returning the effective (short) tool names.
     async fn session_clamp_tool_names(

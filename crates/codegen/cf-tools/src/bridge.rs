@@ -132,8 +132,15 @@ impl ToolBridge {
     /// [`ToolKind`] for a registered tool by client-facing name, or
     /// `None` for unknown names. Sync — uses the registry's
     /// `RwLock::read`.
+    ///
+    /// Uses the same colon↔underscore-tolerant lookup as dispatch: model
+    /// callbacks carry the relay-sanitized wire name (`qidi_build_X`), which
+    /// an exact lookup would miss, leaving colon-family tools with
+    /// `is_read_only = false`.
     pub fn tool_kind(&self, tool_name: &str) -> Option<ToolKind> {
-        self.registry.get_tool_metadata(tool_name).map(|m| m.kind())
+        self.registry
+            .get_tool_metadata_for_dispatch(tool_name)
+            .map(|m| m.kind())
     }
 
     /// Get only built-in tool definitions (exclude MCP tools).
@@ -834,6 +841,33 @@ mod tests {
         assert_eq!(bridge.tool_kind("not_a_registered_tool"), None);
         // Exact client-name lookup is case-sensitive.
         assert_eq!(bridge.tool_kind("write"), None);
+    }
+
+    /// P2-B regression: callbacks carry the relay-sanitized underscore wire
+    /// name, so a colon-registered Read-kind tool must still resolve its
+    /// kind — otherwise `is_read_only` is permanently false for the
+    /// colon family.
+    #[test]
+    fn tool_kind_resolves_underscored_wire_name_for_colon_tool() {
+        let bridge = ToolBridge::for_test();
+        let toolset = bridge.toolset();
+        register_fixture(
+            &toolset,
+            "fixture_ns:ReadThing",
+            ToolKind::Read,
+            "fixture_ns:ReadThing",
+        );
+
+        assert_eq!(
+            bridge.tool_kind("fixture_ns_ReadThing"),
+            Some(ToolKind::Read),
+            "underscored wire name must resolve the colon-registered Read tool"
+        );
+        assert_eq!(
+            bridge.tool_kind("fixture_ns:ReadThing"),
+            Some(ToolKind::Read),
+            "canonical colon name must keep resolving"
+        );
     }
 
     /// Design doc Q1 规则 1 (bridge surface): `tools_for_kind`

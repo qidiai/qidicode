@@ -410,6 +410,21 @@ pub(crate) async fn handle_subagent_request(
             "Applied capability mode filter to agent tool config"
         );
     }
+    // F4: capability filtering only removes tools that are already in the
+    // agent definition. `AgentBuilder` then re-adds its default
+    // `OpenCodeWriteTool` when it finds no write tool, which re-enabled writes
+    // for read-only/execute children. Propagate the verdict to the builder via
+    // `write_file_enabled` so the fallback injection is suppressed too.
+    let capability_write_allowed = effective_runtime
+        .capability_mode
+        .map(|mode| mode.allows_write())
+        .unwrap_or(true);
+    if !capability_write_allowed {
+        tracing::info!(
+            subagent_id = % request.id,
+            "Capability mode forbids writes; suppressing default write tool injection"
+        );
+    }
     {
         use cf_tools::implementations::qidi_build::task::MAX_SUBAGENT_DEPTH;
         use cf_tools::types::tool::ToolKind;
@@ -1177,7 +1192,7 @@ pub(crate) async fn handle_subagent_request(
             ctx.image_gen_config.clone(),
             ctx.video_gen_config.clone(),
             ctx.app_builder_deployer_config.clone(),
-            ctx.write_file_enabled,
+            ctx.write_file_enabled && capability_write_allowed,
             ctx.goal_enabled,
             true,
             ctx.ask_user_question_enabled,
