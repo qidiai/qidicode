@@ -47,13 +47,17 @@ CLI_GLOB = os.path.join(ARTCRAFT_BIN, "wordcraft-*-windows-x64-portable",
 CLI_TIMEOUT = 180          # 单次 CLI 调用超时（秒）
 MAX_RENDER_PAGES = 20      # all 模式渲染上限，防爆
 MAX_INLINE_TEXT = 20000    # 超过该字符数的 text 只落盘不刷屏
+DEFAULT_OUT_DIR = os.path.join(tempfile.gettempdir(), "craft_verify_out")
+OUT_DIR_TTL = 24 * 3600    # 默认输出目录中文本/PNG 的保留时长（秒）
 
 RE_VERSION = re.compile(r"wordcraft-([0-9]+(?:\.[0-9]+)*)-windows-x64-portable")
 
 # R19 修订风险计数（独立实现，禁止 import 标书软件代码）
-RE_REV_DELTEXT = re.compile(r"<w:delText[ >/]")
-RE_REV_SYM = re.compile(r"<w:sym[ >/]")
-RE_REV_TXBX = re.compile(r"<w:txbxContent")
+# 字符类含 \n：标签名后紧跟换行（如 "<w:delText\n"）也是合法标记边界，
+# 与标书软件 utils/craft_bridge.py 的 R19 三模式保持逐字一致。
+RE_REV_DELTEXT = re.compile(r"<w:delText[ >/\n]")
+RE_REV_SYM = re.compile(r"<w:sym[ >/\n]")
+RE_REV_TXBX = re.compile(r"<w:txbxContent[ >/\n]")
 
 
 # ---------------------------------------------------------------- CLI 解析
@@ -152,14 +156,33 @@ def _revision_risk(docx):
     risk["deltext_count"] = len(RE_REV_DELTEXT.findall(xml))
     risk["sym_count"] = len(RE_REV_SYM.findall(xml))
     risk["txbx_content_count"] = len(RE_REV_TXBX.findall(xml))
-    risk["revision_present"] = risk["deltext_count"] > 0
+    # P3-3: 与 craft_bridge._revision_markers 对齐——risk 只看 delText/sym；
+    # txbx（文本框）仅单列计数，不参与 risk（文本框属已知限制，不等于修订）。
+    risk["revision_present"] = (risk["deltext_count"] > 0
+                                or risk["sym_count"] > 0)
     return risk
+
+
+def _cleanup_dir(directory, max_age=OUT_DIR_TTL):
+    """清理目录中超过 max_age 秒的文件（每次运行调用；目录不存在不报错）。"""
+    try:
+        now = time.time()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                try:
+                    if entry.is_file() and now - entry.stat().st_mtime > max_age:
+                        os.remove(entry.path)
+                except OSError:
+                    pass
+    except OSError:
+        pass
 
 
 def _text_file_path(docx):
     digest = hashlib.md5(os.path.abspath(docx).encode("utf-8")).hexdigest()[:8]
     stem = os.path.splitext(os.path.basename(docx))[0]
-    return os.path.join(tempfile.gettempdir(), f"craft_verify_text_{stem}_{digest}.txt")
+    os.makedirs(DEFAULT_OUT_DIR, exist_ok=True)
+    return os.path.join(DEFAULT_OUT_DIR, f"craft_verify_text_{stem}_{digest}.txt")
 
 
 def _resolve_pages(spec, total_pages):
@@ -188,11 +211,12 @@ def _do_render(cli, docx, pages_spec, out_dir, scale):
     tokens = [t.strip().lower() for t in pages_spec.split(",") if t.strip()]
     needs_total = any(t in ("mid", "last", "all") for t in tokens)
     total_pages = None
-    if needs_total:
-        info, err = _read_info(cli, docx)
-        if info is None:
-            return {"ok": False, "error": err}
+    info, info_err = _read_info(cli, docx)
+    if info is not None:
         total_pages = int(info.get("pages") or 0)
+    if needs_total:
+        if info is None:
+            return {"ok": False, "error": info_err}
         if total_pages <= 0:
             return {"ok": False, "error": "info 未返回有效页数"}
     try:
@@ -206,7 +230,20 @@ def _do_render(cli, docx, pages_spec, out_dir, scale):
     os.makedirs(out_dir, exist_ok=True)
     start = time.perf_counter()
     pngs, errors = [], []
-    for n in pages:
+    # P3-4 显式页码上界预检：info 页数已知时，越界页在调用 CLI 前记入 errors，
+    # 不中断其余页（渲染循环只跑 1..total_pages 内的页）。
+    render_pages = pages
+    if total_pages:
+        render_pages = []
+        for n in pages:
+            if n < 1 or n > total_pages:
+                errors.append({
+                    "page": n,
+                    "error": f"页码越界: {n} 不在 1..{total_pages}（info pages={total_pages}）",
+                })
+            else:
+                render_pages.append(n)
+    for n in render_pages:
         png = os.path.join(out_dir, f"p{n}.png")
         rc, out, err, timed_out = _run_cli(
             cli, ["render", docx, png, "--page", str(n), "--scale", str(scale)])
@@ -245,15 +282,22 @@ def _do_text(cli, docx, out_file=None):
         return result
 
     text_file = None
+    _cleanup_dir(DEFAULT_OUT_DIR)   # P3-5: 每次运行清理默认输出目录中 >24h 文件
     if out_file:
-        text_file = os.path.abspath(os.path.expanduser(out_file))
+        out_path = os.path.abspath(os.path.expanduser(out_file))
+        # --out 指向目录（已存在目录 / 以分隔符结尾）时落该目录，否则按文件路径
+        if os.path.isdir(out_path) or out_file.endswith(("/", "\\")):
+            os.makedirs(out_path, exist_ok=True)
+            text_file = os.path.join(out_path, os.path.basename(_text_file_path(docx)))
+        else:
+            text_file = out_path
         os.makedirs(os.path.dirname(text_file) or ".", exist_ok=True)
         with open(text_file, "w", encoding="utf-8", newline="") as f:
             f.write(text)
         result["text_file"] = text_file
     if len(text) > MAX_INLINE_TEXT:
         if text_file is None:
-            text_file = _text_file_path(docx)
+            text_file = _text_file_path(docx)   # 专用 tempdir（%TEMP%/craft_verify_out）
             with open(text_file, "w", encoding="utf-8", newline="") as f:
                 f.write(text)
             result["text_file"] = text_file
@@ -335,6 +379,25 @@ def _make_fixture(path):
             z.writestr(name, data)
 
 
+def _make_sym_fixture(path):
+    """python-docx 造仅含 w:sym 符号字面量的 fixture（无 delText 修订删除）。"""
+    import docx  # 仅 selftest 依赖
+
+    d = docx.Document()
+    d.add_paragraph("符号字面量自检：仅有 sym，无修订删除。")
+    d.save(path)
+
+    with zipfile.ZipFile(path) as z:
+        entries = {name: z.read(name) for name in z.namelist()}
+    xml = entries["word/document.xml"].decode("utf-8")
+    inject = '<w:p><w:r><w:sym w:font="Wingdings" w:char="F0A7"/></w:r></w:p>'
+    xml = xml.replace("</w:body>", inject + "</w:body>", 1)
+    entries["word/document.xml"] = xml.encode("utf-8")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in entries.items():
+            z.writestr(name, data)
+
+
 def _selftest():
     failures = []
 
@@ -349,6 +412,16 @@ def _selftest():
     if not check("wordcraft-cli 解析", cli is not None, cli or "不存在"):
         print("SELFTEST FAILED: wordcraft-cli 不存在")
         return 1
+
+    # P3-1/P3-2 正则边界用例（纯内存，无需 CLI）
+    deltext_nl = "<w:delText\n"
+    txbx_bad = "<w:txbxContentX"
+    check("R19 '<w:delText\\n' 计数=1",
+          len(RE_REV_DELTEXT.findall(deltext_nl)) == 1,
+          f"count={len(RE_REV_DELTEXT.findall(deltext_nl))}")
+    check("R19 '<w:txbxContentX' 计数=0",
+          len(RE_REV_TXBX.findall(txbx_bad)) == 0,
+          f"count={len(RE_REV_TXBX.findall(txbx_bad))}")
 
     workdir = tempfile.mkdtemp(prefix="craft_verify_selftest_")
     try:
@@ -372,6 +445,37 @@ def _selftest():
         check("revision_risk.deltext_count>0",
               int(risk.get("deltext_count") or 0) > 0,
               f"deltext_count={risk.get('deltext_count')}")
+
+        # P3-3 仅 sym 的 fixture -> revision_present=True
+        sym_fixture = os.path.join(workdir, "sym_fixture.docx")
+        _make_sym_fixture(sym_fixture)
+        sym_risk = _revision_risk(sym_fixture)
+        check("P3-3 仅 sym -> revision_present=True",
+              int(sym_risk.get("sym_count") or 0) > 0
+              and int(sym_risk.get("deltext_count") or 0) == 0
+              and sym_risk.get("revision_present") is True,
+              f"sym_count={sym_risk.get('sym_count')} "
+              f"deltext_count={sym_risk.get('deltext_count')} "
+              f"revision_present={sym_risk.get('revision_present')}")
+
+        # P3-4 越界页预检：page 99 记 errors，page 1 照常渲染
+        oob = _do_render(cli, fixture, "1,99",
+                         os.path.join(workdir, "png_oob"), 2)
+        oob_errors = [e.get("page") for e in (oob.get("errors") or [])]
+        check("P3-4 越界页预检(99 记错/1 照渲染)",
+              oob.get("ok") is False and 99 in oob_errors
+              and len(oob.get("pngs") or []) == 1,
+              f"error_pages={oob_errors} pngs={len(oob.get('pngs') or [])}")
+
+        # P3-5 每次运行清理默认输出目录中 >24h 的文件
+        os.makedirs(DEFAULT_OUT_DIR, exist_ok=True)
+        stale = os.path.join(DEFAULT_OUT_DIR, "stale_selftest.txt")
+        with open(stale, "w", encoding="utf-8") as f:
+            f.write("stale")
+        old_ts = time.time() - 25 * 3600
+        os.utime(stale, (old_ts, old_ts))
+        _do_text(cli, fixture)
+        check("P3-5 清理 >24h 落盘文件", not os.path.exists(stale), stale)
 
         inspect_result = _do_inspect(cli, fixture)
         check("inspect ok", bool(inspect_result.get("ok"))
@@ -400,13 +504,17 @@ def main(argv=None):
     p_render.add_argument("docx")
     p_render.add_argument("--pages", default="1,mid,last",
                           help="1,3,5 / mid / last / all（可混用，上限 20 页）")
-    p_render.add_argument("--out", default="_craft_check", help="PNG 输出目录")
+    p_render.add_argument("--out", default=DEFAULT_OUT_DIR,
+                          help="PNG 输出目录（默认 %%TEMP%%/craft_verify_out = %s）"
+                               % DEFAULT_OUT_DIR)
     p_render.add_argument("--scale", type=float, default=2.0)
     p_render.set_defaults(func=cmd_render)
 
     p_text = sub.add_parser("text", help="文本回读 + 修订风险标注")
     p_text.add_argument("docx")
-    p_text.add_argument("--out", default=None, help="文本落盘路径(可选)")
+    p_text.add_argument("--out", default=DEFAULT_OUT_DIR,
+                        help="文本落盘路径或目录（默认 %%TEMP%%/craft_verify_out = %s；"
+                             "传目录时落 <dir>/craft_verify_text_*.txt）" % DEFAULT_OUT_DIR)
     p_text.set_defaults(func=cmd_text)
 
     p_inspect = sub.add_parser("inspect", help="结构回读(页数/段落/表格)")
