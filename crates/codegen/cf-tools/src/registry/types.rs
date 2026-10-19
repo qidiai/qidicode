@@ -1573,6 +1573,57 @@ impl FinalizedToolset {
             .unwrap_or_else(|_| cf_tool_protocol::ToolId::new("unknown").expect("valid"));
         cf_tool_runtime::ToolError::not_found(tid, format!("Tool not found: {tool_name}"))
     }
+    /// Resolve a tool entry for dispatch, tolerating the colon↔underscore
+    /// drift some API relays introduce: providers commonly reject `:` in
+    /// function names and rewrite it to `_` on the wire, so a call can
+    /// arrive as `qidi_build_SchedulerCreate` while the registered ToolId
+    /// is `qidi_build:SchedulerCreate`. Lookup order: exact `client_name`
+    /// first (zero behavior change for well-formed names), then both the
+    /// wire name and every registered `client_name`/`id` are compared in
+    /// the underscore domain (`:` → `_`). Ambiguous matches (two registry
+    /// entries canonicalizing to the same wire name) resolve to `None`
+    /// rather than guessing a tool. Returns `None` only when no candidate
+    /// matches.
+    fn find_for_dispatch<'a>(
+        tools: &'a [FinalizedTool],
+        name: &str,
+    ) -> Option<&'a FinalizedTool> {
+        if let Some(tool) = tools.iter().find(|t| t.client_name == name) {
+            return Some(tool);
+        }
+        if !name.contains('_') && !name.contains(':') {
+            return None;
+        }
+        let canonical = Self::canonical_dispatch_name(name);
+        let mut hits = tools.iter().filter(|t| {
+            Self::canonical_dispatch_name(&t.client_name) == canonical
+                || Self::canonical_dispatch_name(&t.id) == canonical
+        });
+        let first = hits.next()?;
+        // A second canonical hit means the wire name is ambiguous — better
+        // to report "Tool not found" than to dispatch to the wrong tool.
+        if hits.next().is_some() {
+            tracing::warn!(
+                wire_name = name,
+                resolved = % first.client_name,
+                "ambiguous colon↔underscore tool name; refusing to guess"
+            );
+            return None;
+        }
+        Some(first)
+    }
+    /// Canonical form for colon↔underscore tolerant tool lookup: the wire
+    /// sanitizes `:` → `_`, so compare both sides with colons folded to
+    /// underscores (`qidi_build:SchedulerCreate` and
+    /// `qidi_build_SchedulerCreate` both become `qidi_build_SchedulerCreate`).
+    /// Names without a colon are returned unchanged (no allocation).
+    fn canonical_dispatch_name(name: &str) -> std::borrow::Cow<'_, str> {
+        if name.contains(':') {
+            std::borrow::Cow::Owned(name.replace(':', "_"))
+        } else {
+            std::borrow::Cow::Borrowed(name)
+        }
+    }
     pub async fn try_parse(
         &self,
         tool_name: &str,
@@ -1580,9 +1631,7 @@ impl FinalizedToolset {
     ) -> Result<ToolInput, cf_tool_runtime::ToolError> {
         let (reverse_params, parse_input) = {
             let tools = self.tools.read();
-            let tool = tools
-                .iter()
-                .find(|t| t.client_name == tool_name)
+            let tool = Self::find_for_dispatch(&tools, tool_name)
                 .ok_or_else(|| Self::tool_not_found_error(tool_name))?;
             (tool.reverse_params.clone(), tool.parse_input.clone())
         };
@@ -1617,9 +1666,7 @@ impl FinalizedToolset {
     ) -> Result<crate::types::output::ToolOutput, cf_tool_runtime::ToolError> {
         let (registry_id, output_converter, reverse_params) = {
             let tools = self.tools.read();
-            let entry = tools
-                .iter()
-                .find(|t| t.client_name == tool_name)
+            let entry = Self::find_for_dispatch(&tools, tool_name)
                 .ok_or_else(|| Self::tool_not_found_error(tool_name))?;
             (
                 entry.registry_id.clone(),
@@ -1733,9 +1780,7 @@ impl FinalizedToolset {
     ) -> Result<DispatchParts, cf_tool_runtime::ToolError> {
         let (registry_id, output_converter, reverse_params) = {
             let tools = self.tools.read();
-            let entry = tools
-                .iter()
-                .find(|t| t.client_name == tool_name)
+            let entry = Self::find_for_dispatch(&tools, tool_name)
                 .ok_or_else(|| Self::tool_not_found_error(tool_name))?;
             (
                 entry.registry_id.clone(),
@@ -1854,9 +1899,7 @@ impl FinalizedToolset {
     pub fn remap_params(&self, tool_name: &str, tool_args: serde_json::Value) -> serde_json::Value {
         let reverse_params = {
             let tools = self.tools.read();
-            tools
-                .iter()
-                .find(|t| t.client_name == tool_name)
+            Self::find_for_dispatch(&tools, tool_name)
                 .map(|t| t.reverse_params.clone())
                 .unwrap_or_default()
         };
@@ -4845,5 +4888,196 @@ mod tests {
             "gate ON must produce ≥ 1 Progress frame via workspace dispatch, got {progress_count}",
         );
         assert!(got_terminal, "must observe terminal");
+    }
+    /// F1 (2026-10-19 缺陷修复方案): every registered colon-family tool must
+    /// be callable via its relay-sanitized advertised name (`:` → `_`). The
+    /// bug: `qidi_build_SchedulerCreate` 广告即败 `Tool not found` because
+    /// `try_parse` matched `client_name` exactly and the wire name carries
+    /// underscores while the registry id is colon-separated.
+    ///
+    /// `CreateTask` / `CompleteTask` / `LoopSchedule` are slash-command
+    /// constants only — no tool implementation registers them, so there is
+    /// nothing to make callable for those three.
+    #[tokio::test]
+    async fn colon_family_advertised_names_resolve_in_try_parse() {
+        let tmp = TempDir::new().unwrap();
+        let builder = ToolRegistryBuilder::new();
+        let config = ToolServerConfig {
+            tools: vec![
+                ToolConfig::for_tool::<qidi_build::SchedulerCreateTool>(),
+                ToolConfig::for_tool::<qidi_build::SchedulerDeleteTool>(),
+                ToolConfig::for_tool::<qidi_build::UpdateGoalTool>(),
+                ToolConfig::for_tool::<qidi_build::ImageGenTool>(),
+                ToolConfig::for_tool::<qidi_build::ImageToVideoTool>(),
+            ],
+            behavior_preset: None,
+        };
+        let toolset = builder
+            .finalize(config, test_session_context(&tmp))
+            .expect("colon-family toolset should finalize");
+        // (advertised wire name, params, human-readable contract label)
+        let cases: Vec<(&str, serde_json::Value, &str)> = vec![
+            (
+                "qidi_build_SchedulerCreate",
+                serde_json::json!({ "interval" : "60s", "prompt" : "noop" }),
+                "SchedulerCreate advertised name must parse (R-003)",
+            ),
+            (
+                "scheduler_delete",
+                serde_json::json!({ "id" : "noop" }),
+                "SchedulerDelete advertised name must parse (R-003)",
+            ),
+            (
+                "qidi_build_UpdateGoal",
+                serde_json::json!({ "message" : "progress" }),
+                "UpdateGoal advertised name must parse (R-003)",
+            ),
+            (
+                "image_gen",
+                serde_json::json!({ "prompt" : "a red square" }),
+                "ImageGen advertised name must parse (R-003)",
+            ),
+            (
+                "qidi_build_ImageToVideo",
+                serde_json::json!({ "image" : "https://example.invalid/x.png" }),
+                "ImageToVideo advertised name must parse (R-003)",
+            ),
+        ];
+        for (wire_name, params, label) in cases {
+            let input = toolset
+                .try_parse(wire_name, &params)
+                .await
+                .unwrap_or_else(|e| panic!("{label}: try_parse({wire_name}) failed: {e}"));
+            assert!(
+                !matches!(input, crate::types::tool_io::ToolInput::MCPTool(_)),
+                "{label}: {wire_name} must not fall through to MCP passthrough"
+            );
+        }
+        // Sanity: the canonical colon form (relay converts back) resolves too.
+        let canonical_params = serde_json::json!({ "interval" : "60s", "prompt" : "noop" });
+        toolset
+            .try_parse("qidi_build:SchedulerCreate", &canonical_params)
+            .await
+            .expect("canonical colon form qidi_build:SchedulerCreate must parse (R-003)");
+        // Sanity: a genuinely unknown name still reports Tool not found.
+        let err = toolset
+            .try_parse("qidi_build_NoSuchTool", &serde_json::json!({}))
+            .await
+            .expect_err("unknown tool must still fail");
+        assert!(
+            err.to_string().contains("Tool not found"),
+            "unknown-tool error must say 'Tool not found', got: {err}"
+        );
+    }
+    /// F1: end-to-end dispatch with the advertised (underscored) name —
+    /// SchedulerCreate with harmless params (no fire_immediately, 60s
+    /// interval) then SchedulerDelete cleans it up. Asserts the full
+    /// `call` path, not just parsing, no longer returns Tool not found.
+    #[tokio::test]
+    async fn scheduler_create_delete_roundtrip_via_advertised_name() {
+        let tmp = TempDir::new().unwrap();
+        let builder = ToolRegistryBuilder::new();
+        let config = ToolServerConfig {
+            tools: vec![
+                ToolConfig::for_tool::<qidi_build::SchedulerCreateTool>(),
+                ToolConfig::for_tool::<qidi_build::SchedulerDeleteTool>(),
+                ToolConfig::for_tool::<qidi_build::SchedulerListTool>(),
+            ],
+            behavior_preset: None,
+        };
+        let toolset = Arc::new(
+            builder
+                .finalize(config, test_session_context(&tmp))
+                .expect("scheduler toolset should finalize"),
+        );
+        let created = toolset
+            .call(
+                "qidi_build_SchedulerCreate",
+                serde_json::json!({ "interval" : "60s", "prompt" : "noop contract probe",
+                    "recurring" : false, "fire_immediately" : false }),
+                "contract-call-1",
+                None,
+            )
+            .await
+            .expect("qidi_build_SchedulerCreate must dispatch (R-003: no Tool not found)");
+        let job_id = match created.output {
+            crate::types::output::ToolOutput::SchedulerCreate(o) => o.id,
+            other => panic!(
+                "create output must be SchedulerCreate, got {:?}",
+                std::mem::discriminant(&other)
+            ),
+        };
+        assert!(!job_id.is_empty(), "create output must carry the job id");
+        // The task must be listed (proves it landed in the actor) ...
+        let listed = toolset
+            .call("scheduler_list", serde_json::json!({}), "contract-call-2", None)
+            .await
+            .expect("qidi_build_scheduler_list must dispatch");
+        let listed_ids: Vec<String> = match listed.output {
+            crate::types::output::ToolOutput::SchedulerList(o) => {
+                o.tasks.into_iter().map(|t| t.id).collect()
+            }
+            _ => panic!("list output must be SchedulerList"),
+        };
+        assert!(
+            listed_ids.contains(&job_id),
+            "scheduler_list must contain the created job id {job_id}, got: {listed_ids:?}"
+        );
+        // ... and immediately removable, so the probe leaves no scheduled work.
+        toolset
+            .call(
+                "scheduler_delete",
+                serde_json::json!({ "id" : job_id }),
+                "contract-call-3",
+                None,
+            )
+            .await
+            .expect("qidi_build_scheduler_delete must dispatch");
+    }
+    /// F1 prerequisite (修复方案要求): prove the `_`→`:` fallback cannot
+    /// cross-resolve two different tools. Enumerate the ENTIRE built-in
+    /// registry, finalize it, and assert that for every colon-form derived
+    /// from any registered `client_name`/`id`, at most one tool matches.
+    #[tokio::test]
+    async fn dispatch_normalization_collision_free_across_full_registry() {
+        let builder = ToolRegistryBuilder::new();
+        let ids: Vec<String> = builder.tools.keys().cloned().collect();
+        assert!(
+            ids.len() >= 30,
+            "expected the full built-in registry, got only {} entries",
+            ids.len()
+        );
+        // Enumerate the registry instead of a finalized toolset: the
+        // registry deliberately holds namespace variants that share a
+        // client-facing name (`QidiBuild:read_file` vs `Codex:read_file`),
+        // which `finalize` rejects by design when both are requested. What
+        // matters for the dispatch fallback is that no two DIFFERENT
+        // registered ids canonicalize to the same wire name.
+        let mut canonical_owner: std::collections::HashMap<String, String> = Default::default();
+        for (registered_id, entry) in builder.tools.iter() {
+            let mut forms = vec![
+                registered_id.clone(),
+                format!("{}:{}", entry.namespace, entry.id),
+            ];
+            forms.sort();
+            forms.dedup();
+            for form in forms {
+                let canonical = form.replace(':', "_");
+                if let Some(prev) = canonical_owner.get(&canonical) {
+                    assert!(
+                        prev == &form,
+                        "normalization collision: {prev:?} and {form:?} both canonicalize \
+                         to {canonical:?}"
+                    );
+                } else {
+                    canonical_owner.insert(canonical, form);
+                }
+            }
+        }
+        assert!(
+            canonical_owner.len() >= 30,
+            "expected the full built-in registry, got only {} canonical names",
+            canonical_owner.len()
+        );
     }
 }

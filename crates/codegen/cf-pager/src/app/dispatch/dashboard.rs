@@ -89,6 +89,7 @@ fn configure_dashboard_state(app: &mut AppView) {
             .sync_acp_commands(&bootstrap_commands, None, &models);
         d.models = models;
         d.pending_model = None;
+        d.pending_agent_type = None;
         d.pending_mode = if default_yolo {
             crate::views::dashboard::DashboardDispatchMode::AlwaysApprove
         } else {
@@ -627,12 +628,20 @@ pub(super) fn dispatch_dashboard_create_new_agent_with_detail(app: &mut AppView)
         .as_ref()
         .map(|d| d.pending_mode)
         .unwrap_or_default();
+    // F8: staged agent type (`/agent <name>`) rides the CreateSession effect
+    // as `_meta.agentName`; the shell binds the resolved definition to the
+    // new session.
+    let pending_agent_type = app
+        .dashboard
+        .as_ref()
+        .and_then(|d| d.pending_agent_type.clone());
     let model_id = pending_model.as_ref().map(|m| m.id.clone());
     log_dashboard_launched("new_agent_button");
-    let (new_id, effects) = dispatch_new_session_inner_with_id(app, model_id);
+    let (new_id, effects) = dispatch_new_session_inner_with_id(app, model_id, pending_agent_type.clone());
     let policy_block = app.yolo_policy_block;
     if let Some(agent) = app.agents.get_mut(&new_id) {
         apply_pending_dispatch_config(agent, pending_model.as_ref(), pending_mode, policy_block);
+        agent.dispatch_agent_type = pending_agent_type;
     }
     if let Some(d) = app.dashboard.as_mut() {
         // Clear the dispatch input even though we don't enqueue
@@ -909,6 +918,13 @@ pub(super) fn dispatch_dashboard_confirm_worktree(
         .as_ref()
         .map(|d| d.pending_mode)
         .unwrap_or_default();
+    // F8: staged agent type rides the worktree's fresh-create
+    // `NewSessionRequest` as `_meta.agentName` (resume path keeps its own
+    // binding).
+    let pending_agent_type = app
+        .dashboard
+        .as_ref()
+        .and_then(|d| d.pending_agent_type.clone());
     if !app.cwd_has_git_ancestor {
         if let Some(d) = app.dashboard.as_mut() {
             // Restore the typed prompt if the cwd stopped being a repo.
@@ -926,8 +942,16 @@ pub(super) fn dispatch_dashboard_confirm_worktree(
         (None, Vec::new(), Vec::new())
     };
     let model_id = pending_model.as_ref().map(|m| m.id.clone());
-    let effects =
-        dispatch_new_worktree_session(app, None, label, prompt_text, model_id, None, None);
+    let effects = dispatch_new_worktree_session(
+        app,
+        None,
+        label,
+        prompt_text,
+        model_id,
+        pending_agent_type.clone(),
+        None,
+        None,
+    );
     if let Some(new_id) = effects.iter().find_map(|e| match e {
         Effect::CreateWorktreeSession { agent_id, .. } => Some(*agent_id),
         _ => None,
@@ -944,6 +968,7 @@ pub(super) fn dispatch_dashboard_confirm_worktree(
                 pending_mode,
                 policy_block,
             );
+            agent.dispatch_agent_type = pending_agent_type;
             if let Some(entry) = agent.session.pending_prompts.back_mut() {
                 entry.images = std::mem::take(&mut images);
                 entry.chip_elements = chip_elements;
@@ -1122,6 +1147,12 @@ pub(super) fn dispatch_dashboard_dispatch(
         .as_ref()
         .map(|d| d.pending_mode)
         .unwrap_or_default();
+    // F8: staged agent type (`/agent <name>`) → `_meta.agentName` on the
+    // new session.
+    let pending_agent_type = app
+        .dashboard
+        .as_ref()
+        .and_then(|d| d.pending_agent_type.clone());
     let model_id = pending_model.as_ref().map(|m| m.id.clone());
     let prompt_state = app
         .dashboard
@@ -1138,7 +1169,8 @@ pub(super) fn dispatch_dashboard_dispatch(
     log_dashboard_launched("prompt");
     let saved_shown = app.project_picker_shown;
     app.project_picker_shown = true;
-    let (new_id, effects) = dispatch_new_session_inner_with_id(app, model_id);
+    let (new_id, effects) =
+        dispatch_new_session_inner_with_id(app, model_id, pending_agent_type.clone());
     app.project_picker_shown = saved_shown;
     let policy_block = app.yolo_policy_block;
     if let Some(agent) = app.agents.get_mut(&new_id) {
@@ -1148,6 +1180,7 @@ pub(super) fn dispatch_dashboard_dispatch(
             entry.chip_elements = chip_elements;
         }
         apply_pending_dispatch_config(agent, pending_model.as_ref(), pending_mode, policy_block);
+        agent.dispatch_agent_type = pending_agent_type;
     }
     crate::prompt_images::drain_and_cleanup(&mut pasted_images);
     // Only clear the input AFTER successful session
@@ -1230,6 +1263,22 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
     let trimmed = text.trim().to_string();
     if trimmed.is_empty() || !trimmed.starts_with('/') {
         return vec![];
+    }
+
+    // F8: `/agent <name>` stages the agent type for the NEXT agent spawned
+    // from the dispatch input. Intercepted BEFORE the registry lookup: it is
+    // a dashboard-dispatch staging affordance (not a session slash command),
+    // and an unknown token must never fall through to
+    // `dispatch_dashboard_dispatch` where it would become a new session's
+    // first prompt. Bare `/agent` clears the staging back to the default
+    // agent resolution.
+    if trimmed == "/agent" || trimmed.starts_with("/agent ") {
+        let name = trimmed
+            .strip_prefix("/agent")
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        return stage_dashboard_agent_type(app, name);
     }
 
     let coding_data_sharing_opt_out_from_app = app.coding_data_retention_opt_out;
@@ -1494,6 +1543,111 @@ fn stage_dashboard_model(
             display,
         });
     }
+}
+
+/// Stage (`/agent <name>`) or clear (bare `/agent`) the agent type applied to
+/// the NEXT agent spawned from the dispatch input — the agent-type sibling of
+/// [`stage_dashboard_model`]. Validation is best-effort UX against the same
+/// discovery chain the shell runs (built-ins + `.qidi/agents/` +
+/// `~/.qidi/agents/`); the shell's `session/new` handler stays the source of
+/// truth and fails with `invalid_params` on names that slip through.
+pub(super) fn stage_dashboard_agent_type(app: &mut AppView, name: String) -> Vec<Effect> {
+    let Some(d) = app.dashboard.as_mut() else {
+        return vec![];
+    };
+    d.dispatch.set_text("");
+    d.error_toast = None;
+    if name.is_empty() {
+        let previous = d.pending_agent_type.take();
+        d.error_toast = Some(match previous {
+            Some(prev) => format!(
+                "✓ agent type reset (was {prev}); next dispatch uses default agent resolution"
+            ),
+            None => "agent type not staged; next dispatch uses default agent resolution".to_string(),
+        });
+        return vec![];
+    }
+    let cwd = d.cwd.clone();
+    match validate_dashboard_agent_type(&name, &cwd) {
+        Ok(()) => {
+            d.pending_agent_type = Some(name.clone());
+            d.error_toast =
+                Some(format!("✓ agent type: {name} (applies to next dispatched agent)"));
+        }
+        Err(msg) => {
+            d.set_error_toast(&msg);
+        }
+    }
+    vec![]
+}
+
+/// Candidate agent-type names for `/agent <name>` and the `Alt+A` picker:
+/// user-visible built-ins (`general-purpose`, `explore`, `plan`, …) plus
+/// discovered file-based agents, reusing the agents modal's discovery
+/// (read-only reference).
+pub(super) fn dashboard_agent_type_candidates(
+    cwd: &std::path::Path,
+) -> Vec<crate::views::dashboard::AgentTypeCandidate> {
+    crate::views::agents_modal::build_agent_list(cwd, &std::collections::HashMap::new())
+        .into_iter()
+        .map(|entry| crate::views::dashboard::AgentTypeCandidate {
+            name: entry.name,
+            description: entry.description,
+        })
+        .collect()
+}
+
+/// Best-effort pager-side validation of a staged agent type. Returns `Err`
+/// with the available-name list for the error toast.
+fn validate_dashboard_agent_type(name: &str, cwd: &std::path::Path) -> Result<(), String> {
+    let candidates = dashboard_agent_type_candidates(cwd);
+    if candidates.iter().any(|c| c.name == name) {
+        Ok(())
+    } else {
+        let shown: Vec<String> = candidates.into_iter().map(|c| c.name).collect();
+        Err(format!(
+            "Unknown agent type '{name}'. Available: {}",
+            shown.join(", ")
+        ))
+    }
+}
+
+/// Open the agent-type picker (F8 — `Alt+A`). Builds the candidate list
+/// from the same discovery chain the shell uses, highlighting the staged
+/// type (or `general-purpose` when nothing is staged).
+pub(super) fn dispatch_dashboard_open_agent_picker(app: &mut AppView) -> Vec<Effect> {
+    let Some(d) = app.dashboard.as_mut() else {
+        return vec![];
+    };
+    let candidates = dashboard_agent_type_candidates(&d.cwd);
+    d.agent_picker = Some(crate::views::dashboard::AgentTypePickerState::new(
+        candidates,
+        d.pending_agent_type.clone(),
+    ));
+    crate::unified_log::info("dashboard.agent_picker.opened", None, None);
+    vec![]
+}
+
+/// Stage the picker's highlighted agent type and close the modal. Same
+/// staging semantics as `/agent <name>` (sticky across dispatches, reset
+/// on dashboard-open); the shell validates again and fails loudly on a
+/// name that disappeared between open and confirm.
+pub(super) fn dispatch_dashboard_confirm_agent_type(
+    app: &mut AppView,
+    name: String,
+) -> Vec<Effect> {
+    if let Some(d) = app.dashboard.as_mut() {
+        d.agent_picker = None;
+    }
+    stage_dashboard_agent_type(app, name)
+}
+
+/// Close the agent-type picker without changing the staged type.
+pub(super) fn dispatch_dashboard_close_agent_picker(app: &mut AppView) -> Vec<Effect> {
+    if let Some(d) = app.dashboard.as_mut() {
+        d.agent_picker = None;
+    }
+    vec![]
 }
 
 /// Apply the dashboard's staged model effort + plan mode to a freshly

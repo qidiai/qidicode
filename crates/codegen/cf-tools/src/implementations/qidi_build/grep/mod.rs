@@ -696,6 +696,19 @@ async fn prepare_grep(
     ctx: &cf_tool_runtime::ToolCallContext,
     input: &GrepSearchInput,
 ) -> Result<GrepStep, cf_tool_runtime::ToolError> {
+    prepare_grep_with_rg(ctx, input, rg_path()).await
+}
+
+/// `prepare_grep` with an explicit ripgrep executable path. Production
+/// always routes through [`prepare_grep`] (which resolves `rg_path()`);
+/// tests inject a nonexistent path here to exercise the spawn-failure
+/// branch deterministically (`rg_path()` itself is `OnceLock`-cached, so
+/// the `RG_BIN_PATH` env var cannot be flipped mid-process).
+async fn prepare_grep_with_rg(
+    ctx: &cf_tool_runtime::ToolCallContext,
+    input: &GrepSearchInput,
+    rg_exec: std::path::PathBuf,
+) -> Result<GrepStep, cf_tool_runtime::ToolError> {
     use crate::types::tool_metadata::{resolve_cwd, shared_resources};
     let resources = shared_resources(ctx)?;
     let cwd = resolve_cwd(ctx, &resources).await?;
@@ -756,8 +769,6 @@ async fn prepare_grep(
 
     let output_mode = input.output_mode.clone().unwrap_or(OutputMode::Content);
     let effective_head_limit = resolve_effective_head_limit(input, &output_mode);
-
-    let rg_exec = rg_path();
 
     let mut cmd = Command::new(rg_exec);
     cmd.arg("--heading")
@@ -835,9 +846,14 @@ async fn prepare_grep(
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
+            // F2 (2026-10-19): the error must be visible to the caller.
+            // Writing it only into `stderr` hides it — the model-facing
+            // render shows `stdout`, so a missing rg binary looked exactly
+            // like "no matches". Mirror the exit_code==2 path below and
+            // put the error in `stdout`.
             return Ok(GrepStep::Early(GrepSearchOutput {
-                stdout: Vec::new(),
-                stderr: format!("Error calling tool: {}", e).into_bytes(),
+                stdout: format!("Error calling tool: {}", e).into_bytes(),
+                stderr: Vec::new(),
                 exit_code: -1,
                 match_count: 0,
                 file_matches: Vec::new(),
@@ -1668,6 +1684,41 @@ mod tests {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("No matches found"));
         assert_eq!(output.match_count, 0);
+    }
+
+    /// F2 (2026-10-19 缺陷修复方案): when the rg binary cannot be spawned
+    /// (missing on PATH, no bundled binary — the Windows default), the tool
+    /// result must carry the error in `stdout`, not hide it in the
+    /// unrendered `stderr` field. Regression shape: empty stdout + stderr
+    /// held "Error calling tool: …", which looked exactly like
+    /// "no matches" to the model.
+    #[tokio::test]
+    async fn tool_grep_spawn_failure_error_visible_in_stdout() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("hello.txt"), "hello world\n").unwrap();
+        let mut resources = Resources::new();
+        resources.insert(Cwd(tmp.path().to_path_buf()));
+        let ctx = test_ctx(resources.into_shared());
+        let bogus = std::path::PathBuf::from("qidi-definitely-not-a-real-rg-binary-9f3a");
+        let step = prepare_grep_with_rg(&ctx, &make_grep_input("hello"), bogus)
+            .await
+            .expect("prepare should short-circuit, not hard-fail");
+        let out = match step {
+            GrepStep::Early(out) => out,
+            GrepStep::Ready(_) => panic!("a nonexistent rg path must not spawn"),
+        };
+        assert_eq!(out.exit_code, -1, "spawn failure keeps exit_code -1");
+        assert_eq!(out.match_count, 0, "spawn failure reports zero matches");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("Error calling tool:"),
+            "spawn error must be visible in stdout (R-003), got: {stdout:?}"
+        );
+        assert!(
+            out.stderr.is_empty(),
+            "stderr must not carry the only copy of the error anymore, got: {:?}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     #[tokio::test]

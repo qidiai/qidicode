@@ -621,6 +621,9 @@ pub fn resolve_default_agent_name(cwd: &Path, model_agent_type: Option<&str>) ->
         &agent_config,
         None,
         model_agent_type,
+        // F8: `_meta.agentName` is per-session only; the modal previews
+        // the process-wide default chain.
+        None,
     )
     .name
 }

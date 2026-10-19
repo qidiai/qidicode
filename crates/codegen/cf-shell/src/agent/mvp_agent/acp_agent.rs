@@ -845,6 +845,11 @@ impl acp::Agent for MvpAgent {
             .as_ref()
             .and_then(|m| m.get("modelId").and_then(|v| v.as_str()))
             .filter(|s| !s.is_empty());
+        // F8: per-session agent type from `_meta.agentName` (dashboard
+        // `/agent <name>` dispatch). Unknown names fail here — never a
+        // silent fallback to the default chain.
+        let custom_agent_name =
+            parse_custom_agent_name(arguments.meta.as_ref(), cwd.as_path())?;
         #[allow(unused_variables)]
         let session_computer_sessions = parse_session_computer_sessions(
             arguments.meta.as_ref(),
@@ -1036,6 +1041,7 @@ impl acp::Agent for MvpAgent {
                     cwd.clone(),
                     arguments.meta.as_ref(),
                     model_agent_type.as_deref(),
+                    custom_agent_name.as_deref(),
                     session_model_id,
                     session_yolo_mode,
                 )
@@ -1063,6 +1069,7 @@ impl acp::Agent for MvpAgent {
                         session_meta: arguments.meta.as_ref(),
                         managed_mcp_expires_at,
                         model_agent_type: model_agent_type.as_deref(),
+                        custom_agent_name: custom_agent_name.as_deref(),
                         session_model_id,
                         session_yolo_mode,
                         session_auto_mode: session_auto_mode && !session_yolo_mode,
@@ -1605,6 +1612,10 @@ impl acp::Agent for MvpAgent {
                         session_meta: request_meta.as_ref(),
                         managed_mcp_expires_at,
                         model_agent_type: persisted_agent_name.as_deref(),
+                        // F8: `_meta.agentName` is a create-time dispatch
+                        // channel; resume rebinds via the persisted agent
+                        // name above.
+                        custom_agent_name: None,
                         session_model_id: summary.current_model_id.clone(),
                         session_yolo_mode,
                         session_auto_mode: session_auto_mode && !session_yolo_mode,

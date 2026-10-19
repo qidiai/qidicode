@@ -10,9 +10,11 @@ use super::ctx::{
 };
 use super::dashboard::{
     dispatch_dashboard_attach, dispatch_dashboard_begin_rename, dispatch_dashboard_change_location,
-    dispatch_dashboard_commit_rename, dispatch_dashboard_confirm_worktree,
+    dispatch_dashboard_close_agent_picker, dispatch_dashboard_commit_rename,
+    dispatch_dashboard_confirm_agent_type, dispatch_dashboard_confirm_worktree,
     dispatch_dashboard_create_new_agent_with_detail, dispatch_dashboard_dispatch,
-    dispatch_dashboard_dispatch_slash, dispatch_dashboard_open_location_picker,
+    dispatch_dashboard_dispatch_slash, dispatch_dashboard_open_agent_picker,
+    dispatch_dashboard_open_location_picker,
     dispatch_dashboard_open_shortcuts_help, dispatch_dashboard_overlay_cycle,
     dispatch_dashboard_overlay_exit, dispatch_dashboard_overlay_stop,
     dispatch_dashboard_peek_cycle_mode, dispatch_dashboard_peek_reply,
@@ -178,7 +180,9 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             load_session_id,
             label,
             git_ref,
-        } => dispatch_new_worktree_session(app, load_session_id, label, None, None, git_ref, None),
+        } => dispatch_new_worktree_session(
+            app, load_session_id, label, None, None, None, git_ref, None,
+        ),
         Action::OpenNewWorktreeDialog => {
             app.new_worktree_dialog = Some(crate::app::app_view::NewWorktreeDialogState::new());
             vec![]
@@ -1128,7 +1132,9 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             persist_mode,
         } => {
             let mut effects = if worktree {
-                dispatch_new_worktree_session(app, None, None, None, None, None, None)
+                dispatch_new_worktree_session(
+                    app, None, None, None, None, None, None, None,
+                )
             } else {
                 dispatch_new_session_inner(app, None)
             };
@@ -1264,6 +1270,14 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             dispatch_dashboard_create_new_agent_with_detail(app)
         }
         Action::DashboardOpenLocationPicker => dispatch_dashboard_open_location_picker(app),
+        // F8: agent-type picker (`Alt+A`). Open / confirm / close mirror the
+        // location picker's three-action shape; staging itself is shared
+        // with the `/agent <name>` slash affordance.
+        Action::DashboardOpenAgentPicker => dispatch_dashboard_open_agent_picker(app),
+        Action::DashboardConfirmAgentType(name) => {
+            dispatch_dashboard_confirm_agent_type(app, name)
+        }
+        Action::DashboardCloseAgentPicker => dispatch_dashboard_close_agent_picker(app),
         Action::DashboardCloseLocationPicker => {
             if let Some(d) = app.dashboard.as_mut() {
                 if let Some(wt) = d.location_picker.as_ref().map(|lp| lp.worktree_mode) {

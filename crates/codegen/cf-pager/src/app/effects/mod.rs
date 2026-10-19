@@ -120,6 +120,7 @@ pub(crate) fn execute(
             agent_id,
             cwd: session_cwd,
             model_id,
+            agent_name,
             preferred_session_id,
             chat_kind,
         } => {
@@ -139,6 +140,15 @@ pub(crate) fn execute(
             if let Some(ref mid) = model_id {
                 meta.get_or_insert_with(acp::Meta::new)
                     .insert("modelId".into(), serde_json::json!(mid.0));
+            }
+            // F8: staged agent type (dashboard `/agent <name>`). Same
+            // non-empty filter as `modelId` — never written when unset,
+            // so the no-selection path stays byte-identical.
+            if let Some(ref name) = agent_name
+                && !name.is_empty()
+            {
+                meta.get_or_insert_with(acp::Meta::new)
+                    .insert("agentName".into(), serde_json::json!(name));
             }
             if let Some(ref sid) = preferred_session_id {
                 meta.get_or_insert_with(acp::Meta::new)
@@ -219,6 +229,7 @@ pub(crate) fn execute(
             label,
             git_ref,
             model_id,
+            agent_name,
             preferred_session_id,
             chat_kind,
         } => {
@@ -235,6 +246,16 @@ pub(crate) fn execute(
             if let Some(ref mid) = model_id {
                 meta.get_or_insert_with(acp::Meta::new)
                     .insert("modelId".into(), serde_json::json!(mid.0));
+            }
+            // F8: staged agent type — fresh-create only (resume path owns
+            // the session's existing agent binding). Same non-empty filter
+            // as `modelId`.
+            if load_session_id.is_none()
+                && let Some(ref name) = agent_name
+                && !name.is_empty()
+            {
+                meta.get_or_insert_with(acp::Meta::new)
+                    .insert("agentName".into(), serde_json::json!(name));
             }
             if load_session_id.is_none() && let Some(ref sid) = preferred_session_id {
                 meta.get_or_insert_with(acp::Meta::new)

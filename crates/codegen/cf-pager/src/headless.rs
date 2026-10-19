@@ -838,6 +838,26 @@ fn headless_materialize_ctx(has_worktree: bool) -> crate::app::session_startup::
     }
 }
 
+/// F3 guard: reject `--worktree` in headless single-turn mode.
+///
+/// The flag is plumbed through `SessionStartupFlags` / `MaterializeCtx` as a
+/// boolean (`has_worktree`) but the single-turn path never creates a worktree
+/// — without this check the run silently proceeds in the plain cwd (exit 0,
+/// unchanged cwd, no `git worktree` entry). Fail loudly instead. The
+/// root-cause fix (worktree creation for headless) is tracked as a separate
+/// batch-2 item in docs/fix-plans/2026-10-19-缺陷修复方案.md (F3 根治).
+fn validate_headless_worktree_flag(worktree: Option<&str>) -> Result<(), String> {
+    if worktree.is_some() {
+        Err(
+            "--worktree is not yet supported in headless single-turn mode; \
+             run without --worktree (TUI supports worktree dispatch)"
+                .to_string(),
+        )
+    } else {
+        Ok(())
+    }
+}
+
 /// Run a headless single-turn prompt.
 ///
 /// Spawns the agent in-process, runs the full ACP lifecycle (init → auth →
@@ -857,6 +877,14 @@ pub async fn run_single_turn(
     };
 
     let mut emitter = HeadlessEmitter::new(options.output_format, options.json_schema.is_some());
+
+    // F3: fail fast (before spawning the shell) when --worktree was passed —
+    // headless single-turn has no worktree-creation path, so accepting the
+    // flag would silently run in the plain cwd.
+    if let Err(msg) = validate_headless_worktree_flag(options.worktree.as_deref()) {
+        emitter.on_error(&msg);
+        anyhow::bail!("{msg}");
+    }
 
     // Load config and spawn agent
     let t_spawn = Instant::now();
@@ -1915,6 +1943,72 @@ mod tests {
             assert!(!ctx.allow_remote_restore);
             assert_eq!(ctx.has_worktree, has_worktree);
         }
+    }
+
+    /// F3: `--worktree=<x>` must be rejected with the explicit "not yet
+    /// supported" message — never silently ignored.
+    #[test]
+    fn worktree_flag_rejected_with_explicit_message() {
+        let err = super::validate_headless_worktree_flag(Some("x"))
+            .expect_err("--worktree=x must be rejected");
+        assert!(
+            err.contains("--worktree is not yet supported"),
+            "message must name --worktree: got {err:?}"
+        );
+    }
+
+    /// F3: no flag → no error (byte-identical to pre-fix behavior).
+    #[test]
+    fn worktree_flag_absent_is_ok() {
+        assert!(super::validate_headless_worktree_flag(None).is_ok());
+    }
+
+    /// F3: `run_single_turn` bails before spawning the shell when
+    /// `--worktree` is set, so the process exits non-zero (anyhow main)
+    /// with the explicit message instead of silently running in the cwd.
+    #[tokio::test]
+    async fn run_single_turn_rejects_worktree_before_spawn() {
+        let tmp = tempfile::tempdir().unwrap();
+        let options = super::HeadlessOptions {
+            session_id: None,
+            resume: None,
+            cwd: Some(tmp.path().to_path_buf()),
+            yolo: false,
+            trust: false,
+            output_format: super::OutputFormat::Plain,
+            json_schema: None,
+            model: None,
+            rules: None,
+            system_prompt_override: None,
+            continue_last_session: false,
+            fork_session: false,
+            worktree: Some("wt-label".to_string()),
+            restore_code: false,
+            agent: None,
+            agents_json: None,
+            cli_tools: None,
+            cli_disallowed_tools: None,
+            disable_web_search: false,
+            allow_rules: Vec::new(),
+            deny_rules: Vec::new(),
+            max_turns: None,
+            permission_mode_flag: None,
+            reasoning_effort: None,
+            self_verify: false,
+            best_of_n: None,
+            wait_for_background: true,
+            background_wait_timeout: std::time::Duration::from_secs(1),
+            no_memory: false,
+            experimental_memory: false,
+        };
+        let prompt = super::HeadlessPrompt::from_text("hi").expect("prompt must parse");
+        let err = super::run_single_turn(prompt, false, options)
+            .await
+            .expect_err("--worktree must fail the run");
+        assert!(
+            err.to_string().contains("--worktree is not yet supported"),
+            "error must carry the explicit message: got {err}"
+        );
     }
 
     #[test]

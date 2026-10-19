@@ -185,6 +185,39 @@ pub(crate) fn jwt_claim_matches_user_subscription_tier(
 fn parse_session_computer_sessions(_meta: Option<&acp::Meta>) -> Option<Vec<()>> {
     None
 }
+/// F8: parse `_meta.agentName` — the per-session agent type staged by the
+/// dashboard's `/agent <name>` dispatch — and check it resolves through the
+/// agent discovery chain (built-ins first, then project `.qidi/agents/`,
+/// then `~/.qidi/agents/`).
+///
+/// Returns `Ok(None)` when the key is absent or empty so the default
+/// resolution chain runs exactly as before (byte-identical to pre-F8).
+/// Unknown names return `invalid_params` — never a silent fallback.
+pub(crate) fn parse_custom_agent_name(
+    meta: Option<&acp::Meta>,
+    cwd: &std::path::Path,
+) -> Result<Option<String>, acp::Error> {
+    let Some(name) = meta
+        .and_then(|m| m.get("agentName"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return Ok(None);
+    };
+    if cf_agent::discovery::by_name_in_cwd(name, cwd).is_some() {
+        Ok(Some(name.to_string()))
+    } else {
+        Err(
+            acp::Error::invalid_params().data(
+                format!(
+                    "Unknown agent type '{name}' in _meta.agentName: not found in the \
+                     agent discovery chain (built-ins, .qidi/agents/, ~/.qidi/agents/)"
+                ),
+            ),
+        )
+    }
+}
 pub(crate) struct SessionSpawnOptions<'a> {
     pub session_info: SessionInfo,
     pub cwd: AbsPathBuf,
@@ -210,6 +243,13 @@ pub(crate) struct SessionSpawnOptions<'a> {
     pub session_meta: Option<&'a acp::Meta>,
     pub managed_mcp_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     pub model_agent_type: Option<&'a str>,
+    /// F8: explicit per-session agent type requested via `_meta.agentName`
+    /// (dashboard `/agent <name>` dispatch). Validated by the `session/new`
+    /// handler (unknown names fail `invalid_params`) and resolved through
+    /// the same discovery chain here; the resolved definition binds to THIS
+    /// session only. `None` → the resolution chain runs exactly as before
+    /// (byte-identical).
+    pub custom_agent_name: Option<&'a str>,
     pub session_model_id: acp::ModelId,
     pub session_yolo_mode: bool,
     pub session_auto_mode: bool,
@@ -321,6 +361,7 @@ pub(crate) fn chat_session_spawn_options<'a>(
     cwd: AbsPathBuf,
     session_meta: Option<&'a acp::Meta>,
     model_agent_type: Option<&'a str>,
+    custom_agent_name: Option<&'a str>,
     session_model_id: acp::ModelId,
     session_yolo_mode: bool,
 ) -> SessionSpawnOptions<'a> {
@@ -347,6 +388,7 @@ pub(crate) fn chat_session_spawn_options<'a>(
         session_meta,
         managed_mcp_expires_at: None,
         model_agent_type,
+        custom_agent_name,
         session_model_id,
         session_yolo_mode,
         session_auto_mode: false,

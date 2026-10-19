@@ -417,6 +417,13 @@ pub fn render_dashboard(
         return None;
     }
 
+    // The agent-type picker (F8) overlays everything too. When open, input
+    // is routed to it, so the dispatch cursor is suppressed.
+    if let Some(modal) = state.agent_picker.as_mut() {
+        render_agent_picker(buf, area, &theme, modal);
+        return None;
+    }
+
     // The location picker overlays everything too (mutually exclusive
     // with the shortcuts modal in practice). When open, input is routed
     // to it, so the dispatch cursor is suppressed.
@@ -947,6 +954,90 @@ fn underline_location_on_hover(spans: Vec<Span<'static>>, icon: &str) -> Vec<Spa
 
 /// Render the location picker modal over the dashboard. Content-row hit
 /// areas from the render are stashed on the modal for the mouse handler.
+/// Paint the dashboard's agent-type picker (F8 — `Alt+A`).
+///
+/// A short static list, so the modal has no search bar: ↑/↓ walks the
+/// rows, Enter stages the highlighted type (`DashboardConfirmAgentType`),
+/// Esc closes without touching the staging. The currently staged type
+/// carries an `active` badge.
+fn render_agent_picker(
+    buf: &mut Buffer,
+    area: Rect,
+    theme: &Theme,
+    modal: &mut crate::views::dashboard::AgentTypePickerState,
+) {
+    use crate::views::modal_window::{
+        ModalSizing, ModalWindowConfig, Shortcut, render_modal_window,
+    };
+    use crate::views::picker::{PickerEntry, PickerRow, render_picker_content};
+
+    let shortcuts = vec![
+        Shortcut {
+            label: "\u{2191}\u{2193} nav",
+            clickable: false,
+            id: 0,
+        },
+        Shortcut {
+            label: "Enter select",
+            clickable: false,
+            id: 1,
+        },
+        Shortcut {
+            label: "Esc close",
+            clickable: false,
+            id: 2,
+        },
+    ];
+    let config = ModalWindowConfig {
+        title: "Agent type",
+        tabs: None,
+        shortcuts: &shortcuts,
+        sizing: ModalSizing::medium(),
+        fold_info: None,
+    };
+    let Some(content) = render_modal_window(buf, area, &mut modal.window, &config, theme) else {
+        modal.content_hits = None;
+        return;
+    };
+
+    let entries: Vec<PickerEntry<'_>> = modal
+        .candidates
+        .iter()
+        .enumerate()
+        .map(|(idx, candidate)| {
+            let active = modal.current.as_deref() == Some(candidate.name.as_str());
+            PickerEntry::Row(PickerRow {
+                label: candidate.name.as_str(),
+                right_label: candidate.description.as_str(),
+                selected: idx == modal.picker.selected,
+                expanded: false,
+                fields: &[],
+                description_lines: &[],
+                summary_lines: &[],
+                dimmed: false,
+                indent: 0,
+                badge: if active { "active" } else { "" },
+                badge_color: active.then_some(theme.accent_user),
+                collapsible: false,
+                underline_last_desc: false,
+            })
+        })
+        .collect();
+
+    let hits = render_picker_content(
+        buf,
+        content.content,
+        theme,
+        &mut modal.picker,
+        &entries,
+        /* non_selectable */ &[],
+        /* non_selectable_clickable */ &[],
+        Some(theme.bg_base),
+        /* loading */ false,
+    );
+    modal.content_hits = Some(hits);
+}
+
 fn render_location_picker(
     buf: &mut Buffer,
     area: Rect,
@@ -2648,6 +2739,23 @@ fn paint_dispatch_config_badge(
             bold: false,
         }),
         DashboardDispatchMode::Normal => {}
+    }
+
+    // F8: staged agent type (`/agent <name>`) renders on the same info line
+    // as the model — the "same layer as model selection" affordance. Empty
+    // staging (default resolution) adds nothing, so the badge stays
+    // byte-identical to pre-F8.
+    if let Some(agent_type) = state
+        .pending_agent_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        flags.push(PromptFlag {
+            text: agent_type,
+            color: Some(theme.command),
+            bold: false,
+        });
     }
 
     if model_label.is_empty() && flags.is_empty() && !state.multiline_mode {

@@ -5629,3 +5629,374 @@ fn dashboard_attach_build_roster_row_keeps_disk_resume() {
         "expected Build disk resume with roster cwd, got {effects:?}"
     );
 }
+
+// ── F8: `/agent <name>` staging + per-dispatch agent type ────────────────
+
+/// `/agent <name>` on the dashboard stages the agent type for the NEXT
+/// spawned agent — no session is created, the input clears, and a success
+/// toast confirms the staging.
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_slash_agent_stages_pending_agent_type() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    let effects = dispatch_dashboard_dispatch_slash(&mut app, "/agent explore".into());
+    assert!(
+        effects.is_empty(),
+        "staging an agent type must not spawn a session"
+    );
+    assert!(app.agents.is_empty(), "no session should be created");
+    assert_eq!(
+        app.dashboard
+            .as_ref()
+            .unwrap()
+            .pending_agent_type
+            .as_deref(),
+        Some("explore"),
+        "pending_agent_type must be staged"
+    );
+    let toast = app
+        .dashboard
+        .as_ref()
+        .unwrap()
+        .error_toast
+        .as_deref()
+        .expect("staging must confirm via toast");
+    assert!(
+        toast.contains("explore"),
+        "toast must confirm the staged type: {toast}"
+    );
+}
+
+/// `/agent` with an unknown name must error on the dashboard — never
+/// fall through to a dispatch (where the raw slash text would become a
+/// session's first prompt) and never stage silently.
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_slash_agent_unknown_name_errors_without_dispatch() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    let effects =
+        dispatch_dashboard_dispatch_slash(&mut app, "/agent no-such-agent-type".into());
+    assert!(effects.is_empty(), "unknown agent type must not dispatch");
+    assert!(
+        app.agents.is_empty(),
+        "no session may be spawned for the unknown-type slash text"
+    );
+    assert!(
+        app.dashboard
+            .as_ref()
+            .unwrap()
+            .pending_agent_type
+            .is_none(),
+        "unknown type must not be staged"
+    );
+    let toast = app
+        .dashboard
+        .as_ref()
+        .unwrap()
+        .error_toast
+        .as_deref()
+        .expect("unknown type must surface an error toast");
+    assert!(
+        toast.contains("no-such-agent-type"),
+        "error must name the unknown type: {toast}"
+    );
+}
+
+/// Bare `/agent` resets the staging back to the default agent resolution.
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_slash_agent_bare_resets_staging() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    let _ = dispatch_dashboard_dispatch_slash(&mut app, "/agent explore".into());
+    assert_eq!(
+        app.dashboard.as_ref().unwrap().pending_agent_type.as_deref(),
+        Some("explore")
+    );
+    let _ = dispatch_dashboard_dispatch_slash(&mut app, "/agent".into());
+    assert!(
+        app.dashboard
+            .as_ref()
+            .unwrap()
+            .pending_agent_type
+            .is_none(),
+        "bare /agent must clear the staging"
+    );
+}
+
+/// A staged agent type is applied to the agent spawned by the next
+/// dispatch: `CreateSession` carries `agent_name` as `_meta.agentName`
+/// and the new agent's `dispatch_agent_type` mirrors the request (for the
+/// dashboard/tasks-pane row label).
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_dispatch_carries_staged_agent_type() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    let _ = dispatch_dashboard_dispatch_slash(&mut app, "/agent explore".into());
+    let effects = dispatch_dashboard_dispatch(&mut app, "map the codebase".into(), false);
+    assert_eq!(app.agents.len(), 1);
+    let new_id = *app.agents.keys().next().unwrap();
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::CreateSession {
+                agent_name: Some(name), ..
+            } if name == "explore"
+        )),
+        "CreateSession must carry the staged agent type: {effects:?}"
+    );
+    assert_eq!(
+        app.agents[&new_id].dispatch_agent_type.as_deref(),
+        Some("explore"),
+        "the new agent must mirror the requested type for the row label"
+    );
+}
+
+/// No staged type → `CreateSession.agent_name` is `None` and the new agent
+/// has no type tag: byte-identical to pre-F8 dispatch behavior.
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_dispatch_without_staged_type_has_no_agent_name() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    let effects = dispatch_dashboard_dispatch(&mut app, "just do it".into(), false);
+    assert_eq!(app.agents.len(), 1);
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::CreateSession { agent_name: None, .. }
+        )),
+        "no staged type must mean agent_name: None: {effects:?}"
+    );
+    let new_id = *app.agents.keys().next().unwrap();
+    assert!(
+        app.agents[&new_id].dispatch_agent_type.is_none(),
+        "no type tag without staging"
+    );
+}
+
+/// The `[+ New Agent]` button path applies the same staged agent type as
+/// the dispatch path.
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_new_agent_button_carries_staged_agent_type() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    let _ = dispatch_dashboard_dispatch_slash(&mut app, "/agent explore".into());
+    let effects = dispatch(Action::DashboardCreateNewAgentWithDetail, &mut app);
+    assert_eq!(app.agents.len(), 1);
+    let new_id = *app.agents.keys().next().unwrap();
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::CreateSession {
+                agent_name: Some(name), ..
+            } if name == "explore"
+        )),
+        "CreateSession must carry the staged agent type: {effects:?}"
+    );
+    assert_eq!(
+        app.agents[&new_id].dispatch_agent_type.as_deref(),
+        Some("explore")
+    );
+}
+
+/// The staged agent type is sticky across dispatches but resets on every
+/// dashboard-open — same lifecycle as `pending_model`.
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_reopen_resets_pending_agent_type() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    let _ = dispatch_dashboard_dispatch_slash(&mut app, "/agent explore".into());
+    assert_eq!(
+        app.dashboard.as_ref().unwrap().pending_agent_type.as_deref(),
+        Some("explore")
+    );
+    // Open is an idempotent toggle while the dashboard view is active —
+    // navigate away first so the re-open runs `configure_dashboard_state`
+    // (same pattern as `dashboard_open_reseeds_pending_model_and_mode`).
+    app.active_view = ActiveView::Welcome;
+    open_dashboard(&mut app);
+    assert!(
+        app.dashboard
+            .as_ref()
+            .unwrap()
+            .pending_agent_type
+            .is_none(),
+        "dashboard-open must reset the staged agent type (pending_model semantics)"
+    );
+}
+
+/// F8: `Alt+A` opens a picker listing the built-in agent types (plus any
+/// discovered `.qidi/agents/*.md` definitions), highlighting
+/// `general-purpose` when nothing is staged yet.
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_agent_picker_lists_types_and_defaults_to_general_purpose() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    let effects = dispatch(Action::DashboardOpenAgentPicker, &mut app);
+    assert!(effects.is_empty(), "opening the picker spawns nothing");
+    let picker = app
+        .dashboard
+        .as_ref()
+        .unwrap()
+        .agent_picker
+        .as_ref()
+        .expect("Alt+A must open the agent-type picker");
+    let names: Vec<&str> = picker.candidates.iter().map(|c| c.name.as_str()).collect();
+    for expected in ["general-purpose", "explore", "plan"] {
+        assert!(
+            names.contains(&expected),
+            "picker must list built-in {expected}: got {names:?}"
+        );
+    }
+    assert_eq!(
+        picker.selected_name(),
+        Some("general-purpose"),
+        "nothing staged → general-purpose is pre-selected"
+    );
+}
+
+/// F8: confirming a picker row stages that type and closes the modal; the
+/// staging then rides the next dispatch (existing test covers the
+/// CreateSession side).
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_agent_picker_confirm_stages_type_and_closes() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    let _ = dispatch(Action::DashboardOpenAgentPicker, &mut app);
+    let effects = dispatch(
+        Action::DashboardConfirmAgentType("explore".to_string()),
+        &mut app,
+    );
+    assert!(effects.is_empty(), "confirming only stages, never dispatches");
+    let d = app.dashboard.as_ref().unwrap();
+    assert!(d.agent_picker.is_none(), "confirm must close the picker");
+    assert_eq!(
+        d.pending_agent_type.as_deref(),
+        Some("explore"),
+        "confirm must stage the chosen agent type"
+    );
+}
+
+/// F8: Esc (close) leaves an existing staging untouched.
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_agent_picker_close_keeps_staging() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    let _ = dispatch_dashboard_dispatch_slash(&mut app, "/agent explore".into());
+    let _ = dispatch(Action::DashboardOpenAgentPicker, &mut app);
+    let effects = dispatch(Action::DashboardCloseAgentPicker, &mut app);
+    assert!(effects.is_empty());
+    let d = app.dashboard.as_ref().unwrap();
+    assert!(d.agent_picker.is_none(), "Esc must close the picker");
+    assert_eq!(
+        d.pending_agent_type.as_deref(),
+        Some("explore"),
+        "closing without selecting must keep the previous staging"
+    );
+}
+
+/// F8: confirming an unknown name (can only happen if a file disappears
+/// between open and confirm) errors without replacing the staging.
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_agent_picker_confirm_unknown_name_keeps_staging() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    let _ = dispatch_dashboard_dispatch_slash(&mut app, "/agent explore".into());
+    let _ = dispatch(Action::DashboardOpenAgentPicker, &mut app);
+    let effects = dispatch(
+        Action::DashboardConfirmAgentType("no-such-agent-type".to_string()),
+        &mut app,
+    );
+    assert!(effects.is_empty());
+    let d = app.dashboard.as_ref().unwrap();
+    assert!(
+        d.agent_picker.is_none(),
+        "confirm closes the picker even when validation fails"
+    );
+    assert_eq!(
+        d.pending_agent_type.as_deref(),
+        Some("explore"),
+        "an invalid confirm must not clobber the existing staging"
+    );
+}
+/// F8: the worktree dispatch path threads the staged agent type onto
+/// `CreateWorktreeSession` (fresh-create `_meta.agentName`) and mirrors it
+/// on the new agent's row label — the third of the three dispatch paths.
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_confirm_worktree_carries_staged_agent_type() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    app.cwd_has_git_ancestor = true;
+    let _ = dispatch_dashboard_dispatch_slash(&mut app, "/agent explore".into());
+    if let Some(d) = app.dashboard.as_mut() {
+        d.dispatch.set_text("do the thing");
+        d.pending_worktree_prompt = Some(d.dispatch.stash());
+    }
+
+    let effects = dispatch_dashboard_confirm_worktree(&mut app, Some("my-wt".into()));
+
+    let (wt_id, effect_agent) = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::CreateWorktreeSession {
+                agent_id, agent_name, ..
+            } => Some((*agent_id, agent_name.clone())),
+            _ => None,
+        })
+        .expect("expected a CreateWorktreeSession effect");
+    assert_eq!(
+        effect_agent.as_deref(),
+        Some("explore"),
+        "the staged agent type must ride on the worktree effect (R-003)"
+    );
+    assert_eq!(
+        app.agents[&wt_id].dispatch_agent_type.as_deref(),
+        Some("explore"),
+        "the worktree agent must mirror the requested type for the row label"
+    );
+}
+
+/// F8: the worktree path without a staged type keeps `agent_name: None` —
+/// byte-identical to pre-F8 worktree dispatch.
+#[serial_test::serial(QIDI_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_confirm_worktree_without_staged_type_has_no_agent_name() {
+    let mut app = test_app();
+    open_dashboard(&mut app);
+    app.cwd_has_git_ancestor = true;
+    if let Some(d) = app.dashboard.as_mut() {
+        d.dispatch.set_text("do the thing");
+        d.pending_worktree_prompt = Some(d.dispatch.stash());
+    }
+
+    let effects = dispatch_dashboard_confirm_worktree(&mut app, Some("my-wt".into()));
+
+    let (wt_id, effect_agent) = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::CreateWorktreeSession {
+                agent_id, agent_name, ..
+            } => Some((*agent_id, agent_name.clone())),
+            _ => None,
+        })
+        .expect("expected a CreateWorktreeSession effect");
+    assert!(
+        effect_agent.is_none(),
+        "no staged type must leave the worktree agent_name unset"
+    );
+    assert!(
+        app.agents[&wt_id].dispatch_agent_type.is_none(),
+        "no type tag without staging"
+    );
+}

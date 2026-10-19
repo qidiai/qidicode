@@ -714,6 +714,19 @@ fn top_level_subtitle(agent: &AgentView) -> Option<String> {
     if is_worktree {
         parts.push("worktree".to_string());
     }
+    // F8: when this session was dispatched from the dashboard with an
+    // explicit agent type (`/agent <name>` staging), surface it as the
+    // trailing subtitle part (e.g. `main qidicode explore`). `None` for
+    // every non-dashboard dispatch — those rows render byte-identical to
+    // pre-F8.
+    if let Some(agent_type) = agent
+        .dispatch_agent_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        parts.push(sanitize(agent_type));
+    }
     Some(parts.join(" "))
 }
 /// Compose the dim "last tool / message" line painted directly below

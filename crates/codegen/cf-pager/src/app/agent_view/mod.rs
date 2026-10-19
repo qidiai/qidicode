@@ -1309,6 +1309,14 @@ pub struct AgentView {
     pub(crate) pending_inline_resubmit: Option<String>,
     /// Running agent definition for this session (`x.ai/session/info` `agentName`).
     pub session_agent_name: Option<String>,
+    /// F8: agent type this session was dispatched with from the dashboard
+    /// (`/agent <name>` staging). `None` for every non-dashboard path — the
+    /// dashboard/tasks-pane row only shows a type tag when this is `Some`,
+    /// so default dispatches render byte-identical to pre-F8. The
+    /// shell-side binding is the source of truth; this mirrors what the
+    /// pager *requested* (it drives the row label until the async
+    /// `session/info` round-trip confirms).
+    pub dispatch_agent_type: Option<String>,
     /// Map of child session IDs to subagent metadata. Populated on
     /// `SubagentSpawned` notifications, used for permission routing
     /// (which agent owns a session) and provenance display.
@@ -2039,6 +2047,7 @@ fn resolve_action(action_id: Option<ActionId>) -> Option<InputOutcome> {
         | ActionId::DashboardOverlayStop
         | ActionId::DashboardToggleAutoApprove
         | ActionId::DashboardOpenLocationPicker
+        | ActionId::DashboardOpenAgentPicker
         | ActionId::DashboardToggleWorktree => return None,
     };
     Some(InputOutcome::Action(action))

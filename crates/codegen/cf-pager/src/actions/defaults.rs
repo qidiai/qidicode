@@ -1119,6 +1119,26 @@ pub fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<ActionDef> {
                 "Arms the next dashboard-dispatched agent to spawn in a fresh git worktree, isolating its work on a separate checkout.\nOnly applies when the working directory is a git repo.\nAffects newly dispatched agents, not ones already running.",
             ),
         },
+        // Choose the agent type for newly dispatched dashboard sessions
+        // (F8). Alt+A ("agent") is free under `DashboardFocused`; Ctrl+A
+        // is the prompt widget's caret-to-start editing chord, so the
+        // picker takes the Alt variant. `/agent <name>` stages the same
+        // value without opening the modal.
+        ActionDef {
+            id: ActionId::DashboardOpenAgentPicker,
+            label: "agent",
+            description: "Choose agent type for new dispatches",
+            default_key: key!('a', ALT),
+            alt_keys: vec![],
+            category: Category::Dashboard,
+            context: When::DashboardFocused,
+            hint_priority: None,
+            hint_key_display: Some("Alt+a"),
+            requires_confirmation: false,
+            long_help: Some(
+                "Opens a picker listing the agent types new dashboard dispatches can spawn as: the built-in general-purpose/explore/plan (plus qidi-build and browser-use) and any custom agents under .qidi/agents/ or ~/.qidi/agents/.\nThe choice is sticky for subsequent dispatches and rides the new session as a per-session agent binding.\nLeaving no type selected keeps the default agent resolution, exactly as before.",
+            ),
+        },
         // Session overlay (dashboard → agent attach)
         // bindings. They use `When::DashboardOverlay`: the agent-side
         // overlay intercept (`app_view`) looks them up in that context, and

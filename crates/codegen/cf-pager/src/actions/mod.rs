@@ -131,6 +131,10 @@ pub enum ActionId {
     DashboardToggleAutoApprove,
     DashboardOpenLocationPicker,
     DashboardToggleWorktree,
+    /// Open the agent-type picker (F8) — choose which agent definition the
+    /// next dashboard dispatch spawns as (`_meta.agentName`). Bound to
+    /// Alt+A by default.
+    DashboardOpenAgentPicker,
 }
 /// When an action is available / visible.
 ///

@@ -40,7 +40,8 @@ pub use row::{
     classify_top_level, sort_rows,
 };
 pub use state::{
-    DashboardDispatchMode, DashboardRowId, DashboardState, Filter, FilterValue, Focusable,
+    AgentTypeCandidate, AgentTypePickerState, DashboardDispatchMode, DashboardRowId,
+    DashboardState, Filter, FilterValue, Focusable,
     Grouping, LocationCandidate, LocationPickerState, PendingDispatchModel, PersistedDashboard,
     PersistedRowId, RowState, SectionKey, SessionIdResolver, ShortcutsModalState, load_persisted,
     parse_filter, parse_row_state_token,

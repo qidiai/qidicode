@@ -254,6 +254,7 @@ impl AgentView {
             inline_edit: None,
             pending_inline_resubmit: None,
             session_agent_name: None,
+            dispatch_agent_type: None,
             subagent_sessions: HashMap::new(),
             subagent_views: HashMap::new(),
             active_subagent: None,

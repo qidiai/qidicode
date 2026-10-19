@@ -598,6 +598,14 @@ pub struct DashboardState {
     /// model. Sticky across dispatches; reset to `None` on every
     /// dashboard-open (alongside `pending_mode`).
     pub pending_model: Option<PendingDispatchModel>,
+    /// F8: agent type chosen for the *next* agent spawned from the dispatch
+    /// input, set by `/agent <name>` (intercepted in
+    /// `dispatch_dashboard_dispatch_slash`; empty `/agent` clears back to the
+    /// default resolution). `None` → spawn with the shell's default agent
+    /// resolution — byte-identical to pre-F8 behavior (no `_meta.agentName`
+    /// written). Sticky across dispatches; reset to `None` on every
+    /// dashboard-open (alongside `pending_model`).
+    pub pending_agent_type: Option<String>,
     /// Mode the next spawned agent starts in. Cycled with Shift+Tab and set
     /// by `/plan`. Sticky across dispatches; re-seeded from
     /// `app.default_yolo` on every dashboard-open (alongside `pending_model`).
@@ -613,6 +621,11 @@ pub struct DashboardState {
     /// here before the dashboard's own handlers, and the renderer paints
     /// it on top of the row list. Reset on dashboard-open.
     pub location_picker: Option<LocationPickerState>,
+    /// Agent-type picker modal (F8) — `Some` while open. Lets the user
+    /// choose which agent definition the next dashboard dispatch spawns
+    /// as. Opened via `Alt+A`; input is routed here before the dashboard's
+    /// own handlers, and the renderer paints it on top of the row list.
+    pub agent_picker: Option<AgentTypePickerState>,
     /// Hit area for the header's clickable location label. Painted by
     /// `render_header` and consumed by the mouse handler to open the
     /// location picker. `None` when the header is too narrow to paint it.
@@ -1037,6 +1050,95 @@ fn read_subdirs(
     out
 }
 
+/// One row in the dashboard's agent-type picker (F8): a selectable agent
+/// definition name plus its one-line description.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTypeCandidate {
+    pub name: String,
+    pub description: String,
+}
+
+/// State for the dashboard's agent-type picker modal (F8 — Alt+A).
+///
+/// Lists the types new dashboard dispatches can spawn as: the built-ins
+/// (`general-purpose`, `explore`, `plan`, …) plus discovered
+/// `.qidi/agents/*.md` definitions. Confirming a row stages
+/// `DashboardState::pending_agent_type`, which the next dispatch sends as
+/// `_meta.agentName`; Esc closes without touching the staging.
+pub struct AgentTypePickerState {
+    pub picker: crate::views::picker::PickerState,
+    pub window: crate::views::modal_window::ModalWindowState,
+    pub candidates: Vec<AgentTypeCandidate>,
+    /// Currently staged type (rendered as the `active` badge). `None` when
+    /// the default agent resolution is in effect.
+    pub current: Option<String>,
+    /// Content-row hit areas from the last render (mouse hover state).
+    pub content_hits: Option<crate::views::picker::PickerContentHitAreas>,
+}
+
+impl AgentTypePickerState {
+    /// Build the modal. Highlights the currently staged type, or
+    /// `general-purpose` when nothing is staged yet (the documented
+    /// default choice), falling back to the first row.
+    pub fn new(candidates: Vec<AgentTypeCandidate>, current: Option<String>) -> Self {
+        let selected = current
+            .as_ref()
+            .and_then(|name| candidates.iter().position(|c| &c.name == name))
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .position(|c| c.name == "general-purpose")
+            })
+            .unwrap_or(0);
+        let picker = crate::views::picker::PickerState {
+            selected,
+            search_active: false,
+            ..crate::views::picker::PickerState::default()
+        };
+        Self {
+            picker,
+            window: crate::views::modal_window::ModalWindowState::new(),
+            candidates,
+            current,
+            content_hits: None,
+        }
+    }
+
+    /// Name of the highlighted row (the picker clamps `selected` to the
+    /// candidate list, but guard against an empty list anyway).
+    pub fn selected_name(&self) -> Option<&str> {
+        self.candidates
+            .get(self.picker.selected)
+            .map(|c| c.name.as_str())
+    }
+}
+
+/// Per-call config for the agent-type picker's shared-picker input handler:
+/// flat rows, no search (the list is short and static), no tabs/actions.
+fn agent_picker_config<'a>() -> crate::views::picker::PickerConfig<'a> {
+    crate::views::picker::PickerConfig {
+        title: None,
+        show_search_hint: false,
+        expandable: false,
+        esc_clears_query: false,
+        shortcuts: None,
+        pending_hint: None,
+        shortcuts_area: None,
+        non_selectable: &[],
+        non_selectable_clickable: &[],
+        tabs: None,
+        active_tab: 0,
+        filter_label: None,
+        filter_key_hint: None,
+        filter_active: false,
+        action_keys: &[],
+        disable_search: true,
+        compact_bottom_bar: false,
+        search_only_on_slash: false,
+        vim_normal_first: false,
+    }
+}
+
 /// Per-call config for the location picker's shared-picker input handler.
 /// Search is always active (no `/` to start), search is not disabled, and
 /// rows are flat (no expand / tabs / filter / action keys).
@@ -1287,9 +1389,11 @@ impl DashboardState {
             manual_scroll_active: false,
             shortcuts_modal: None,
             pending_model: None,
+            pending_agent_type: None,
             pending_mode: DashboardDispatchMode::Normal,
             models: crate::acp::model_state::ModelState::default(),
             location_picker: None,
+            agent_picker: None,
             location_hit: crate::app::agent_view::HitArea::default(),
             upgrade_cta_hit: crate::app::agent_view::HitArea::default(),
             pinned_upgrade_cta_live: false,
@@ -1840,6 +1944,13 @@ impl DashboardState {
         // dashboard's own handlers got a parallel say.
         if self.location_picker.is_some() {
             return self.handle_location_picker_input(ev);
+        }
+
+        // The agent-type picker (F8) owns input while open — its row nav
+        // and Enter/Esc handling would be inconsistent if the dashboard's
+        // own handlers got a parallel say.
+        if self.agent_picker.is_some() {
+            return self.handle_agent_picker_input(ev);
         }
 
         // The worktree-label dialog (shown when a dashboard agent is
@@ -3772,6 +3883,42 @@ impl DashboardState {
         InputOutcome::Unchanged
     }
 
+    /// Route input to the open agent-type picker (F8). Caller has confirmed
+    /// `agent_picker.is_some()`. Row nav (↑/↓/j/k), Enter (stage + close),
+    /// and Esc (close, staging untouched) flow through the shared picker
+    /// handler; mouse events are swallowed so clicks can't reach the
+    /// dashboard rows painted behind the modal.
+    fn handle_agent_picker_input(&mut self, ev: &Event) -> InputOutcome {
+        if matches!(ev, Event::Mouse(_)) {
+            return InputOutcome::Unchanged;
+        }
+        let Some(picker) = self.agent_picker.as_mut() else {
+            return InputOutcome::Unchanged;
+        };
+        let entry_count = picker.candidates.len();
+        let config = agent_picker_config();
+        match crate::views::picker::handle_picker_input(
+            ev,
+            &mut picker.picker,
+            entry_count,
+            &config,
+        ) {
+            crate::views::picker::PickerOutcome::Selected(idx) => match picker
+                .candidates
+                .get(idx)
+                .map(|c| c.name.clone())
+            {
+                Some(name) => InputOutcome::Action(Action::DashboardConfirmAgentType(name)),
+                None => InputOutcome::Unchanged,
+            },
+            crate::views::picker::PickerOutcome::Closed => {
+                InputOutcome::Action(Action::DashboardCloseAgentPicker)
+            }
+            crate::views::picker::PickerOutcome::Changed => InputOutcome::Changed,
+            _ => InputOutcome::Unchanged,
+        }
+    }
+
     /// Route input to the open location picker. Caller has confirmed
     /// `location_picker.is_some()` (the gate in [`Self::handle_input`]).
     /// Keys flow through the shared [`crate::views::picker`] handler (nav +
@@ -4204,6 +4351,9 @@ fn dashboard_action_for_id(
         }
         ActionId::DashboardOpenLocationPicker => {
             Some(InputOutcome::Action(Action::DashboardOpenLocationPicker))
+        }
+        ActionId::DashboardOpenAgentPicker => {
+            Some(InputOutcome::Action(Action::DashboardOpenAgentPicker))
         }
         ActionId::DashboardToggleGrouping => {
             Some(InputOutcome::Action(Action::DashboardToggleGrouping))
@@ -10176,6 +10326,87 @@ mod tests {
         assert!(
             state.location_picker.as_ref().unwrap().error.is_none(),
             "editing the path must clear the stale error",
+        );
+    }
+
+    // ── F8: agent-type picker ─────────────────────────────────────────
+
+    fn agent_candidate(name: &str) -> AgentTypeCandidate {
+        AgentTypeCandidate {
+            name: name.to_string(),
+            description: format!("{name} description"),
+        }
+    }
+
+    fn agent_picker_state(current: Option<&str>) -> AgentTypePickerState {
+        AgentTypePickerState::new(
+            vec![
+                agent_candidate("general-purpose"),
+                agent_candidate("explore"),
+                agent_candidate("plan"),
+            ],
+            current.map(str::to_string),
+        )
+    }
+
+    #[test]
+    fn alt_a_opens_agent_picker() {
+        let mut state = DashboardState::new();
+        let reg = crate::actions::ActionRegistry::defaults();
+        let key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::ALT);
+        assert!(
+            matches!(
+                state.handle_input(&Event::Key(key), &reg),
+                InputOutcome::Action(Action::DashboardOpenAgentPicker)
+            ),
+            "Alt+A must request the agent-type picker (F8)"
+        );
+    }
+
+    #[test]
+    fn agent_picker_defaults_to_general_purpose() {
+        let picker = agent_picker_state(None);
+        assert_eq!(
+            picker.selected_name(),
+            Some("general-purpose"),
+            "with nothing staged the picker must highlight general-purpose"
+        );
+        let staged = agent_picker_state(Some("explore"));
+        assert_eq!(
+            staged.selected_name(),
+            Some("explore"),
+            "a staged type must be highlighted instead of the default"
+        );
+    }
+
+    #[test]
+    fn agent_picker_enter_returns_selected_type() {
+        let mut state = DashboardState::new();
+        state.agent_picker = Some(agent_picker_state(None));
+        state.agent_picker.as_mut().unwrap().picker.selected = 1;
+        let reg = crate::actions::ActionRegistry::defaults();
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        match state.handle_input(&Event::Key(enter), &reg) {
+            InputOutcome::Action(Action::DashboardConfirmAgentType(name)) => {
+                assert_eq!(name, "explore", "Enter must confirm the highlighted row");
+            }
+            other => panic!("expected DashboardConfirmAgentType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_picker_esc_closes() {
+        crate::appearance::cache::set_vim_mode(false);
+        let mut state = DashboardState::new();
+        state.agent_picker = Some(agent_picker_state(None));
+        let reg = crate::actions::ActionRegistry::defaults();
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(
+            matches!(
+                state.handle_input(&Event::Key(esc), &reg),
+                InputOutcome::Action(Action::DashboardCloseAgentPicker)
+            ),
+            "Esc must close the agent picker without selecting"
         );
     }
 

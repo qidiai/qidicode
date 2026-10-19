@@ -248,6 +248,7 @@ pub(in crate::app::dispatch) fn dispatch_fork_resolved(
             label: None,
             git_ref: None,
             model_id: None,
+            agent_name: None,
             preferred_session_id: None,
             chat_kind: parent_chat_kind,
         }]
@@ -363,6 +364,7 @@ pub(in crate::app::dispatch) fn dispatch_project_selected(
         agent_id: id,
         cwd: path,
         model_id: None,
+        agent_name: None,
         preferred_session_id,
         chat_kind,
     });
@@ -472,7 +474,7 @@ pub(in crate::app::dispatch) fn dispatch_startup_fork_session(
             });
         return vec![];
     }
-    let (_agent_id, mut effects) = dispatch_new_session_inner_with_id(app, None);
+    let (_agent_id, mut effects) = dispatch_new_session_inner_with_id(app, None, None);
     let agent_id = app
         .agents
         .keys()

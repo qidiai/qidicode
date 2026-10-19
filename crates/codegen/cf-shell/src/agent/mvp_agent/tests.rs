@@ -664,6 +664,7 @@ fn resolve_agent_definition_defaults_to_qidi_build() {
         &config::AgentSelectionConfig::default(),
         None,
         None,
+        None,
     );
     assert_eq!(def.name, config::DEFAULT_AGENT_TYPE);
     if let Some(v) = prev {
@@ -686,6 +687,7 @@ fn resolve_agent_definition_model_agent_type_overrides_default() {
         &config::AgentSelectionConfig::default(),
         None,
         Some("codex"),
+        None,
     );
     assert_eq!(def.name, "codex");
     if let Some(v) = prev {
@@ -708,6 +710,7 @@ fn resolve_agent_definition_none_agent_type_does_not_override() {
         tmp.path(),
         None,
         &config::AgentSelectionConfig::default(),
+        None,
         None,
         None,
     );
@@ -738,6 +741,7 @@ fn resolve_agent_definition_acp_profile_wins_when_model_agent_type_is_default() 
         &config::AgentSelectionConfig::default(),
         Some(acp_profile),
         Some(config::DEFAULT_AGENT_TYPE),
+        None,
     );
     assert_eq!(
         def.name, "custom-devbox-profile",
@@ -772,6 +776,7 @@ fn resolve_agent_definition_acp_profile_wins_for_explicit_qidi_build_family() {
             &config::AgentSelectionConfig::default(),
             Some(acp_profile.clone()),
             Some(family_variant),
+            None,
         );
         assert_eq!(
             def.name, "custom-devbox-profile",
@@ -828,8 +833,126 @@ fn resolve_agent_definition_cli_agent_profile_wins_when_model_agent_type_is_defa
         &config::AgentSelectionConfig::default(),
         None,
         Some(config::DEFAULT_AGENT_TYPE),
+        None,
     );
     assert_eq!(def.name, "cli-profile");
+    if let Some(v) = prev {
+        unsafe { std::env::set_var("QIDI_AGENT", v) }
+    }
+}
+
+/// F8: `_meta.agentName` absent / empty / whitespace → `Ok(None)` — the
+/// default resolution chain runs exactly as before (byte-identical).
+#[test]
+fn parse_custom_agent_name_absent_or_empty_is_none() {
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(parse_custom_agent_name(None, tmp.path()).unwrap().is_none());
+    let meta = acp::Meta::new();
+    assert!(
+        parse_custom_agent_name(Some(&meta), tmp.path()).unwrap().is_none(),
+        "empty meta must not stage an agent type"
+    );
+    let mut empty = acp::Meta::new();
+    empty.insert("agentName".into(), serde_json::json!(""));
+    assert!(
+        parse_custom_agent_name(Some(&empty), tmp.path()).unwrap().is_none(),
+        "empty-string agentName must not stage an agent type"
+    );
+    let mut blank = acp::Meta::new();
+    blank.insert("agentName".into(), serde_json::json!("   "));
+    assert!(
+        parse_custom_agent_name(Some(&blank), tmp.path()).unwrap().is_none(),
+        "whitespace-only agentName must not stage an agent type"
+    );
+}
+
+/// F8: a known name (built-in `explore`) resolves; whitespace is trimmed.
+#[test]
+fn parse_custom_agent_name_known_builtin_resolves() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut meta = acp::Meta::new();
+    meta.insert("agentName".into(), serde_json::json!(" explore "));
+    assert_eq!(
+        parse_custom_agent_name(Some(&meta), tmp.path()).unwrap().as_deref(),
+        Some("explore"),
+        "built-in agent types must resolve through discovery and trim"
+    );
+}
+
+/// F8: an unknown name fails with `invalid_params` — never a silent
+/// fallback to the default chain.
+#[test]
+fn parse_custom_agent_name_unknown_fails_loudly() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut meta = acp::Meta::new();
+    meta.insert("agentName".into(), serde_json::json!("no-such-agent-type"));
+    let err = parse_custom_agent_name(Some(&meta), tmp.path())
+        .expect_err("unknown agent type must fail");
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("no-such-agent-type"),
+        "error must name the unknown agent type: got {rendered}"
+    );
+    assert!(
+        rendered.to_lowercase().contains("invalid params"),
+        "error must be an invalid_params error: got {rendered}"
+    );
+}
+
+/// F8: the requested per-session agent definition (from `_meta.agentName`)
+/// wins over the chain default AND over `_meta.agentProfile`.
+#[test]
+#[serial_test::serial]
+fn resolve_agent_definition_requested_agent_wins_over_default_and_acp_profile() {
+    let prev = std::env::var("QIDI_AGENT").ok();
+    unsafe {
+        std::env::remove_var("QIDI_AGENT");
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let requested = cf_agent::discovery::by_name_in_cwd("explore", tmp.path())
+        .expect("built-in explore must resolve via discovery");
+    let acp_profile = cf_agent::AgentDefinition::from_json(&serde_json::json!(
+        { "name" : "custom-devbox-profile", "description" :
+        "Custom devbox profile", "systemPrompt" :
+        "You are a custom-configured devbox agent.", }
+    ))
+    .expect("agent definition must parse");
+    let def = MvpAgent::resolve_agent_definition(
+        tmp.path(),
+        None,
+        &config::AgentSelectionConfig::default(),
+        Some(acp_profile),
+        None,
+        Some(requested),
+    );
+    assert_eq!(
+        def.name, "explore",
+        "_meta.agentName must win over _meta.agentProfile and the default chain"
+    );
+    if let Some(v) = prev {
+        unsafe { std::env::set_var("QIDI_AGENT", v) }
+    }
+}
+
+/// F8: `None` requested agent leaves the chain untouched (regression
+/// guard for the byte-identical no-selection path).
+#[test]
+#[serial_test::serial]
+fn resolve_agent_definition_none_requested_keeps_default_chain() {
+    let prev = std::env::var("QIDI_AGENT").ok();
+    unsafe {
+        std::env::remove_var("QIDI_AGENT");
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let def = MvpAgent::resolve_agent_definition(
+        tmp.path(),
+        None,
+        &config::AgentSelectionConfig::default(),
+        None,
+        None,
+        None,
+    );
+    assert_eq!(def.name, config::DEFAULT_AGENT_TYPE);
     if let Some(v) = prev {
         unsafe { std::env::set_var("QIDI_AGENT", v) }
     }
@@ -855,7 +978,7 @@ fn resolve_agent_definition_agent_profile_with_model_override() {
         definition: None,
         system_prompt_label: None,
     };
-    let def = MvpAgent::resolve_agent_definition(tmp.path(), None, &agent_config, None, None);
+    let def = MvpAgent::resolve_agent_definition(tmp.path(), None, &agent_config, None, None, None);
     assert_eq!(def.name, "test-architect");
     assert_eq!(
         def.model,
@@ -1048,6 +1171,7 @@ async fn file_toolset_override_e2e_to_finalized_toolset() {
         tmp.path(),
         None,
         &config::AgentSelectionConfig::default(),
+        None,
         None,
         None,
     );
@@ -2861,6 +2985,8 @@ fn chat_session_spawn_options_matches_thin_profile() {
         },
         cwd,
         None,
+        None,
+        // F8: no per-session `_meta.agentName` for the thin profile probe.
         None,
         acp::ModelId::new(std::sync::Arc::from("test-model")),
         false,

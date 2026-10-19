@@ -133,7 +133,9 @@ pub(in crate::app::dispatch) fn dispatch_new_session(app: &mut AppView) -> Vec<E
     if in_git_repo {
         match app.new_session_worktree_mode {
             WorktreeMode::Always => {
-                dispatch_new_worktree_session(app, None, None, None, None, None, None)
+                dispatch_new_worktree_session(
+                    app, None, None, None, None, None, None, None,
+                )
             }
             WorktreeMode::Never => dispatch_new_session_inner(app, None),
             WorktreeMode::Ask => {
@@ -267,15 +269,19 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner(
     app: &mut AppView,
     model_id: Option<acp::ModelId>,
 ) -> Vec<Effect> {
-    let (_id, effects) = dispatch_new_session_inner_with_id(app, model_id);
+    let (_id, effects) = dispatch_new_session_inner_with_id(app, model_id, None);
     effects
 }
 /// Sibling that returns the new `AgentId` alongside
 /// the effects. Used by `dispatch_dashboard_dispatch` so it doesn't
 /// rely on the (correct-but-brittle) `app.agents.last()` lookup.
+///
+/// F8: `agent_name` is the dashboard-staged agent type (`/agent <name>`);
+/// `None` for every non-dashboard path so those stay byte-identical.
 pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
     app: &mut AppView,
     model_id: Option<acp::ModelId>,
+    agent_name: Option<String>,
 ) -> (AgentId, Vec<Effect>) {
     // `/new` switches away without ever firing `on_session_end`, so the
     // outgoing session's memory would otherwise never be persisted (the
@@ -442,6 +448,7 @@ pub(in crate::app::dispatch) fn dispatch_new_session_inner_with_id(
             agent_id,
             cwd: effective_cwd,
             model_id,
+            agent_name,
             preferred_session_id,
             chat_kind,
         });
@@ -544,6 +551,7 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
                     worktree_label,
                     None,
                     None,
+                    None,
                     worktree_ref,
                     None,
                 ));
@@ -565,6 +573,7 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
                     app,
                     None,
                     worktree_label,
+                    None,
                     None,
                     None,
                     worktree_ref,
@@ -596,6 +605,7 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
                         worktree_label,
                         None,
                         None,
+                        None,
                         worktree_ref,
                         Some(sid),
                     ));
@@ -607,6 +617,7 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
                     app,
                     None,
                     worktree_label,
+                    None,
                     None,
                     None,
                     worktree_ref,
@@ -628,12 +639,16 @@ pub(in crate::app::dispatch) fn drain_startup_actions(app: &mut AppView) -> Vec<
     effects
 }
 /// Create a placeholder agent in a new git worktree, then create a session.
+///
+/// F8: `agent_name` is the dashboard-staged agent type — `None` for the
+/// resume / CLI / fork paths (byte-identical to pre-F8 behavior).
 pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
     app: &mut AppView,
     load_session_id: Option<String>,
     label: Option<String>,
     prompt: Option<String>,
     model_id: Option<acp::ModelId>,
+    agent_name: Option<String>,
     git_ref: Option<String>,
     preferred_session_id: Option<String>,
 ) -> Vec<Effect> {
@@ -772,6 +787,7 @@ pub(in crate::app::dispatch) fn dispatch_new_worktree_session(
         label,
         git_ref,
         model_id,
+        agent_name,
         preferred_session_id,
         chat_kind,
     }];
@@ -787,7 +803,7 @@ pub(in crate::app::dispatch) fn dispatch_new_session_with_id(
             Some(crate::app::session_startup::DeferredSessionStartup::NewWithId { session_id });
         return vec![];
     }
-    let (agent_id, mut effects) = dispatch_new_session_inner_with_id(app, None);
+    let (agent_id, mut effects) = dispatch_new_session_inner_with_id(app, None, None);
     for e in &mut effects {
         if let Effect::CreateSession {
             preferred_session_id,
@@ -858,6 +874,7 @@ pub(in crate::app::dispatch) fn skip_picker_and_create_session(
         agent_id,
         cwd: app.cwd.clone(),
         model_id: None,
+        agent_name: None,
         preferred_session_id,
         chat_kind,
         

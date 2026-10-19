@@ -2107,3 +2107,123 @@ fn session_picker_entry_maps_to_dormant_roster_row() {
     assert_eq!(roster.origin.kind, "local");
     assert_eq!(roster.origin.host.as_deref(), Some("box"));
 }
+
+/// F8: `Effect::CreateSession` with a staged agent type must inject
+/// `_meta.agentName` into the `NewSessionRequest` it sends.
+#[tokio::test]
+async fn create_session_injects_agent_name_meta() {
+    use cf_acp_lib::AcpAgentMessage;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut tasks = tokio::task::JoinSet::new();
+    let tmp = tempfile::tempdir().unwrap();
+    execute(
+        Effect::CreateSession {
+            agent_id: AgentId(1),
+            cwd: tmp.path().to_path_buf(),
+            model_id: None,
+            agent_name: Some("explore".to_string()),
+            preferred_session_id: None,
+            chat_kind: false,
+        },
+        &mut tasks,
+        &tx,
+        tmp.path(),
+        &SessionFlags::default(),
+        &progress_tx,
+    );
+    // Responder: assert the outgoing request's meta, then answer so the
+    // spawned task completes with SessionCreated.
+    let respond = tokio::spawn(async move {
+        let msg = rx.recv().await.expect("session/new request must be sent");
+        match msg {
+            AcpAgentMessage::NewSession(args) => {
+                let agent_name = args
+                    .request
+                    .meta
+                    .as_ref()
+                    .and_then(|m| m.get("agentName"))
+                    .and_then(|v| v.as_str());
+                assert_eq!(
+                    agent_name,
+                    Some("explore"),
+                    "staged agent type must ride _meta.agentName"
+                );
+                let _ = args
+                    .response_tx
+                    .send(Ok(acp::NewSessionResponse::new(acp::SessionId::new(
+                        "test-session",
+                    ))));
+            }
+            other => panic!("expected NewSession, got {other:?}"),
+        }
+    });
+    let result = tasks
+        .join_next()
+        .await
+        .expect("task should complete")
+        .expect("task should not panic");
+    respond.await.expect("responder must finish");
+    match result {
+        TaskResult::SessionCreated { agent_id, .. } => assert_eq!(agent_id, AgentId(1)),
+        other => panic!("expected SessionCreated, got {other:?}"),
+    }
+}
+
+/// F8: `Effect::CreateSession` without a staged agent type must NOT write
+/// `_meta.agentName` — the no-selection path stays byte-identical.
+#[tokio::test]
+async fn create_session_without_agent_name_omits_meta_key() {
+    use cf_acp_lib::AcpAgentMessage;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut tasks = tokio::task::JoinSet::new();
+    let tmp = tempfile::tempdir().unwrap();
+    execute(
+        Effect::CreateSession {
+            agent_id: AgentId(2),
+            cwd: tmp.path().to_path_buf(),
+            model_id: None,
+            agent_name: None,
+            preferred_session_id: None,
+            chat_kind: false,
+        },
+        &mut tasks,
+        &tx,
+        tmp.path(),
+        &SessionFlags::default(),
+        &progress_tx,
+    );
+    let respond = tokio::spawn(async move {
+        let msg = rx.recv().await.expect("session/new request must be sent");
+        match msg {
+            AcpAgentMessage::NewSession(args) => {
+                let has_key = args
+                    .request
+                    .meta
+                    .as_ref()
+                    .is_some_and(|m| m.get("agentName").is_some());
+                assert!(
+                    !has_key,
+                    "agentName key must be absent when no type is staged"
+                );
+                let _ = args
+                    .response_tx
+                    .send(Ok(acp::NewSessionResponse::new(acp::SessionId::new(
+                        "test-session",
+                    ))));
+            }
+            other => panic!("expected NewSession, got {other:?}"),
+        }
+    });
+    let result = tasks
+        .join_next()
+        .await
+        .expect("task should complete")
+        .expect("task should not panic");
+    respond.await.expect("responder must finish");
+    match result {
+        TaskResult::SessionCreated { agent_id, .. } => assert_eq!(agent_id, AgentId(2)),
+        other => panic!("expected SessionCreated, got {other:?}"),
+    }
+}
