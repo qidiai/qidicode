@@ -358,6 +358,12 @@ impl ToolBridge {
         };
         // Write the runtime projection directly -- the shell never sees this.
         res.insert(crate::types::resources::AvailableSkills(runtime_skills));
+        // Tell the skill tool *why* a denied skill is missing: the runtime set
+        // above no longer contains it, so without this the tool can only say
+        // "not found", conflating a policy denial with a typo. The resource is
+        // only ever installed on the subagent path; a primary session has no
+        // denylist in scope.
+        res.insert(denied);
         snapshot
     }
 

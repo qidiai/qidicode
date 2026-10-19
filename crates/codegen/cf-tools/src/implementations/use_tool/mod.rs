@@ -430,6 +430,19 @@ impl cf_tool_runtime::Tool for UseTool {
                     ),
                 ));
             }
+            // A missing integration tool used to surface as a bare "not found"
+            // with no next step. Point at the supported discovery path: only
+            // `search_tool` yields the schema `use_tool` needs.
+            Err(err) if err.kind == cf_tool_runtime::ToolErrorKind::NotFound => {
+                return Err(cf_tool_runtime::ToolError::new(
+                    err.kind,
+                    format!(
+                        "{} (tool not found; use `{}` to discover available integration \
+                         tools and their input schemas)",
+                        err.detail, search_tool_name
+                    ),
+                ));
+            }
             Err(err) => return Err(err),
         };
 
@@ -661,6 +674,31 @@ mod tests {
 
         let err = result.unwrap_err();
         assert!(err.detail.contains("bad__tool"));
+    }
+
+    /// Nit: a not-found dispatch must steer the model at `search_tool` instead
+    /// of leaving a bare "Tool not found" with no next step.
+    #[tokio::test]
+    async fn not_found_error_points_at_search_tool() {
+        let ctx = ctx_with_dispatch(ErrorToolDispatch {
+            error: "bad__tool".into(),
+        });
+
+        let err = cf_tool_runtime::Tool::run(
+            &UseTool,
+            ctx,
+            UseToolInput {
+                tool_name: "bad__tool".into(),
+                tool_input: serde_json::json!({}),
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.kind, cf_tool_runtime::ToolErrorKind::NotFound);
+        assert!(err.detail.contains("bad__tool"), "{}", err.detail);
+        assert!(err.detail.contains("search_tool"), "{}", err.detail);
+        assert!(err.detail.contains("discover"), "{}", err.detail);
     }
 
     #[derive(Clone)]

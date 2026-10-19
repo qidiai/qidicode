@@ -169,6 +169,8 @@ impl ToolSearchIndex for Bm25ToolSearchIndex {
         // Fast path: exact match on qualified name or bare tool name.
         // When the model already knows the tool name (e.g. "grafana-ai__SearchDashboards"
         // or "SearchDashboards"), skip BM25 entirely and return the match directly.
+        // The score is a fixed 1.0 on this path and deliberately does **not**
+        // go through `drop_weak_tail`: the name match is exact, not a weak hit.
         let query_lower = query.trim().to_lowercase();
         if let Some(exact) = snapshot.tools.iter().find(|t| {
             t.qualified_name.to_lowercase() == query_lower
@@ -209,7 +211,9 @@ impl ToolSearchIndex for Bm25ToolSearchIndex {
                     input_schema: meta.input_schema.clone(),
                 })
             })
-            .collect();
+            .collect::<Vec<_>>();
+
+        let results = drop_weak_tail(results);
 
         SearchSnapshot {
             results,
@@ -254,6 +258,35 @@ impl ToolSearchIndex for Bm25ToolSearchIndex {
             })
             .collect()
     }
+}
+
+/// Minimum BM25 score a hit must reach, **relative to the best hit** of the
+/// same query, to be reported.
+///
+/// BM25 scores are not on a fixed scale: they scale with the corpus size and
+/// term statistics. Measured on this index: a strong hit scores ~0.9-1.2 on a
+/// 1-tool corpus, ~1.3-4.5 on a 10-tool corpus, and ~5-13 on a 30-tool one --
+/// so any absolute cutoff either drops genuine matches on small catalogs or
+/// lets weak ones through on large ones. A ratio is corpus-independent: it
+/// keeps the hits in the same relevance band as the best one and drops the
+/// tail of accidental single-token overlaps (searching "browser snapshot"
+/// also matched every Playwright tool whose description contains "page").
+const MIN_RELATIVE_SCORE: f32 = 0.5;
+
+/// Drop results that are far weaker than the best hit for the query.
+///
+/// Input is sorted by score descending (BM25 `matches` sorts), so the first
+/// entry defines the reference. Empty input stays empty; a single hit is
+/// always kept because it is its own reference.
+fn drop_weak_tail(results: Vec<ToolSearchResult>) -> Vec<ToolSearchResult> {
+    let Some(top_score) = results.first().map(|r| r.score) else {
+        return results;
+    };
+    let cutoff = top_score * MIN_RELATIVE_SCORE;
+    results
+        .into_iter()
+        .filter(|result| result.score >= cutoff)
+        .collect()
 }
 
 /// Extract parameter names from a JSON Schema `properties` object.
@@ -443,6 +476,108 @@ mod tests {
         // "deploy" doesn't match any tool descriptions — should return low/no results
         // without panicking
         assert!(snap.total_hidden_tools > 0);
+    }
+
+    fn scored(name: &str, score: f32) -> ToolSearchResult {
+        ToolSearchResult {
+            tool_name: name.into(),
+            server_name: "s".into(),
+            description: String::new(),
+            score,
+            parameters: vec![],
+            input_schema: serde_json::json!({}),
+        }
+    }
+
+    /// The relative cutoff keeps the best hit and its near-peers and drops the
+    /// weak tail; a single hit is never dropped (it is its own reference).
+    #[test]
+    fn drop_weak_tail_keeps_only_the_top_band() {
+        let kept = drop_weak_tail(vec![
+            scored("a", 4.0),
+            scored("b", 2.0),
+            scored("c", 1.99),
+            scored("d", 0.5),
+        ]);
+        let names: Vec<&str> = kept.iter().map(|r| r.tool_name.as_str()).collect();
+        assert_eq!(names, vec!["a", "b"]);
+
+        assert!(drop_weak_tail(vec![]).is_empty());
+
+        let solo = drop_weak_tail(vec![scored("only", 0.1)]);
+        assert_eq!(solo.len(), 1, "a lone hit must survive the cutoff");
+    }
+
+    /// End-to-end precision: a query that shares one common word with several
+    /// tools must return the genuinely matching tool, not every tool whose
+    /// description happens to contain that word.
+    #[test]
+    fn weak_tail_matches_are_dropped() {
+        let tool = |qn: &str, name: &str, desc: &str, params: &[&str]| ToolMetadata {
+            qualified_name: qn.into(),
+            server_name: "playwright".into(),
+            tool_name: name.into(),
+            description: desc.into(),
+            parameters: params.iter().map(|s| (*s).into()).collect(),
+            input_schema: serde_json::json!({}),
+        };
+        let index = Bm25ToolSearchIndex::new(make_snapshot(vec![
+            tool(
+                "playwright__browser_snapshot",
+                "browser_snapshot",
+                "Capture an accessibility snapshot of the page",
+                &[],
+            ),
+            tool(
+                "playwright__browser_navigate",
+                "browser_navigate",
+                "Navigate to a URL in the browser",
+                &["url"],
+            ),
+            tool(
+                "playwright__browser_close",
+                "browser_close",
+                "Close the page",
+                &[],
+            ),
+            tool(
+                "playwright__browser_tab_list",
+                "browser_tab_list",
+                "List open browser tabs",
+                &[],
+            ),
+        ]));
+
+        let snap = index.search_snapshot("browser snapshot", 5);
+        let names: Vec<&str> = snap.results.iter().map(|r| r.tool_name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["playwright__browser_snapshot"],
+            "the tools that merely contain \"browser\"/\"page\" are weak tail"
+        );
+    }
+
+    /// The cutoff must not eat close competitors: when several tools score in
+    /// the same band as the best one, they all stay discoverable.
+    #[test]
+    fn comparable_matches_survive_the_cutoff() {
+        let index = Bm25ToolSearchIndex::new(make_snapshot(linear_tools()));
+        let snap = index.search_snapshot("create linear issue", 5);
+        let names: Vec<&str> = snap.results.iter().map(|r| r.tool_name.as_str()).collect();
+        for expected in [
+            "linear__save_issue",
+            "linear__get_issue",
+            "linear__list_issues",
+        ] {
+            assert!(
+                names.contains(&expected),
+                "expected {expected} to survive, got {names:?}"
+            );
+        }
+        assert!(
+            !names.contains(&"linear__list_projects"),
+            "the weak tail must be dropped, got {names:?}"
+        );
     }
 
     #[test]

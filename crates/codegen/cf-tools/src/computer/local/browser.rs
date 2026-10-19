@@ -89,6 +89,20 @@ struct Inner {
     page: chromiumoxide::Page,
 }
 
+/// Result of the snapshot-ref lookup evaluated in the page.
+///
+/// Distinguishes the three failure shapes so the model gets an actionable
+/// message instead of a blanket "stale": refs can be absent because the page
+/// was never snapshotted (`no_snapshot`), because the number is not in the
+/// current snapshot (`missing` -- typically renumbered by a later snapshot),
+/// or because the mapped element no longer exists.
+#[derive(Debug, serde::Deserialize)]
+struct RefLookup {
+    state: String,
+    #[serde(default)]
+    css: Option<String>,
+}
+
 /// Browser backend bound to a lazily-launched local Chromium-family process.
 #[derive(Default)]
 pub struct LocalBrowserBackend {
@@ -130,10 +144,12 @@ impl LocalBrowserBackend {
         if selector.chars().all(|c| c.is_ascii_digit()) && selector != "0" {
             // A stale execution context can only be observed here; the map
             // lookup itself is read-only, so retrying is safe.
-            let lookup: Option<String> = retry_stale_context(|| async {
+            let lookup: Option<RefLookup> = retry_stale_context(|| async {
                 page.evaluate_expression(format!(
-                    "(() => {{ const e = window.__qidiRefs && window.__qidiRefs[{selector}]; \
-                     return e ? e.css_path : null; }})()"
+                    "(() => {{ const m = window.__qidiRefs; \
+                     if (!m) return {{ state: 'no_snapshot' }}; \
+                     const e = m[{selector}]; \
+                     return e ? {{ state: 'found', css: e.css_path }} : {{ state: 'missing' }}; }})()"
                 ))
                 .await
                 .map_err(|e| ComputerError::io(format!("ref lookup failed: {e}")))
@@ -141,14 +157,44 @@ impl LocalBrowserBackend {
             .await
             .ok()
             .and_then(|r| r.into_value().ok());
-            if let Some(css) = lookup {
-                if let Ok(el) = page.find_element(&css).await {
-                    return Ok(el);
+            match lookup {
+                Some(RefLookup {
+                    state,
+                    css: Some(css),
+                }) if state == "found" => {
+                    if let Ok(el) = page.find_element(&css).await {
+                        return Ok(el);
+                    }
+                    // The ref is in the map but the element is gone: the page
+                    // changed since the snapshot that produced the ref.
+                    return Err(ComputerError::io(format!(
+                        "ref {selector} is stale -- the page changed after the last snapshot; \
+                         run browser_snapshot first and use a fresh ref"
+                    )));
+                }
+                Some(RefLookup {
+                    state,
+                    css: None,
+                }) if state == "no_snapshot" => {
+                    return Err(ComputerError::io(format!(
+                        "ref {selector} cannot be resolved: this page has no snapshot refs \
+                         (the page navigated, or browser_snapshot was never run) -- run \
+                         browser_snapshot first and use a listed ref"
+                    )));
+                }
+                Some(RefLookup { state, .. }) if state == "missing" => {
+                    return Err(ComputerError::io(format!(
+                        "ref {selector} does not exist in the current snapshot -- refs are \
+                         renumbered on every browser_snapshot; run it again and use a listed ref"
+                    )));
+                }
+                _ => {
+                    return Err(ComputerError::io(format!(
+                        "ref {selector} could not be resolved (ref lookup failed) -- run \
+                         browser_snapshot first and use a listed ref"
+                    )));
                 }
             }
-            return Err(ComputerError::io(format!(
-                "ref {selector} is stale -- run browser_snapshot first and use a fresh ref"
-            )));
         }
         page.find_element(selector).await.map_err(|e| {
             ComputerError::io(format!("no element matches selector `{selector}`: {e}"))
@@ -481,26 +527,61 @@ fn build_insert_text_expression(text: &str) -> String {
     )
 }
 
+/// Extra Chromium switches for the local browser.
+///
+/// These are **bare keys**, not `--`-prefixed flags: chromiumoxide's
+/// `ArgsBuilder` prepends `--` to every entry, so `"--no-first-run"` reaches
+/// the process as `----no-first-run` -- a no-op switch Chromium silently
+/// ignores. All three switches were shipped in that broken form; keeping them
+/// as constants plus [`tests::browser_switches_are_bare_keys`] pins the
+/// contract. `disable-extensions` is deliberately absent: chromiumoxide adds
+/// it itself whenever no extension is requested.
+const BROWSER_SWITCHES: &[&str] = &["no-first-run", "no-default-browser-check"];
+
+/// Environment overrides applied to the browser process.
+///
+/// `__COMPAT_LAYER` is injected into a qidi process's environment block by
+/// Windows AppCompat (`DetectorsAppHealth`). Edge inherits it and **relaunches
+/// itself** with `--edge-skip-compat-layer-relaunch`, exiting the process
+/// chromiumoxide spawned with status 0; the replacement does not inherit
+/// chromiumoxide's stderr pipe, so `DevTools listening on ws://...` is never
+/// observed and the launch looks like an instant exit while the browser is
+/// actually alive. An empty value is equivalent to leaving the variable unset
+/// for Chromium's compat-layer check, so Edge stays in the spawned process and
+/// the CDP address flows through stderr again.
+const BROWSER_ENV: &[(&str, &str)] = &[("__COMPAT_LAYER", "")];
+
+/// Build the browser configuration used by [`launch`].
+///
+/// Split out so tests can inspect the environment overrides
+/// ([`chromiumoxide::BrowserConfig::process_envs`] is public; the argument list
+/// is not).
+fn build_browser_config(
+    user_data: &std::path::Path,
+) -> Result<chromiumoxide::BrowserConfig, String> {
+    // Default builder mode is headless; HeadlessMode is not re-exported at the
+    // crate root in 0.9, so plain headless it is.
+    let mut builder = chromiumoxide::BrowserConfig::builder()
+        .user_data_dir(user_data)
+        .window_size(1280, 900)
+        // Drop the default 800x600 emulation override so the layout viewport
+        // follows the 1280x900 window: snapshot refs and click coordinates
+        // then describe the same page a headed browser would show.
+        .viewport(None)
+        .args(BROWSER_SWITCHES.iter().copied());
+    for (key, value) in BROWSER_ENV {
+        builder = builder.env(*key, *value);
+    }
+    builder.build()
+}
+
 /// Launch a hidden browser and open a blank page.
 async fn launch() -> Result<Inner, ComputerError> {
     let user_data = tempfile::Builder::new()
         .prefix("qidi-browser-")
         .tempdir()
         .map_err(|e| ComputerError::io(format!("profile dir failed: {e}")))?;
-    // Default builder mode is headless; HeadlessMode is not re-exported at the
-    // crate root in 0.9, so plain headless it is.
-    let config = chromiumoxide::BrowserConfig::builder()
-        .user_data_dir(user_data.path())
-        .window_size(1280, 900)
-        // Drop the default 800x600 emulation override so the layout viewport
-        // follows the 1280x900 window: snapshot refs and click coordinates
-        // then describe the same page a headed browser would show.
-        .viewport(None)
-        .arg("--no-first-run")
-        .arg("--no-default-browser-check")
-        .arg("--disable-extensions")
-        .build()
-        .map_err(ComputerError::io)?;
+    let config = build_browser_config(user_data.path()).map_err(ComputerError::io)?;
     let (browser, mut handler) = chromiumoxide::Browser::launch(config)
         .await
         .map_err(|e| ComputerError::io(format!("browser launch failed: {e}")))?;
@@ -554,6 +635,46 @@ mod tests {
         let out = truncate_chars(&long, MAX_CONTENT_CHARS);
         assert!(out.chars().count() <= MAX_CONTENT_CHARS + 16);
         assert!(out.ends_with("[truncated]"));
+    }
+
+    /// Regression: chromiumoxide's `ArgsBuilder` prepends `--`, so an entry
+    /// that already carries the prefix reaches Chromium as `----flag` and is
+    /// silently ignored. All three switches shipped in that broken form.
+    #[test]
+    fn browser_switches_are_bare_keys() {
+        for switch in BROWSER_SWITCHES {
+            assert!(
+                !switch.starts_with('-'),
+                "switch {switch:?} must not carry the `--` prefix (ArgsBuilder adds it)"
+            );
+            assert!(!switch.is_empty(), "empty switch would render as `--`");
+        }
+        assert!(BROWSER_SWITCHES.contains(&"no-first-run"));
+        assert!(BROWSER_SWITCHES.contains(&"no-default-browser-check"));
+        // chromiumoxide adds this one itself when no extension is requested;
+        // listing it here produced a duplicate `----disable-extensions`.
+        assert!(!BROWSER_SWITCHES.contains(&"disable-extensions"));
+    }
+
+    /// Regression: the Windows AppCompat `__COMPAT_LAYER` inherited from the
+    /// qidi process made Edge relaunch itself (status 0 on the spawned
+    /// process, stderr pipe lost, CDP address never read). The launch config
+    /// must clear it.
+    #[test]
+    fn browser_config_clears_appcompat_layer() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = build_browser_config(dir.path()).expect("browser config");
+        assert_eq!(
+            config.user_data_dir.as_deref(),
+            Some(dir.path()),
+            "profile dir must be passed through"
+        );
+        let envs = config.process_envs.expect("env overrides must be present");
+        assert_eq!(
+            envs.get("__COMPAT_LAYER").map(String::as_str),
+            Some(""),
+            "the compat layer must be cleared with an empty value"
+        );
     }
 
     /// Pin the JS<->Rust contract: COLLECT_REFS_JS emits ref_id/css_path
@@ -662,6 +783,38 @@ mod tests {
             .await
             .expect("read");
         assert!(read.content.contains("done"), "content: {}", read.content);
+
+        // Ref errors must say *which* failure happened: a number that is not in
+        // the current snapshot is not the same as a page that was never
+        // snapshotted.
+        let missing = backend
+            .click(BrowserClickRequest {
+                selector: "9999".into(),
+            })
+            .await
+            .expect_err("unknown ref must fail");
+        assert!(
+            missing.to_string().contains("does not exist"),
+            "unknown ref: {missing}"
+        );
+
+        backend
+            .navigate(BrowserNavigateRequest {
+                url: "data:text/html,<title>fresh</title><p>new document</p>".to_owned(),
+                wait_ms: Some(0),
+            })
+            .await
+            .expect("renavigate");
+        let no_snapshot = backend
+            .click(BrowserClickRequest {
+                selector: "1".into(),
+            })
+            .await
+            .expect_err("no snapshot refs must fail");
+        assert!(
+            no_snapshot.to_string().contains("no snapshot refs"),
+            "fresh document: {no_snapshot}"
+        );
     }
 
     fn stale_context_error() -> ComputerError {
