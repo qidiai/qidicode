@@ -324,9 +324,13 @@ pub enum AgentCmd {
 /// WebSocket URL override arguments, used by headless / leader / serve modes.
 #[derive(Debug, clap::Args, Clone, Default)]
 pub struct HeadlessArgs {
-    #[arg(long = "grok-ws-origin")]
+    /// WebSocket origin override (auth/build links). `--grok-ws-origin` is
+    /// kept as a visible alias so existing scripts keep working.
+    #[arg(long = "qidi-ws-origin", visible_alias = "grok-ws-origin")]
     pub grok_ws_origin: Option<String>,
-    #[arg(long = "grok-ws-url")]
+    /// WebSocket relay URL override. `--grok-ws-url` is kept as a visible
+    /// alias so existing scripts keep working.
+    #[arg(long = "qidi-ws-url", visible_alias = "grok-ws-url")]
     pub grok_ws_url: Option<String>,
 }
 /// Arguments for the `agent serve` subcommand.
@@ -1201,5 +1205,47 @@ mod tests {
             panic!("expected agent subcommand");
         };
         assert_eq!(agent.reasoning_effort.as_deref(), Some("max"));
+    }
+    /// Pull the `HeadlessArgs` out of `agent headless <args>`.
+    fn parse_headless(extra: &[&str]) -> HeadlessArgs {
+        let mut argv = vec!["grok", "agent", "headless"];
+        argv.extend_from_slice(extra);
+        let args = PagerArgs::try_parse_from(argv).expect("agent headless parses");
+        let Command::Agent(agent) = args.command.expect("agent subcommand") else {
+            panic!("expected agent subcommand");
+        };
+        let Some(AgentCmd::Headless(headless)) = agent.mode else {
+            panic!("expected headless mode");
+        };
+        headless
+    }
+    /// The qidi-named flags are canonical; the legacy grok-named flags remain
+    /// visible aliases so existing scripts keep parsing.
+    #[test]
+    fn headless_ws_flags_accept_qidi_names_and_grok_aliases() {
+        let qidi = parse_headless(&[
+            "--qidi-ws-url",
+            "wss://relay.example/ws",
+            "--qidi-ws-origin",
+            "https://relay.example",
+        ]);
+        assert_eq!(qidi.grok_ws_url.as_deref(), Some("wss://relay.example/ws"));
+        assert_eq!(
+            qidi.grok_ws_origin.as_deref(),
+            Some("https://relay.example")
+        );
+        let grok = parse_headless(&[
+            "--grok-ws-url",
+            "wss://legacy.example/ws",
+            "--grok-ws-origin",
+            "https://legacy.example",
+        ]);
+        assert_eq!(grok.grok_ws_url.as_deref(), Some("wss://legacy.example/ws"));
+        assert_eq!(
+            grok.grok_ws_origin.as_deref(),
+            Some("https://legacy.example")
+        );
+        let none = parse_headless(&[]);
+        assert!(none.grok_ws_url.is_none() && none.grok_ws_origin.is_none());
     }
 }

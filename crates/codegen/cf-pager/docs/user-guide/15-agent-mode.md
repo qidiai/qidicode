@@ -60,7 +60,7 @@ Clients connect over WebSocket and authenticate with the secret token. If you om
 To reach the agent over the internet instead of the local network, run a WebSocket relay server and have the agent connect to it:
 
 ```bash
-grok agent headless --grok-ws-url wss://your-relay.example.com/ws
+grok agent headless --qidi-ws-url wss://your-relay.example.com/ws
 ```
 
 The agent connects out to your relay, and your web clients connect to the same relay. This is useful for building web UIs where browsers cannot spawn local processes.

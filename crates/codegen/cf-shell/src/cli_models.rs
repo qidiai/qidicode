@@ -171,7 +171,7 @@ mod tests {
 
         assert_eq!(
             AuthStatus::resolve(&Config::default()),
-            AuthStatus::LoggedIn("grok.com".to_owned())
+            AuthStatus::LoggedIn("ba.qidiai.ltd".to_owned())
         );
     }
 

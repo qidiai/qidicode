@@ -18,13 +18,24 @@ const PRODUCTION_ENDPOINTS: QidiBuildEndpoints = QidiBuildEndpoints {
     // completion, 2026-10-19).
     cli_chat_proxy_base_url: "https://api.qidiai.ltd/v1",
     asset_server_url: "https://assets.qidiai.ltd",
-    // Relay/gateway hosts are live infrastructure, not just branding: no qidi
-    // equivalent exists in the tree yet, and guessing one would silently
-    // redirect auth/leader traffic. Left on the upstream hosts, overridable
-    // via QIDI_PRODUCTION_WS_* env vars, pending operator confirmation.
-    relay_ws_url: "wss://code.grok.com/ws/code-agent",
+    // Relay/gateway hosts are live infrastructure, not just branding: pointing
+    // them at the wrong host silently redirects auth/leader traffic, so each
+    // value is only changed once its counterpart has been confirmed running.
+    //
+    // Relay: the qidi mobile-remote relay (`agent headless` mode, Bearer
+    // secret auth, JSON-RPC/ACP over `/ws`) was confirmed live at
+    // `wss://ba.qidiai.ltd/ws` on 2026-10-19; see the configuration guide.
+    // The `ws_origin` moves with it (`https://ba.qidiai.ltd`).
+    //
+    // Gateway (`/ws/gw/`): still on the upstream host. `ba.qidiai.ltd` returns
+    // 404 for `/ws/gw/` and no qidi gateway deployment exists yet; switch it
+    // the same way once the operator deploys one.
+    //
+    // All three remain overridable at runtime via `QIDI_PRODUCTION_WS_URL`,
+    // `QIDI_PRODUCTION_GATEWAY_WS_URL`, and `QIDI_PRODUCTION_WS_ORIGIN`.
+    relay_ws_url: "wss://ba.qidiai.ltd/ws",
     gateway_ws_url: "wss://grok.com/ws/gw/",
-    ws_origin: "https://grok.com",
+    ws_origin: "https://ba.qidiai.ltd",
 };
 pub const PROD_CLI_CHAT_PROXY_BASE_URL: &str = PRODUCTION_ENDPOINTS.cli_chat_proxy_base_url;
 pub const PROD_ASSET_SERVER_URL: &str = PRODUCTION_ENDPOINTS.asset_server_url;
@@ -176,6 +187,39 @@ mod tests {
             std::env::var(KEY).ok(),
             before,
             "Drop must restore the pre-guard snapshot (was {before:?})"
+        );
+    }
+    /// The compiled relay default points at the qidi mobile-remote relay
+    /// confirmed live on 2026-10-19; the gateway stays on the upstream host
+    /// until a qidi deployment exists (`ba.qidiai.ltd` 404s on `/ws/gw/`).
+    #[test]
+    fn production_endpoints_match_confirmed_infrastructure() {
+        assert_eq!(PROD_RELAY_WS_URL, "wss://ba.qidiai.ltd/ws");
+        assert_eq!(PROD_WS_ORIGIN, "https://ba.qidiai.ltd");
+        assert_eq!(PROD_GATEWAY_WS_URL, "wss://grok.com/ws/gw/");
+    }
+    /// `QIDI_PRODUCTION_*` env vars still take precedence over compiled
+    /// defaults after the relay move.
+    #[test]
+    fn env_overrides_still_win_for_relay_and_origin() {
+        {
+            let _guard = EnvVarGuard::set("QIDI_PRODUCTION_WS_URL", "wss://override.example/ws");
+            assert_eq!(
+                QidiBuildEnvironment::Production.relay_ws_url(),
+                "wss://override.example/ws"
+            );
+        }
+        {
+            let _guard = EnvVarGuard::set("QIDI_PRODUCTION_WS_ORIGIN", "https://override.example");
+            assert_eq!(
+                QidiBuildEnvironment::Production.ws_origin(),
+                "https://override.example"
+            );
+        }
+        assert_eq!(
+            QidiBuildEnvironment::Production.gateway_ws_url(),
+            PROD_GATEWAY_WS_URL,
+            "gateway must keep using the compiled default without an override"
         );
     }
     /// Guards against conflating the relay and gateway endpoints (a relay
