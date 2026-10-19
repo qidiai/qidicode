@@ -544,7 +544,9 @@ pub struct PagerArgs {
         value_name = "PROMPT"
     )]
     pub system_prompt_override: Option<String>,
-    /// Resume a session by ID, or the most recent if omitted.
+    /// Resume a session by ID, or the most recent if omitted. The session's
+    /// persisted agent type is restored — `--agent` must match it or be
+    /// omitted.
     #[arg(
         long = "resume",
         short = 'r',
@@ -606,7 +608,8 @@ pub struct PagerArgs {
     /// Disable cross-session memory for this session.
     #[arg(long = "no-memory", conflicts_with = "experimental_memory")]
     pub no_memory: bool,
-    /// Agent name or definition file path.
+    /// Agent name or definition file path. With `--resume`, it must match the
+    /// session's persisted agent type.
     #[arg(long = "agent", value_name = "NAME")]
     pub agent: Option<String>,
     /// Inline subagent definitions as JSON.

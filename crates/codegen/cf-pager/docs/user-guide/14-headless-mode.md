@@ -267,6 +267,10 @@ grok -p "Remember: the secret number is 42" --output-format json
 grok -p "What's the secret number?" --resume abc123
 ```
 
+A resumed session keeps the agent type it was persisted with. Passing
+`--agent` with a different type is rejected with an error naming both types;
+omit `--agent` (or pass the matching type) to resume.
+
 ### Continue (`-c`)
 
 The `-c/--continue` flag continues the most recent session in the current working directory:

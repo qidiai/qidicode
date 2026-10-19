@@ -324,6 +324,47 @@ fn apply_agent_flag(agent: &Option<String>, config: &mut cf_shell::agent::config
     }
 }
 
+/// The agent type an explicit `--agent` flag names, if one is given.
+///
+/// A definition file contributes its `name` (that is the identity persisted
+/// in `Summary.agent_name`), so both flag forms are comparable to a resumed
+/// session's binding. Unreadable files yield `None` — the spawn path reports
+/// the real load error; this check must not mask it.
+fn requested_agent_name(agent: &Option<String>) -> Option<String> {
+    match resolve_agent_arg(agent.as_deref()?) {
+        ResolvedAgent::Name(name) => Some(name),
+        ResolvedAgent::FilePath(path) => {
+            cf_shell::agent::config::AgentDefinition::from_file(&path)
+                .ok()
+                .map(|def| def.name)
+        }
+    }
+}
+
+/// Reject `--resume` combined with an `--agent` that names a different type.
+///
+/// A resumed session restores the agent type persisted in its summary. An
+/// explicit `--agent` naming another type makes the two sources disagree;
+/// instead of silently letting one side win, resume fails loudly and says
+/// how to proceed. Matching types (case-insensitively) and sessions without
+/// a persisted agent name (pre-feature summaries) pass through.
+fn resume_agent_conflict(
+    session_id: &str,
+    requested: Option<&str>,
+    persisted: Option<&str>,
+) -> Option<String> {
+    let requested = requested.map(str::trim).filter(|s| !s.is_empty())?;
+    let persisted = persisted.map(str::trim).filter(|s| !s.is_empty())?;
+    if requested.eq_ignore_ascii_case(persisted) {
+        return None;
+    }
+    Some(format!(
+        "--resume {session_id} was persisted with agent type '{persisted}', \
+         but --agent '{requested}' was requested. A resumed session keeps its persisted \
+         agent binding; drop --agent to resume as '{persisted}', or pass a matching agent type."
+    ))
+}
+
 // ── Emitter ──────────────────────────────────────────────────────────────
 
 struct HeadlessEmitter {
@@ -1170,6 +1211,23 @@ pub async fn run_single_turn(
         &cwd_str,
     )
     .await?;
+
+    // A resumed session restores the agent type persisted in its summary.
+    // An explicit `--agent` naming a different type is a contradiction, not a
+    // silent rebinding: fail before opening the session and say why.
+    if let MaterializedStartup::Resume { session_id, .. } = &materialized {
+        let persisted = cf_shell::session::persistence::find_summary_by_session_id(session_id)
+            .and_then(|summary| summary.agent_name);
+        if let Some(msg) = resume_agent_conflict(
+            session_id,
+            requested_agent_name(&options.agent).as_deref(),
+            persisted.as_deref(),
+        ) {
+            emitter.on_error(&msg);
+            cancel.cancel();
+            anyhow::bail!("{msg}");
+        }
+    }
 
     // Open session
     let restore_code = options.restore_code.then_some(true);
@@ -2200,6 +2258,65 @@ mod tests {
         assert!(
             err.to_string().contains("--worktree combined with"),
             "error must carry the explicit message: got {err}"
+        );
+    }
+
+    /// P3: `--resume` + a different `--agent` must fail loudly and name both
+    /// sides of the conflict, instead of silently letting one win.
+    #[test]
+    fn resume_agent_conflict_rejects_mismatched_type_with_message() {
+        let msg = super::resume_agent_conflict("sess-1", Some("explore"), Some("general-purpose"))
+            .expect("mismatched agent types must conflict");
+        assert!(
+            msg.contains("--resume sess-1"),
+            "message must name the resumed session: {msg:?}"
+        );
+        assert!(
+            msg.contains("'general-purpose'"),
+            "message must name the persisted agent type: {msg:?}"
+        );
+        assert!(
+            msg.contains("'explore'"),
+            "message must name the requested agent type: {msg:?}"
+        );
+        assert!(
+            msg.contains("persisted"),
+            "message must explain the persisted binding: {msg:?}"
+        );
+        assert!(
+            msg.contains("drop --agent"),
+            "message must state the way out: {msg:?}"
+        );
+    }
+
+    /// P3: matching types (case-insensitively), no `--agent`, and summaries
+    /// predating the persisted agent name all resume unchanged.
+    #[test]
+    fn resume_agent_conflict_allows_compatible_inputs() {
+        assert!(
+            super::resume_agent_conflict(
+                "sess-1",
+                Some("general-purpose"),
+                Some("general-purpose")
+            )
+            .is_none(),
+            "identical agent types must resume"
+        );
+        assert!(
+            super::resume_agent_conflict("sess-1", Some("Explore"), Some("explore")).is_none(),
+            "agent type comparison must ignore case"
+        );
+        assert!(
+            super::resume_agent_conflict("sess-1", Some("  explore  "), Some("explore")).is_none(),
+            "agent type comparison must ignore surrounding whitespace"
+        );
+        assert!(
+            super::resume_agent_conflict("sess-1", None, Some("explore")).is_none(),
+            "resume without --agent must keep the persisted binding"
+        );
+        assert!(
+            super::resume_agent_conflict("sess-1", Some("explore"), None).is_none(),
+            "old sessions without a persisted agent name must not be rejected"
         );
     }
 
