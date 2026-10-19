@@ -51,6 +51,8 @@
 
 ---
 
+**产品竞品分析与吸收方案**：docs/absorption/（ADM 竞品分析+吸收方案 v2 三模型审计整合定稿，2026-10-19；含 WeCom 消息桥 P0 规格、qidi-update 技能、纪律互鉴、开放问题）。
+
 ## 3. 办公项目（方案 / 标书 / 审计 / 资料 / 纪要 等非代码交付物）
 
 **统一根：私有库 `github.com/qidiai/qidiwork-docs`（Private），本地工作副本 `G:\qidiwork-docs-local\qidiwork-docs\`（2026-10-17 勘误：原写 `G:\qidicode-docs-local\` 实测不存在，真实副本为带 `qidiwork-docs` 子目录的本路径）。**
@@ -141,7 +143,7 @@
 
   - **DeepSeek 401 备用通道（2026-10-17 下午实测）**：luyou 池 401 时 deepseek-v4-1-flash-260910 同样 401；可用位为 deepseek-flash?**2026-10-17 ????????????????? API ?**??deepseek-flash ?????????????DeepSeek ???? docs/ops/deepseek-flash-evolution.md?（200 通过）与 deepseek-flash（200 通过）；config 中 model 字段应写 deepseek/deepseek-v4.1-flash。
 - luyou/codely 池为**每日共享额度制**（用户口径）：429 = 当日配额被共享用户挤占/用尽，波动型限流（同分钟内小请求与大请求成败可并存），等窗口或次日
-- **2026-10-19 模型可用性实测快照（headless CLI 通道、串行、单实例）**：GLM-5.3-222（9.2s）/ KIMI-K3-222（9.6s，**当日稍后 429 并退役，勿再用**）/ kimi-k2.7-code-highspeed-222（10.7s）/ step-5-preview-222（10.5s，⚠️订阅明日到期）**可用**；deepseek-flash-222 **池级 429**（串行+退避 30s 仍限=当日配额耗尽，非瞬时并发；**下午经用户铺设 apigoto 路由 `deepseek-flash-ago-222` 恢复，spawn 路径不认 config 条目须走 headless**）；claude-sonnet-4-6-222 上游 401（luyou 无账号可服务）、gpt-5.5-222 上游 404（apigoto 不支持，本地 catalog stale）。**编排教训（今日实测）：并行派发 3 个同模型子代理瞬间击穿 tpm/rps 全灭（单会话 77K tokens）——同模型派工必须串行，严禁并行挖吞吐；429 均 ~10s 快速返回（池级拒答非挂起）**
+- **2026-10-19 模型可用性实测快照（headless CLI 通道、串行、单实例）**：GLM-5.3-222（9.2s）/ KIMI-K3-222（9.6s，**当日稍后 429 并退役，勿再用**）/ kimi-k2.7-code-highspeed-222（10.7s）/ step-5-preview-222（10.5s，⚠️订阅明日到期）**可用**。**当晚追况**：luyou 中转 GLM 家族全族 401（"no account could serve it"，GLM-5.3/GLM-5.3-Flash/intern-glm-5.3 均中招，账号池波动，非我方问题）；**claude-haiku-5-5（apigoto 通道 `claude-haiku-5-5-ago-222`）顶替审计/第二席**（用户指定，深测判真）；**qwen3.8-flash 上魔塔**（config 条目 `qwen3.8-flash-ms-222`=ModelScope `Qwen/Qwen3.8-Flash-Next`，PONG 10s）；deepseek-flash-222 **池级 429**（串行+退避 30s 仍限=当日配额耗尽，非瞬时并发；**下午经用户铺设 apigoto 路由 `deepseek-flash-ago-222` 恢复，spawn 路径不认 config 条目须走 headless**）；claude-sonnet-4-6-222 上游 401（luyou 无账号可服务）、gpt-5.5-222 上游 404（apigoto 不支持，本地 catalog stale）。**编排教训（今日实测）：并行派发 3 个同模型子代理瞬间击穿 tpm/rps 全灭（单会话 77K tokens）——同模型派工必须串行，严禁并行挖吞吐；429 均 ~10s 快速返回（池级拒答非挂起）**
 - luyou→kimi-k3 流的 `finish_reason:""` 空串坑已修（commit `b333b253`：`empty_finish_reason_as_none` 双路径归一化+5 回归测试）——**旧 qidi.exe 进程 spawn K3 必炸**（unknown variant ''），换新版 exe 后消除
 - **Kimi 系唯一在位线 = `kimi-k2.7-code-highspeed-222`**（apigoto 直连带独立 key；spawn 与 headless 双通道今日实测均可用，编码手/审计第二席两职均可担）——**KIMI-K3-222 已于 2026-10-19 退役（用户决定，当日 429 后未恢复），任何任务书/编排不得再派**；其历史坑（`finish_reason:""` 空串需新版 exe）随退役归档
 - **headless 路由与"429=x.ai"假象实测（2026-10-16 深挖+两次勘误，RUST_LOG=debug 探针铁证）**：
@@ -156,7 +158,7 @@
 | 项 | 约定 |
 |---|---|
 | 远程 | `origin`（github）、`gitee`、`upstream`（**SMB 共享基线** `\\192.168.1.222\程序开发\grok-build-upstream`，2026-10-05 起；原本地路径 `C:\Users\ASUS\grok-build` 已不存在）。⚠️ **2026-10-17 API 实测：origin 与 gitee 均为 PUBLIC（用户确认软件对外公开即为此状态）**——文档私有库是另一个仓库 `github.com/qidiai/qidiwork-docs`（Private），勿混 |
-| GitHub 网络分流 | **origin 推送走首尔 SSH 隧道**（2026-10-14 起）：git 已配域名级代理 `http.https://github.com.proxy = socks5://127.0.0.1:1080`——**仅 github.com 走首尔出口，gitee 等其他全部原网络直连**。隧道=`C:\qidi-proxy\seoul_socks5.py`（SSH 动态转发→首尔 VPS，源自 `\\192.168.1.222\程序开发\clash` 归档），**计划任务 `QidiSeoulProxy` 常驻**（登录自启+无执行时限；勿用 shell Start-Process 拉起——Job Object 会杀）。SOCKS5 1080 / PAC 1081 |
+| GitHub 网络分流 | **origin 推送走首尔 SSH 隧道**（2026-10-14 起）：git 已配域名级代理 `http.https://github.com.proxy = socks5://127.0.0.1:1080`——**仅 github.com 走首尔出口，gitee 等其他全部原网络直连**。隧道=`C:\qidi-proxy\seoul_socks5.py`（SSH 动态转发→首尔 VPS，源自 `\\192.168.1.222\程序开发\clash` 归档），**计划任务 `QidiSeoulProxy` 常驻**（登录自启+无执行时限；勿用 shell Start-Process 拉起——Job Object 会杀）。SOCKS5 1080 / PAC 1081。⚠️ **2026-10-19 实测：首尔代理当日两次掉线**（port 1080 TCP 不通→origin 推送失败）——**修复法：`Start-ScheduledTask -TaskName "QidiSeoulProxy"`**（计划任务本身 Ready，拉起后端口即恢复；进程跑在任务独立会话，本 shell 的 Get-Process 看不到但端口可验）；另注意：**并行会话会在同一分支落 commit**（今日实测到他人 commit a1c81e2f/e1adc824）——推送前 `git log` 核对，**勿 revert 他人提交** |
 | 默认推送 | **双推 `origin` + `gitee`（仅限代码）**；worktree 分支用 `git push <remote> feat/xxx:main` 直推 main。**文档永不进本仓库双推面**（§3） |
 | 可见性闸门（2026-10-17 事故后新增） | 每次会话首次推送前、以及任何远程配置变更后，跑一次 `curl.exe -s https://api.github.com/repos/qidiai/qidicode` 与 gitee 对应 API，确认可见性与预期一致（公开是预期状态；**若返回 private 或仓库消失，停止推送并报告**）。文档类内容一律推私有库，推完 `gh repo view qidiai/qidiwork-docs --json visibility` 验证 PRIVATE |
 | 提交权 | 编码手/子代理禁止 commit；指挥官质检通过后统一提交 |
@@ -182,7 +184,7 @@
 
 | 操作 | 命令 | 耗时/备注 |
 |---|---|---|
-| 出产品 exe | `cargo build --release -p cf-pager-bin --bin qidi -j 4` | 冷 30-90 分钟；有缓存快；**运行中的 qidi.exe 无法覆盖 → 先改名旧 exe（Windows 允许改名不允许覆盖）** |
+| 出产品 exe | `cargo build --release -p cf-pager-bin --bin qidi -j 4` | 冷 30-90 分钟；有缓存快；**运行中的 qidi.exe 无法覆盖 → 先改名旧 exe（Windows 允许改名不允许覆盖）**。**2026-10-19 构建实录**：含当日全部修复的产品 exe 已出（`qidi 0.1.220-alpha.4 (35045d22)`，独立目录 `C:\qidi-release-build` 冷编 101 分钟+冒烟 PONG+构建区已清），**暂存于 `G:\qidi-exe-backup\qidi-20261019-35045d22.exe`** 待换装（换装四步：备份旧→改名旧→拷新→`--version` 验；新会话生效） |
 | cf-memory 测试 | `cargo test -p cf-memory --lib` | ~2-10 分钟 |
 | **cf-shell 测试** | `$env:CARGO_TARGET_DIR='C:\qidi-cfshell-test'; $env:CARGO_PROFILE_DEV_DEBUG='0'; cargo test -p cf-shell --lib -j 4` | **热缓存全量 ~2.5 分钟**；`DEBUG=0`+串行是内存 OOM 的解药（本机 16GB，cf-shell 测试二进制直跑必 OOM）。⚠️ **2026-10-19 实测：全量跑不绿属既有问题（非回归），共 10 项已知失败**——① `acp_session::cancel_running_task_tests::persist_ack_waits_for_disk_flush_before_success` 栈溢出（Windows 测试线程 2MB 栈）会**中断整个 harness**；② `auth_method::tests::enterprise_byok_config_does_not_require_login`、`agent::config::tests::has_own_credentials_guards_session_vs_external_key`、`cli_models::tests::resolve_{deployment_key,model_api_key_byok,model_credentials_uses_first_catalog_key,model_env_key_byok,not_authenticated,priority_byok_over_deployment}` 共 8 项因本机预置多枚 API key（ANTHROPIC/OPENAI/DEEPSEEK/MOONSHOT/ZHIPU/ARK/AGNES）必败（kimi-k3-moonshot 条目 env 探针翻转，测试自己的注释记载了该机制）；③ `drain_finished_thread_returns_immediately` 负载敏感 flaky。**跑法：按名称跳过这 10 项（全量基线 5630 passed/7 env-failed，批次2 QC 实测），或 `cargo test -p cf-shell --lib mvp_agent::` 过滤跑（基线 185/186）** |
 | cf-chat-state 测试 | `cargo test -p cf-chat-state --lib`（G 盘直跑）；历史注记：2026-10-04 曾报 G 盘链接确定性挂起（link.exe ~369MB 零 I/O 冻结，两次复现），**2026-10-09 复测未复现**——冷编 21m22s + link.exe 活跃推进（工作集 5.4GB，非冻结特征）+ 链接正常完成 + 测试 0.53s；若再现挂起，改用 C 盘热 target 方案（同 cf-shell 行） | G 盘冷编（禁 sccache）~21 分钟；基线 345 passed / 0 failed（2026-10-09，较 2026-10-04 基线 343 +2 = B1-6 新增 cache_read_ratio 两测试，数目自洽） |
