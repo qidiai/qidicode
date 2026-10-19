@@ -879,7 +879,7 @@ pub fn cached_token_auth_method() -> acp::AuthMethod {
 
 
 
-pub const QIDI_COM_METHOD_ID: &str = "qidi.com";
+pub const QIDI_COM_METHOD_ID: &str = "qidiai.ltd";
 
 /// Legacy ACP id written by pre-rebrand builds. **Format compatibility only**:
 /// never advertise or persist it, but keep parsing it so existing sessions,
@@ -1104,7 +1104,7 @@ mod tests {
 
 
 
-    /// Rebrand migration: new builds advertise/persist `qidi.com`, but the
+    /// Rebrand migration: new builds advertise/persist `qidiai.ltd`, but the
     /// legacy `grok.com` id must keep parsing so existing sessions and older
     /// ACP peers are not logged out.
     #[test]
@@ -1113,7 +1113,7 @@ mod tests {
         let legacy = acp::AuthMethodId::new(LEGACY_QIDI_COM_METHOD_ID);
 
         assert_eq!(
-            QIDI_COM_METHOD_ID, "qidi.com",
+            QIDI_COM_METHOD_ID, "qidiai.ltd",
             "canonical id must be the qidi spelling"
         );
         assert_eq!(
@@ -1123,7 +1123,7 @@ mod tests {
         assert_eq!(
             AuthMethodKind::from_id(&canonical),
             AuthMethodKind::GrokCom,
-            "canonical qidi.com id must map to the interactive method"
+            "canonical qidiai.ltd id must map to the interactive method"
         );
         assert_eq!(
             AuthMethodKind::from_id(&legacy),
@@ -1131,7 +1131,7 @@ mod tests {
             "legacy grok.com id must keep mapping to the interactive method"
         );
         assert!(
-            is_qidi_com_method_id("qidi.com") && is_qidi_com_method_id("grok.com"),
+            is_qidi_com_method_id("qidiai.ltd") && is_qidi_com_method_id("grok.com"),
             "both spellings must be recognized as the interactive method"
         );
         assert!(
