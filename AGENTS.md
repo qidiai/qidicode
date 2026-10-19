@@ -86,7 +86,7 @@
 - 换会话/新开会话前若有未沉淀结论 → 先 `/flush`
 - **自动兜底**：compact 出错前会自动落盘（`pre_compact_on_error-*.md`），`/flush` 是主动版
 - **关键安心条款**：`cargo clean` / `git clean` / 仓库清理**物理隔离**于 `C:\Users\ASUS\.qidi\`（记忆、会话、技能、配置都在 C 盘，不受任何仓库清理影响）
-- 测试绿门基线见记忆：`reference-qidicode-green-gates`（2026-10 快照：cf-shell 5538 / cf-pager 7021 / cf-tools 2605；另 2026-10-19 全面测试实测 `cargo check --workspace -j 2` 17m41s、0 errors、仅 1 warning）——先对照基线再判断"是不是我跑挂了"
+- 测试绿门基线见记忆：`reference-qidicode-green-gates`（**2026-10-19 批次1修复后实测：cf-tools 2666 passed / 0 failed / 7 ignored；cf-pager 7055 passed / 0 failed / 6 ignored；cf-shell 全量被既有测试事故中断（见 §12 cf-shell 行注），改动面过滤 `mvp_agent::` 185 passed / 1 failed（既有 flaky）**；`cargo check --workspace` 0 errors）——先对照基线再判断"是不是我跑挂了"
 
 ---
 
@@ -164,7 +164,7 @@
 
 ## 11. 环境硬约束（本机实测，新会话必读）
 
-1. **本机无 `rg`**；内置 grep 工具在本环境 **100% 静默返空**（2026-10-19 全面测试实测——比"常返回空"更糟：`fn main` 内置 0 vs `git grep` 89；根因链：Windows 构建不捆绑 rg（cf-shell/build.rs:43）+ PATH 无 rg 回落裸名（ripgrep.rs:99）+ spawn 失败错误被写进不渲染的 stderr 字段、stdout 留空（grep/mod.rs:835-845）→ "工具坏了"伪装成"没有匹配"）→ **一律用 `git grep`**；该 P1 修复前勿信内置 grep 的任何返空结果（连无效正则都无报错）
+1. **本机无 `rg`**；内置 grep 工具在本环境 **100% 返空**（2026-10-19 全面测试实测：`fn main` 内置 0 vs `git grep` 89；根因链：Windows 构建不捆绑 rg（cf-shell/build.rs:43）+ PATH 无 rg 回落裸名（ripgrep.rs:99））→ **一律用 `git grep`**。⚠️ 2026-10-19 已修"静默" half（commit 45828f22：spawn 失败错误写入 stdout，不再伪装成"没有匹配"）——**但本机仍无 rg，grep 依旧不可搜索，只是现在会明说**；rg 捆绑根治（F2b 启动期探针/Windows 解捆）在批次 2
 2. **PowerShell 不支持 `&&`**（用 `;`）；控制台 GBK 中文乱码 → `Get-Content -Encoding UTF8`
 3. **禁止递归扫描**：`target/`、`mem-log/`、`tmp_relay/`、`9.22方案/scripts`、`C:\Users\ASUS\.qidi\sessions\`（1.9 万文件）——都会卡死
 4. `Format-Table` 输出有缓冲错位——重要判断以具体值/行号为准，勿凭表格位置
@@ -183,14 +183,14 @@
 |---|---|---|
 | 出产品 exe | `cargo build --release -p cf-pager-bin --bin qidi -j 4` | 冷 30-90 分钟；有缓存快；**运行中的 qidi.exe 无法覆盖 → 先改名旧 exe（Windows 允许改名不允许覆盖）** |
 | cf-memory 测试 | `cargo test -p cf-memory --lib` | ~2-10 分钟 |
-| **cf-shell 测试** | `$env:CARGO_TARGET_DIR='C:\qidi-cfshell-test'; $env:CARGO_PROFILE_DEV_DEBUG='0'; cargo test -p cf-shell --lib -j 4` | **热缓存全量 ~2.5 分钟**；`DEBUG=0`+串行是内存 OOM 的解药（本机 16GB，cf-shell 测试二进制直跑必 OOM） |
+| **cf-shell 测试** | `$env:CARGO_TARGET_DIR='C:\qidi-cfshell-test'; $env:CARGO_PROFILE_DEV_DEBUG='0'; cargo test -p cf-shell --lib -j 4` | **热缓存全量 ~2.5 分钟**；`DEBUG=0`+串行是内存 OOM 的解药（本机 16GB，cf-shell 测试二进制直跑必 OOM）。⚠️ **2026-10-19 实测：全量跑不绿属既有问题（非回归）**——① `acp_session::cancel_running_task_tests::persist_ack_waits_for_disk_flush_before_success` 栈溢出（Windows 测试线程 2MB 栈）会**中断整个 harness**；② `auth_method::tests::enterprise_byok_config_does_not_require_login` 因本机预置多枚 API key（ANTHROPIC/OPENAI/DEEPSEEK/MOONSHOT/ZHIPU/ARK/AGNES）必败；③ `drain_finished_thread_returns_immediately` 负载敏感 flaky。**跑法：按名称跳过这三项，或 `cargo test -p cf-shell --lib mvp_agent::` 过滤跑（基线 185/186）** |
 | cf-chat-state 测试 | `cargo test -p cf-chat-state --lib`（G 盘直跑）；历史注记：2026-10-04 曾报 G 盘链接确定性挂起（link.exe ~369MB 零 I/O 冻结，两次复现），**2026-10-09 复测未复现**——冷编 21m22s + link.exe 活跃推进（工作集 5.4GB，非冻结特征）+ 链接正常完成 + 测试 0.53s；若再现挂起，改用 C 盘热 target 方案（同 cf-shell 行） | G 盘冷编（禁 sccache）~21 分钟；基线 345 passed / 0 failed（2026-10-09，较 2026-10-04 基线 343 +2 = B1-6 新增 cache_read_ratio 两测试，数目自洽） |
-| **cf-pager 测试** | ⚠️ G 盘冷链**严重偏离旧记载**（2026-10-04 实测 >90 分钟未完成，pdb 1.6GB 链接为瓶颈）→ **一律用 C 盘热 target 方案**（同 cf-shell 行） | C 盘热缓存 ~40 分钟；基线 **7033 passed + 6 ignored / 0 failed**（2026-10-16 实测，7039 总数）——**必须加 `$env:QIDI_FORCE_LEGACY_CONSOLE='0'`**：旧记载"53 预先存在字形失败"已作废（根因=legacy OEM 代码页遗留，非环境字体） |
+| **cf-pager 测试** | ⚠️ G 盘冷链**严重偏离旧记载**（2026-10-04 实测 >90 分钟未完成，pdb 1.6GB 链接为瓶颈）→ **一律用 C 盘热 target 方案**（同 cf-shell 行） | C 盘热缓存 ~40 分钟；基线 **7055 passed + 6 ignored / 0 failed**（2026-10-19 批次1修复后实测，7061 总数；旧值 7033 作废）——**必须加 `$env:QIDI_FORCE_LEGACY_CONSOLE='0'`**：旧记载"53 预先存在字形失败"已作废（根因=legacy OEM 代码页遗留，非环境字体）；另注意既有 flaky：`needs_animation_gates_prompt_history_tick_delivery`（时序敏感，隔离重跑即过） |
 | 快速全局校验 | `cargo check --workspace` | 0 errors 为过 |
 | **macOS 构建** | `.github/workflows/ci.yml` 的 macos-build job（直推 main 自动触发，`git push origin feat/xxx:main`） | aarch64-apple-darwin 产物挂 artifact `qidi-macos-arm64`（~59MB）可下载；libc 依赖门教训（b507ae61）：依赖 cfg 不得比代码使用面窄（`cfg(unix)` ⊃ macos） |
 | **ai-bridge 多工具桥** | Hub `http://127.0.0.1:9800`（`/api/dispatch` 等，鉴权 token=用户级环境变量 `AI_BRIDGE_TOKEN`） | claude-code 与 opencode 适配器已改 **stdin 传参**（2026-10-14——arg 模式多行长文本丢失实锤）；opencode 已注册免费模型 `opencode-go/deepseek-v4-flash`；开关状态在 switches.json（`/api/toggle`）；Hub 挂了用 WMI 拉起（`Win32_Process.Create`，脱离 Job Object）；**dispatch 可绕道子代理 depth 限制**（MAX_SUBAGENT_DEPTH=1 拦得住原生 spawn、拦不住 MCP 派发，且空返回不被识别为失败——2026-10-19 实测） |
 | **playwright（MCP 25 工具 + 内置 5 `browser_*`）** | 2026-10-19 实测：枚举自洽（25=宣称数）、内置 5 工具全链路（导航/快照/读/点击/输入提交/错误路径）全部达成、错误路径报错清晰 | **⚠️ 双上下文陷阱：MCP 面 `playwright__*` 与内置 `browser_*` 操作两个完全隔离的浏览器上下文**——一面导航另一面不可见，带登录态/页面状态的任务严禁混用（静默错乱）；跳转后首次调用偶发 `Cannot find context with specified id`（~25%，操作实际均成功，重试即过） |
-| **已知 P1 缺陷（2026-10-19 全面测试发现，均未修复）** | ①内置 grep 100% 静默返空（根因见 §11.1）②`qidi_build_SchedulerCreate`（推测整个 `qidi_build:` 冒号族同病）广告在册但调用必败 `Tool not found`（ToolId 冒号 vs 函数名下划线、无归一化；指挥官/子代理席双双实测复现）③`capability_mode=read-only/execute` 不禁 write（builder.rs:755-761 在过滤后重注入 OpenCodeWriteTool）④headless `--worktree` 静默失效（只消费为布尔量、从不建 worktree——隔离是幻觉，写入直接落主仓库） | 修复前绕法：grep 用 `git grep`；定时任务走 TUI 斜杠命令；read-only 子代理按"可写"对待（勿托付写敏感操作）；worktree 隔离手工 `git worktree add` 或走 TUI；冒号族工具修复前视为不存在 |
+| **P1 缺陷台账（2026-10-19 全面测试发现；批次1修复 commit `45828f22`+`69677775`）** | ✅已修：①grep 静默返空→错误可见化（本机仍无 rg，grep 依旧不可用但不再伪装"没有匹配"，继续用 `git grep`；捆绑根治在批次2）②冒号族广告即败→registry 归一化查找（含 `tool_identity` 残肢，7 常量全部恢复可调用）④headless `--worktree` 静默失效→显式报错退出（**真正创建 worktree 在批次2**）⏳未修：③`capability_mode=read-only/execute` 不禁 write（builder.rs:755-761 过滤后重注入）——**修好前 read-only 子代理按"可写"对待，勿托付写敏感操作** | 规格与剩余批次（F4/F2b/F3根治/F6技能库/F7）见 `docs/fix-plans/2026-10-19-缺陷修复方案.md`；F8 Dashboard 代理类型选择已随批次1落地（Alt+A） |
 | 清理 | `cargo clean` | 先备份 `target/release/qidi.exe` 到 `G:\qidi-exe-backup\`；**注意 §6 target/debug 历史文件雷** |
 
 ⚠️ **磁盘清理硬性规则（2026-10-10 事故后强制，对所有编码手通用）**：target/debug 下混有大量历史用户文件（`_archive/`、`staging/`、`sagent/`、`少儿英语小程序/`、`quant_deploy_*.zip` 等——2026-10-10 被 DeepSeek 按"清 debug"指令**整目录删除后丢失**，无备份，仅部分有外部副本）。**规则**：
@@ -200,7 +200,7 @@
 4. **违反后果**：不可恢复丢失（Remove-Item -Force 不走回收站；HDD 未覆盖前 winfr 可部分捞回但不可依赖）
 
 注意：cf-shell 的 **test profile** 在 G 盘 target 直跑会 OOM——一律走上面的 C 盘热 target 方案（**每次跑前手动设** `$env:CARGO_PROFILE_TEST_DEBUG='0'`——未持久化到用户环境变量，规范命令行见上表 cf-shell 行）。
-⚠️ **C 盘热 target 会无界增长**（2026-10-06 实测：`C:\qidi-cfshell-test` 累积 **44GB** 构建产物把 C: 盘填满到 0 bytes，cf-shell 测试编译报 `rustc-LLVM ERROR: IO failure on output stream: no space on device`）→ 每次跑前 `Get-PSDrive C` 看余量，低于 ~20GB 先清该目录（纯构建产物，可整目录删；cf-shell 冷重建 ~2 分钟）。带 `CARGO_PROFILE_TEST_DEBUG='0'` 时增量产物很小，44GB 是历史 debug 全量残留。
+⚠️ **C 盘热 target 会无界增长**（2026-10-06 实测：`C:\qidi-cfshell-test` 累积 **44GB** 构建产物把 C: 盘填满到 0 bytes，cf-shell 测试编译报 `rustc-LLVM ERROR: IO failure on output stream: no space on device`）→ 每次跑前 `Get-PSDrive C` 看余量，低于 ~20GB 先清该目录（纯构建产物，可整目录删；cf-shell 冷重建 ~2 分钟）。带 `CARGO_PROFILE_TEST_DEBUG='0'` 时增量产物很小，44GB 是历史 debug 全量残留。**2026-10-19 实测更新**：该目录达 **72.1GB**（构成：`debug/incremental/` **47.2GB ≈65%**、`debug/deps/` 23.3GB、`debug/build/` 2.5GB）——**`incremental/` 是增量编译缓存，删除后 cargo 自动重建且不动 deps 热缓存，是精准清理首选**（当日经 §6 雷区守卫扫描后删除，回收 45.5GB，C: 56.1→101.5GB；删除前必须复扫 `_archive/staging/sagent/quant_deploy*/少儿英语*/*.zip` 雷区，且确认无 cargo 在跑）。
 
 13. **upstream（SMB 基线）使用注意**（2026-10-05 实测）：① `git fetch upstream` 会报 "shallow roots are not allowed to be updated"（浅历史纠缠），**读上游更新改用直读**：`git --git-dir='\\192.168.1.222\程序开发\grok-build-upstream\.git' log/diff ...`（SMB 上可执行，慢但可用）；② 上游是 monorepo 镜像（提交均称 "Synced from monorepo"，每周 1-3 次）；③ 上游 crate 命名为 `xai-grok-*`，我们 7-25 已 rebrand 为 `cf-*`——**路径全不同，直接 merge 不可行**，同步只能按主题 cherry-pick + 手工改名适配；④ fork（2026-07-19）以来从未同步过上游；⑤ **定位声明（2026-10-05 用户确认）：上游为低频情报参考源、非合并目标**——分叉已深且双向加速演进，仅安全类修复（RUSTSEC/依赖漏洞）值得定期扫一眼，功能类改进一律以我们自己的设计与实现为准
 14. **sccache 会污染 target 缓存**（2026-10-07 实测）：sccache.exe 服务挂掉后，经它包装的 rustc 会产出**坏元数据产物**——后续编译报 `E0460 found possibly newer version of crate` 或直接 "process didn't exit successfully: sccache.exe..."（同一 target 内 release lib 与 test 二进制可同时中招，cf-shell 是高发点）。**解药：`$env:RUSTC_WRAPPER=''` 禁用后增量重编**（16 分钟级可过）；若增量仍 E0460 则 `cargo clean -p <crate>` 强制重编该 crate。多轮审计/长任务中 sccache 反复崩是本机常态（2026-10-06 起三次实测），长编译/测试任务建议起手就禁用
