@@ -216,7 +216,7 @@ PDF 提取：`python pdfplumber` 逐页提取文本。大文件优先定位：�
 
 ## 配合 office-tools skill 使用
 
-- Word 文档生成: `python scripts/md_to_docx.py` 或 `python scripts/word_ops.py`
+- Word 文档生成: `python .qidi/skills/bid-write/scripts/md2docx.py`（Markdown → 投标 DOCX，见 bid-write Step 8）或 `python scripts/word_ops.py`
 - PDF 提取: `python scripts/pdf_ops.py extract-text`
 - Excel 报价表: `python scripts/excel_ops.py`
 - 图表生成后插入 Word

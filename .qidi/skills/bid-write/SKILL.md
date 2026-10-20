@@ -126,18 +126,25 @@ metadata:
 
 ## Step 8：Word 导出
 
-用 `scripts/md2docx.py`（Markdown → DOCX）：
+用 `scripts/md2docx.py`（Markdown → DOCX，v3.0：markdown 解析层 + 自研标书渲染层）：
 
 ```bash
 python scripts/md2docx.py 方案.md --project "XX项目施工总承包" \
     --bidder "XX建设工程有限公司" -o 投标文件.docx
 ```
 
+常用可选参数（不改变旧调用）：
+`--anonymous` 暗标（清文档属性）｜`--body-font 仿宋`｜`--line-spacing {22,28}`｜
+`--table-style {grid,three-line}`｜`--margin 上,下,左,右`（cm）｜`--download-images`｜`--no-cover`
+
 - 封面：项目名 26pt 居中 + 副标题"投标文件"18pt + 投标人 + 日期 + TOC 自动目录域
-- **加粗标记解析**：`**xx**` 必须拆分为多个 run 设置 bold（直接塞入会显示星号，
-  实测踩坑）
-- 表格：三线表样式，长表 `cantSplit` 防跨页断行
-- 页数控制：超页红线用 WPS COM `ComputeStatistics(2)` 实测（Word COM 本机不稳）
+- **行内标记解析**：`**加粗**` 等由 markdown 解析器拆 run（直接塞入会显示星号，实测踩坑）
+- 表格：**默认全框线（`--table-style three-line` 可切三线表），长表 `cantSplit` + 表头跨页重复**
+- 页数控制：**WPS COM `ComputeStatistics(2)` 为本机准绳（Word COM 本机不稳）**
+- **改动即自测（硬纪律）**：凡改动 `scripts/md2docx.py`，提交前必跑
+  `python .qidi/skills/bid-write/scripts/md2docx_selftest.py`（11 份 unit + 1 份
+  integration golden + A0/A1/A2/A3/A4 全断言 + 泄漏残留扫描）；**FAIL 即停**，
+  不得带失败断言提交或交付。
 
 ## 自检
 

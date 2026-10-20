@@ -255,9 +255,18 @@ def force_font(r, name='SimSun', size_pt=14):
 
 ## 十、页数实测
 
-Word COM：`word.ActiveWindow.View.Type = 3; doc.Repaginate();
-doc.ComputeStatistics(2)`（必须先Repaginate，否则返回错误值如9）。
-WPS COM同API但本机实测不准（返回9），以Word COM为准。
+**口径（唯一准绳）**：`WPS COM ComputeStatistics(2)` —— WPS COM 为本机准绳（Word COM 本机不稳）。
+
+```python
+# WPS COM（KWPS.Application）
+doc.Repaginate()
+pages = doc.ComputeStatistics(2)   # 2 = wdStatisticPages
+```
+
+**勘误（2026-10-20，T10 治理）**：本节早前写作"WPS COM 本机实测不准（返回 9），以 Word COM 为准"，
+与 bid-write SKILL.md Step 8 的口径互相矛盾。现统一为 **WPS COM `ComputeStatistics(2)` 为本机准绳
+（Word COM 本机不稳）**：Word COM 在本机多次返回错误页数（Repaginate 时机不稳），WPS COM 实测稳定，
+故以 WPS COM 为准；两者结果不一致时以 PDF 导出后的实际页数为最终复核。
 
 ---
 
@@ -440,7 +449,7 @@ finally:
 | 操作 | 推荐工具 | 原因 |
 |---|---|---|
 | 修改文字/格式/行距/列宽 | python-docx | XML级精确控制，无COM开销 |
-| 页数统计 | Word COM | python-docx无法计算 |
+| 页数统计 | WPS COM（本机准绳，见第十节） | python-docx无法计算；Word COM 本机不稳 |
 | PDF导出 | Word COM | 唯一可靠方案（WPS不可靠） |
 | 页码添加 | Word COM | python-docx footer API不完整 |
 | 表格边框/底色 | python-docx | XML级精确控制 |
