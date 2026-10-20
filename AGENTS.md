@@ -135,6 +135,26 @@
 | 只读探查 | `subagent_type="explore"` / `plan`（只读侦察/方案规划；**2026-10-19 起可指定 `Qwen/Qwen3.8-Flash-Next`（modelscope 魔粒池，slug `qwen3.8-flash-next-ms-222`）——零成本白嫖池，6/6 推理基准支撑规划质量；重规划仍建议 GLM/haiku**） | 只读侦察/规划 |
 | 隔离 | `isolation="worktree"` | 需要隔离时用（有冷构建代价） |
 
+
+### 笔记本侧 AI 工具调用双路径（2026-10-20 用户裁定：**默认走本机**，两条路都留）
+
+| 路径 | 用法 | 定位 |
+|---|---|---|
+| **① ai-bridge 本机链（默认）** | `ai-bridge__dispatch(tools=["qoder", "opencode-flash", "codely"])`（hub 9800，本机执行，autoFallback 自动接力） | **默认**。qoder=Qoder 订阅全家桶（DeepSeek V4 Pro/Qwen3.8 Max/GLM-5.3/Kimi K3/M3.1）；opencode-flash=deepseek-v4.1-flash 快档；codely=兜底。零 LAN 跳转、失败自动降级、2026-10-20 实测 3/3 通 |
+| ② 台式机 relay 条目（备用） | config.toml 的 `qoder-*` 三条（经 192.168.1.222:8765 → 台式机 qoder2api-hub 8790） | 备用。仅在本机链整链失败或需台式机侧特有通道时用；受台式机开机/负载/SMB 状态制约（历史痛点：两台同时调用慢且易失败） |
+
+**纪律**：派子代理/任务分发**默认走 ①**；仅 ① 整链失败（qoder/opencode-flash/codely 全挂）才降 ②。
+**注意**：qodercli（网页版 CLI）与 Qoder 桌面 IDE 是**两个应用、登录态独立**——本机链的 qoder 工具依赖 qodercli 已登录（2026-10-20 已登，若报 Not logged in 则重新 `qodercli /login`）。
+
+### 笔记本侧 AI 工具调用双路径（2026-10-20 用户裁定：**默认走本机**，两条路都留）
+
+| 路径 | 用法 | 定位 |
+|---|---|---|
+| **① ai-bridge 本机链（默认）** | `ai-bridge__dispatch(tools=["qoder", "opencode-flash", "codely"])`（hub 9800，本机执行，autoFallback 自动接力） | **默认**。qoder=Qoder 订阅全家桶（DeepSeek V4 Pro/Qwen3.8 Max/GLM-5.3/Kimi K3/M3.1）；opencode-flash=deepseek-v4.1-flash 快档；codely=兜底。零 LAN 跳转、失败自动降级、2026-10-20 实测 3/3 通 |
+| ② 台式机 relay 条目（备用） | config.toml 的 `qoder-*` 三条（经 192.168.1.222:8765 → 台式机 qoder2api-hub 8790） | 备用。仅在本机链整链失败或需台式机侧特有通道时用；受台式机开机/负载/SMB 状态制约（历史痛点：两台同时调用慢且易失败） |
+
+**纪律**：派子代理/任务分发**默认走 ①**；仅 ① 整链失败（qoder/opencode-flash/codely 全挂）才降 ②。
+**注意**：qodercli（网页版 CLI）与 Qoder 桌面 IDE 是**两个应用、登录态独立**——本机链的 qoder 工具依赖 qodercli 已登录（2026-10-20 已登，若报 Not logged in 则重新 `qodercli /login`）。
 铁律：指挥官不写码（写规格/审计/质检/提交）；编码手与子代理**禁止 commit**；每项修复必须有对应测试；审计规格须按 **audit-rubrics 技能**执行（先自由审查、后对照清单，适用条目注入 ≤5，报告落文档私有库 `G:\qidiwork-docs-local\审计评审\`，见 §3），返工闭环后教训合入 `docs/audit-rubrics/RUBRICS.md`。
 
 **子代理失败回报契约（2026-10-20 修复，B1）**：`insert_pending` 之后的失败**必须**走 `handle_request.rs::fail_post_pending`（`PendingGuard::set_error` + `send_failure`），不得只调 `send_failure`——只调它时后台调用方（oneshot 接收端早已丢弃）只能看到 `PendingGuard::drop` 的泛化兜底 `"Subagent failed during initialization"`，真实原因（resume 仍在运行/未找到/身份冲突、cwd 非法、源模型缺失、resume 拷贝中止）全丢。失败记录进 `completed` 快照 + **恰好 1 条** completion summary；**条数由 `surface_completion` 决定，`set_error` 只保证消息保真**（勿再把"防重复呈现"记在 `set_error` 账上）。回归：`post_pending_*_records_reason_{foreground,background}` 6 例（`tests/mod.rs`）。另：`is_valid_resume_id` 的哨兵容忍（只排除 `""`/`null`/`none`/`undefined`/空白）是**设计**，非标准 id 走 not-found 分支属受支持行为，**不要**改成显式报错。
