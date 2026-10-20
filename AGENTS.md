@@ -192,7 +192,7 @@
 
 1. **本机无 `rg`**；内置 grep 工具在本环境 **100% 返空**（2026-10-19 全面测试实测：`fn main` 内置 0 vs `git grep` 89；根因链：Windows 构建不捆绑 rg（cf-shell/build.rs:43）+ PATH 无 rg 回落裸名（ripgrep.rs:99））→ **一律用 `git grep`**。⚠️ 2026-10-19 已修"静默" half（commit 45828f22：spawn 失败错误写入 stdout，不再伪装成"没有匹配"）——**但本机仍无 rg，grep 依旧不可搜索，只是现在会明说**；rg 捆绑根治（F2b 启动期探针/Windows 解捆）在批次 2
 2. **PowerShell 不支持 `&&`**（用 `;`）；控制台 GBK 中文乱码 → `Get-Content -Encoding UTF8`
-3. **禁止递归扫描**：`target/`、`mem-log/`、`tmp_relay/`、`9.22方案/scripts`、`C:\Users\ASUS\.qidi\sessions\`（1.9 万文件）——都会卡死（按需小范围扫可以，全量递归必卡）；**会话归档用 junction 模式**（2026-10-20 首用）：7 天未活动的会话 `Move-Item` 到 `E:\qidi-sessions-archive\<项目>\` + 原位 `mklink /J` 回填——C 盘字节真释放且选择器/`/resume` 无感；归档包带 README+catalog（convention 见 `G:\qidi-sessions-archive\2026-09-18\`）；反向=删 junction（`rmdir` 纯联接勿加 /s）+ move 回
+3. **禁止递归扫描**：`target/`、`mem-log/`、`tmp_relay/`、`9.22方案/scripts`、`C:\Users\ASUS\.qidi\sessions\`（1.9 万文件）——都会卡死。**会话压缩阈值实测（2026-10-20）**：默认 **85%**（`cf-shell/src/util/config/resolve/compaction.rs:2` `DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT`），优先级 env `QIDI_AUTO_COMPACT_THRESHOLD_PERCENT` > 用户 config `[model.<id>].auto_compact_threshold_percent` / `[session]` > 服务端下发 > 默认；**1M 窗口模型要到 ~85 万 token 才触发压缩**——大窗口下"一天不压缩"属预期（实测 973K 会话确实在越阈后自动压缩）；嫌晚可设 env=60 提前触发；`[skills].subagent_denied_skills` 是**显式替换**非合并（写配置=整体取代默认集）（按需小范围扫可以，全量递归必卡）；**会话归档用 junction 模式**（2026-10-20 首用）：7 天未活动的会话 `Move-Item` 到 `E:\qidi-sessions-archive\<项目>\` + 原位 `mklink /J` 回填——C 盘字节真释放且选择器/`/resume` 无感；归档包带 README+catalog（convention 见 `G:\qidi-sessions-archive\2026-09-18\`）；反向=删 junction（`rmdir` 纯联接勿加 /s）+ move 回
 4. `Format-Table` 输出有缓冲错位——重要判断以具体值/行号为准，勿凭表格位置
 5. `read_file` 只能读 workspace 内文件（C 盘日志用终端 `-Encoding UTF8` 读）
 6. 机器上有 25+ 常驻 python/node 进程（用户其它会话的活）——**绝不擅自杀进程**
