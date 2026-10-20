@@ -71,8 +71,8 @@
 
 **验收门**：每批带测试（围栏单测+daemon 集成测试+E2E 冒烟）；`cargo check --workspace` 0 errors（涉及 Rust 侧时）；ci-baseline 全量不回归（Rust 改动时）。
 
-## 六、待用户定案（3 项）
+## 六、决策定案（2026-10-20，GLM-5.3 决策分析+用户拍板）
 
-1. **V3-3**：denylist 加 `wecom`（推荐，一条前缀两技能）还是接受“子代理可直发微信”为设计？
-2. **V3-4**：凭据托管选“全站专用部署 daemon”（推荐）还是“跟 agent 同机同账户+只读降级”？
-3. **方向 3 中继形态**（backlog 项，开工前再定）：复用 ba.qidiai.ltd 信任根 / 独立穿透 / WeCom 智能机器人长连接？
+1. **V3-3 denylist**：✅ **已定：加 `wecom-` 前缀**（GLM 推荐 A+用户拍板）。子代理禁直发微信，daemon 为唯一发送面；已落地（subagent_gate.rs + 7 测试，cf-tools 2685/0）。用户 config 的 `[skills].subagent_denied_skills` 自动合并语义保留为纠偏口
+2. **V3-4 凭据托管**：✅ **已定：全站专用部署 daemon**（GLM 推荐 A）。daemon 独占凭据生命周期、与会话 owner 绑定、agent 只读；同机同权限现实下可控变量=发送面数量（A=1 个审计咽喉 vs B=每会话一个）；独立 Windows 账户+DPAPI 为后续增强路径
+3. **方向 3 中继形态**：✅ **已定：暂缓+第四方案 D**（GLM 推荐）。WeCom 实证仅支持轮询无推送 API——“中继”是伪问题；方向 3 起步 = 现有 daemon+wecom-cli 轮询收件（零新增基础设施）；确需秒级推送再上 A（ba 信任根加独立鉴权路由）；B/C 不推荐

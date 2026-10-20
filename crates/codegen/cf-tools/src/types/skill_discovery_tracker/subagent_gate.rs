@@ -24,11 +24,18 @@
 /// allowlist and the skill tool use.
 ///
 /// Scope: the machine-specific dangerous families documented in the workspace
-/// `AGENTS.md` (§11.9) — GPU / service bring-up and document-OCR pipelines:
+/// `AGENTS.md` (§8 skill library, §11.9 GPU services) — GPU / service bring-up,
+/// document-OCR pipelines, and outbound-messaging side channels:
 /// - `qwen-image-lowvram` — low-VRAM Qwen-Image generation (ComfyUI)
 /// - `pdf-to-word-ocr` — HunyuanOCR document pipeline
 /// - `seal-extractor` — HunyuanOCR seal / stamp extraction
 /// - `bid-` — the `bid-*` office / bid-document parsing family (OCR-based)
+/// - `wecom-` — the `wecom-*` enterprise-WeChat bridge family. `wecom-unified`
+///   sends messages through the user's own `wecom-cli` credentials, which
+///   bypasses the `wecom-bridge` daemon — the only path carrying source
+///   validation, human confirmation and an audit log (v3 decision 1). A child
+///   that can post to WeChat can also fan conversation content out of the
+///   workspace, so the whole family is denied by prefix, exactly like `bid-`.
 ///
 /// A name that is not present on a given machine simply matches nothing: the
 /// list is a filter, never a requirement, so an unknown entry is harmless.
@@ -37,6 +44,10 @@ pub const DEFAULT_SUBAGENT_DENIED_SKILLS: &[&str] = &[
     "pdf-to-word-ocr",
     "seal-extractor",
     "bid-",
+    // v3 decision 1: `wecom-unified` is live in the skill library and would let
+    // a child post to WeChat with the user's own credentials, bypassing the
+    // audited `wecom-bridge` daemon. Prefix form covers `wecom-bridge` too.
+    "wecom-",
 ];
 
 /// The resolved subagent skill deny-list.
@@ -131,11 +142,37 @@ mod tests {
             "seal-extractor",
             "bid-write",
             "bid-parse",
+            "wecom-unified",
+            "wecom-bridge",
         ] {
             assert!(gate.denies(denied), "default gate must deny {denied}");
         }
-        for kept in ["check-work", "dev-orchestra", "bidding"] {
+        for kept in ["check-work", "dev-orchestra", "audit-rubrics", "bidding"] {
             assert!(!gate.denies(kept), "default gate must not deny {kept}");
+        }
+    }
+
+    /// v3 decision 1: the `wecom-` prefix keeps both the live `wecom-unified`
+    /// skill and the future `wecom-bridge` daemon client out of a child's reach
+    /// — a subagent must never post to WeChat on the user's credentials, since
+    /// that path bypasses the daemon's source validation, confirmation and audit
+    /// log. The bare entry is denied too (equality arm), and unrelated names
+    /// that merely *contain* `wecom` stay clear: matching is anchored, and the
+    /// hyphen is part of the pattern.
+    #[test]
+    fn wecom_prefix_is_denied_by_the_default_gate() {
+        let gate = SubagentSkillDenylist::default();
+        for denied in ["wecom-", "wecom-unified", "wecom-bridge", "wecom-anything"] {
+            assert!(
+                gate.denies(denied),
+                "the default `wecom-` entry must deny {denied}"
+            );
+        }
+        for kept in ["wecomxyz", "my-wecom-unified", "audit-rubrics"] {
+            assert!(
+                !gate.denies(kept),
+                "{kept} must not be caught by the `wecom-` prefix"
+            );
         }
     }
 

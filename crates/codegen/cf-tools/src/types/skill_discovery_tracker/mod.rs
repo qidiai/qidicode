@@ -2081,8 +2081,9 @@ mod tests {
         SubagentSkillDenylist::default()
     }
 
-    /// Manager seeded with the three built-in denied families, both `bid-`
-    /// prefix victims, and two safe skills.
+    /// Manager seeded with the three exact-name denied families, both `bid-`
+    /// prefix victims, and two safe skills. The `wecom-` family is exercised by
+    /// its own fixture in [`subagent_gate_denies_wecom_family_in_child_projection`].
     fn manager_with_gate_skills() -> SkillManager {
         let mut mgr = SkillManager::new();
         mgr.seed(
@@ -2279,6 +2280,68 @@ mod tests {
             runtime_names(&mgr.subagent_runtime_skills(SubagentSkillListing::Full, &gate)),
             vec!["check-work", "random-tool"],
             "the runtime set must follow the listing exactly"
+        );
+    }
+
+    /// v3 decision 1: the `wecom-` family must not reach a subagent — neither in
+    /// the model-facing listing nor in the activatable runtime set. A child that
+    /// can load `wecom-unified` posts to WeChat with the user's own
+    /// `wecom-cli` credentials, bypassing the `wecom-bridge` daemon's source
+    /// validation, human confirmation and audit log.
+    #[test]
+    fn subagent_gate_denies_wecom_family_in_child_projection() {
+        let mut mgr = SkillManager::new();
+        mgr.seed(
+            None,
+            None,
+            vec![
+                make_skill("check-work", "/ck/SKILL.md"),
+                make_skill("audit-rubrics", "/ar/SKILL.md"),
+                make_skill("wecom-unified", "/wc/SKILL.md"),
+                make_skill("wecom-bridge", "/wb/SKILL.md"),
+            ],
+            None,
+            None,
+            None,
+        );
+        let gate = default_gate();
+
+        let snapshot = mgr
+            .listing_for_subagent(SubagentSkillListing::Full, &gate)
+            .expect("full listing must render");
+        for denied in ["wecom-unified", "wecom-bridge"] {
+            assert!(
+                !snapshot.text.contains(denied),
+                "the default gate must keep {denied} out of the child listing:\n{}",
+                snapshot.text
+            );
+        }
+        for kept in ["check-work", "audit-rubrics"] {
+            assert!(
+                snapshot.text.contains(kept),
+                "the gate must not disturb unrelated skill {kept}:\n{}",
+                snapshot.text
+            );
+        }
+        assert_eq!(
+            snapshot.skill_count, 2,
+            "only the two safe skills may qualify:\n{}",
+            snapshot.text
+        );
+
+        let full_runtime =
+            mgr.subagent_runtime_skills(SubagentSkillListing::Full, &gate);
+        assert_eq!(
+            runtime_names(&full_runtime),
+            vec!["audit-rubrics", "check-work"],
+            "the activatable set must not carry the wecom family"
+        );
+        // `none` installs the gate-only set, so the listing knob cannot re-open
+        // the WeChat path.
+        assert_eq!(
+            runtime_names(&mgr.subagent_runtime_skills(SubagentSkillListing::None, &gate)),
+            vec!["audit-rubrics", "check-work"],
+            "`none` must still withhold the wecom family"
         );
     }
 
