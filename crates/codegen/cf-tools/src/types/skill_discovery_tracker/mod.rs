@@ -507,9 +507,33 @@ impl SkillManager {
     /// `effects` contains only conversation/UI side-effects the session
     /// must perform.
     pub fn take_pending(&mut self) -> Option<(Vec<SkillInfo>, SkillUpdateEffects)> {
+        self.take_pending_gated(None)
+    }
+
+    /// [`Self::take_pending`] with the F2S subagent gate applied (R5).
+    ///
+    /// A mid-session discovery flush re-derives the whole skill set, so it must
+    /// pass the same permission boundary as the subagent's startup baseline;
+    /// otherwise the first `SKILL.md` discovery in a child session would
+    /// replace `AvailableSkills` with the unfiltered catalog and re-open every
+    /// denied skill for the rest of the session.
+    ///
+    /// `denied` is `Some` only when the caller established that this is a
+    /// subagent session (the bridge reads the [`SubagentSkillDenylist`]
+    /// resource, which is installed by the subagent injection seam and never by
+    /// a primary session). The gate runs **before** the announcement is
+    /// rendered and before `announced_names` is updated, so a denied skill is
+    /// neither advertised nor recorded as announced.
+    ///
+    /// `None` is byte-identical to the historical ungated path.
+    pub fn take_pending_gated(
+        &mut self,
+        denied: Option<&SubagentSkillDenylist>,
+    ) -> Option<(Vec<SkillInfo>, SkillUpdateEffects)> {
         let pending = self.pending.take()?;
 
-        let runtime_skills = dedup_by_canonical_path(&self.discovered_skills, &self.startup_skills);
+        let mut runtime_skills =
+            dedup_by_canonical_path(&self.discovered_skills, &self.startup_skills);
 
         let kind = match pending {
             PendingKind::Discovery => SkillUpdateKind::Discovery,
@@ -518,7 +542,7 @@ impl SkillManager {
         // Take the announced set out of `self` so `render_listing` can
         // borrow `self` immutably alongside it; restored below.
         let mut announced = std::mem::take(&mut self.announced_names);
-        let skills_owned = match pending {
+        let mut skills_owned = match pending {
             PendingKind::Discovery => None,
             PendingKind::BaselineChange => {
                 announced.clear();
@@ -528,6 +552,14 @@ impl SkillManager {
                 ))
             }
         };
+        if let Some(denied) = denied {
+            runtime_skills = deny_subagent_skills(runtime_skills, denied);
+            let listing = match skills_owned.take() {
+                Some(skills) => skills,
+                None => self.discovered_skills.clone(),
+            };
+            skills_owned = Some(deny_subagent_skills(listing, denied));
+        }
         let skills = skills_owned.as_deref().unwrap_or(&self.discovered_skills);
 
         let system_reminder = render_listing(skills, &mut announced, &self.render_params());
@@ -2342,6 +2374,140 @@ mod tests {
             runtime_names(&mgr.subagent_runtime_skills(SubagentSkillListing::None, &gate)),
             vec!["audit-rubrics", "check-work"],
             "`none` must still withhold the wecom family"
+        );
+    }
+
+    /// R5: a mid-session discovery flush re-derives the whole skill set, so it
+    /// must pass the same gate as the startup baseline. A pending
+    /// `wecom-unified` / `bid-*` discovery must be withheld from both the
+    /// runtime set (what the skill tool can activate) and the injected
+    /// announcement — otherwise one touch of a `SKILL.md` re-opens the family
+    /// for the rest of the child session.
+    #[test]
+    fn gated_pending_flush_withholds_denied_discoveries() {
+        let mut mgr = manager_with_gate_skills();
+        // Drain the startup baseline: the defect is the *discovery* flush.
+        let _ = mgr.take_pending();
+        assert!(
+            mgr.add_discovered(vec![
+                make_skill("fresh-safe", "/fs/SKILL.md"),
+                make_skill("wecom-unified", "/wu/SKILL.md"),
+                make_skill("bid-review", "/br/SKILL.md"),
+            ]),
+            "the discoveries must queue a pending flush"
+        );
+
+        let (runtime, effects) = mgr
+            .take_pending_gated(Some(&default_gate()))
+            .expect("a queued discovery must flush");
+
+        let names = runtime_names(&runtime);
+        assert!(
+            names.contains(&"fresh-safe"),
+            "the safe discovery must survive the gate: {names:?}"
+        );
+        for denied in [
+            "wecom-unified",
+            "bid-review",
+            // The startup baseline's denied families must stay out of the
+            // `AvailableSkills` replacement too, not just the new discoveries.
+            "qwen-image-lowvram",
+            "pdf-to-word-ocr",
+            "seal-extractor",
+            "bid-write",
+            "bid-parse",
+        ] {
+            assert!(
+                !names.contains(&denied),
+                "{denied} must stay withheld after the flush: {names:?}"
+            );
+        }
+
+        let reminder = effects
+            .system_reminder
+            .expect("a discovery flush announces the new skills");
+        assert!(
+            reminder.contains("fresh-safe"),
+            "the safe skill must be announced:\n{reminder}"
+        );
+        for denied in ["wecom-unified", "bid-review"] {
+            assert!(
+                !reminder.contains(denied),
+                "{denied} must not be announced to the child:\n{reminder}"
+            );
+        }
+    }
+
+    /// R5: the gate is re-read on **every** flush, not latched at the first
+    /// one. `wecom-one` stays in `discovered_skills` after being withheld (the
+    /// gate is a write-time filter, not a state purge), so each later flush has
+    /// to filter it again — and a fresh denied discovery must be withheld just
+    /// the same.
+    #[test]
+    fn gate_is_reapplied_on_each_pending_flush() {
+        let mut mgr = SkillManager::new();
+        mgr.seed(
+            None,
+            None,
+            vec![make_skill("check-work", "/ck/SKILL.md")],
+            None,
+            None,
+            None,
+        );
+        let _ = mgr.take_pending_gated(Some(&default_gate()));
+
+        mgr.add_discovered(vec![make_skill("wecom-one", "/w1/SKILL.md")]);
+        let (runtime, _) = mgr
+            .take_pending_gated(Some(&default_gate()))
+            .expect("first discovery flush");
+        assert!(
+            !runtime.iter().any(|s| s.name == "wecom-one"),
+            "first flush must withhold the denied discovery"
+        );
+
+        mgr.add_discovered(vec![make_skill("wecom-two", "/w2/SKILL.md")]);
+        let (runtime, effects) = mgr
+            .take_pending_gated(Some(&default_gate()))
+            .expect("second discovery flush");
+        assert_eq!(
+            runtime_names(&runtime),
+            vec!["check-work"],
+            "a later flush must not forget the earlier denial either"
+        );
+        // With nothing *announceable* left, the renderer legitimately yields no
+        // reminder; if one is produced, it must not mention the denied skill.
+        assert!(
+            !effects
+                .system_reminder
+                .as_deref()
+                .unwrap_or_default()
+                .contains("wecom-two"),
+            "the second denied discovery must not be announced"
+        );
+    }
+
+    /// Requirement 3: the primary session is never gated. With no denylist in
+    /// scope (the `take_pending()` wrapper), a `wecom-unified` discovery flows
+    /// through exactly as before.
+    #[test]
+    fn ungated_pending_flush_keeps_denied_names_for_the_primary_session() {
+        let mut mgr = SkillManager::new();
+        mgr.seed(
+            None,
+            None,
+            vec![
+                make_skill("check-work", "/ck/SKILL.md"),
+                make_skill("wecom-unified", "/wu/SKILL.md"),
+            ],
+            None,
+            None,
+            None,
+        );
+        let (runtime, _) = mgr.take_pending().expect("startup baseline flush");
+        assert!(
+            runtime.iter().any(|s| s.name == "wecom-unified"),
+            "the primary session must keep its full skill set: {:?}",
+            runtime_names(&runtime)
         );
     }
 

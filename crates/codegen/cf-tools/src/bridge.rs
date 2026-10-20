@@ -503,8 +503,20 @@ impl ToolBridge {
     ) -> Option<crate::types::skill_discovery_tracker::SkillUpdateEffects> {
         let registry = &*self.registry;
         let mut res = registry.resources.lock().await;
+        // R5/F2S: the resolved subagent denylist is installed only by
+        // `subagent_skill_listing` (the child injection seam); a primary
+        // session never has it. It must be re-read on **every** flush, because
+        // this single seam backs all four flush sites (`run_loop`'
+        // RefreshSkillBaseline, `tool_calls` post-tool discovery, session
+        // setup, and the baseline-change path): without it, one mid-session
+        // discovery would replace `AvailableSkills` with the unfiltered
+        // catalog and re-open `wecom-*` / `bid-*` for the rest of the child's
+        // life, bypassing the commit-23987bfb gate.
+        let denied =
+            res.get::<crate::types::skill_discovery_tracker::SubagentSkillDenylist>()
+                .cloned();
         let tracker = res.get_mut::<crate::types::skill_discovery_tracker::SkillManager>()?;
-        let (runtime_skills, effects) = tracker.take_pending()?;
+        let (runtime_skills, effects) = tracker.take_pending_gated(denied.as_ref())?;
 
         // Write the runtime projection directly -- the shell never sees this.
         res.insert(crate::types::resources::AvailableSkills(runtime_skills));
@@ -1010,6 +1022,115 @@ mod tests {
         assert!(
             !ids.contains(&"parent-task"),
             "another session's task must NOT leak into this session: {ids:?}"
+        );
+    }
+
+    // ── R5: the subagent gate must survive a mid-session discovery flush ──
+
+    fn skill_fixture(name: &str, path: &str) -> crate::implementations::skills::types::SkillInfo {
+        crate::implementations::skills::types::SkillInfo {
+            name: name.to_owned(),
+            description: format!("desc for {name}"),
+            path: path.to_owned(),
+            ..Default::default()
+        }
+    }
+
+    /// A child session whose discovery reminder fires: the flush replaces
+    /// `AvailableSkills`, so it must re-apply the gate. The denylist resource is
+    /// installed by `subagent_skill_listing` in the real spawn path; seeding it
+    /// here marks the session as a subagent exactly the same way.
+    #[tokio::test]
+    async fn pending_flush_keeps_the_subagent_gate_closed() {
+        use crate::types::resources::AvailableSkills;
+        use crate::types::skill_discovery_tracker::{SkillManager, SubagentSkillDenylist};
+
+        let bridge = ToolBridge::for_test();
+        {
+            let mut res = bridge.registry.resources.lock().await;
+            let tracker = res.get_or_default::<SkillManager>();
+            tracker.seed(
+                None,
+                None,
+                vec![skill_fixture("check-work", "/ck/SKILL.md")],
+                None,
+                None,
+                None,
+            );
+            // Drain the startup baseline: the bypass is the discovery flush.
+            let _ = tracker.take_pending();
+            tracker.add_discovered(vec![
+                skill_fixture("fresh-safe", "/fs/SKILL.md"),
+                skill_fixture("wecom-unified", "/wu/SKILL.md"),
+                skill_fixture("bid-review", "/br/SKILL.md"),
+            ]);
+            // What `subagent_skill_listing` installs for a child session.
+            res.insert(SubagentSkillDenylist::default());
+        }
+
+        bridge
+            .apply_pending_skill_update()
+            .await
+            .expect("the queued discovery must flush");
+
+        let res = bridge.registry.resources.lock().await;
+        let available = &res
+            .get::<AvailableSkills>()
+            .expect("the flush must install the runtime set")
+            .0;
+        let names: Vec<&str> = available.iter().map(|s| s.name.as_str()).collect();
+
+        assert!(
+            names.contains(&"fresh-safe"),
+            "the safe discovery must stay activatable: {names:?}"
+        );
+        for denied in ["wecom-unified", "bid-review"] {
+            assert!(
+                !names.contains(&denied),
+                "{denied} must not be activatable after the flush: {names:?}"
+            );
+        }
+        assert!(
+            res.contains::<SubagentSkillDenylist>(),
+            "the gate must still be installed after the flush"
+        );
+    }
+
+    /// Requirement 3: a primary session installs no denylist resource, so the
+    /// same flush path keeps its full catalog — the gate is a subagent-only
+    /// boundary, not a global one.
+    #[tokio::test]
+    async fn pending_flush_leaves_the_primary_session_ungated() {
+        use crate::types::resources::AvailableSkills;
+        use crate::types::skill_discovery_tracker::SkillManager;
+
+        let bridge = ToolBridge::for_test();
+        {
+            let mut res = bridge.registry.resources.lock().await;
+            let tracker = res.get_or_default::<SkillManager>();
+            tracker.seed(
+                None,
+                None,
+                vec![skill_fixture("check-work", "/ck/SKILL.md")],
+                None,
+                None,
+                None,
+            );
+            let _ = tracker.take_pending();
+            tracker.add_discovered(vec![skill_fixture("wecom-unified", "/wu/SKILL.md")]);
+        }
+
+        bridge
+            .apply_pending_skill_update()
+            .await
+            .expect("the queued discovery must flush");
+
+        let res = bridge.registry.resources.lock().await;
+        let available = &res.get::<AvailableSkills>().expect("runtime set installed").0;
+        let names: Vec<&str> = available.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"wecom-unified"),
+            "a primary session must keep wecom-unified activatable: {names:?}"
         );
     }
 }

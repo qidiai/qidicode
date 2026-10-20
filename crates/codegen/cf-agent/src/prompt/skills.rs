@@ -88,11 +88,19 @@ pub struct SkillsConfig {
     /// Skills a **subagent** session may not activate (F2S).
     ///
     /// `None` (unset) resolves to the built-in dangerous set
-    /// ([`DEFAULT_SUBAGENT_DENIED_SKILLS`]: image generation, document OCR, and
-    /// the `bid-*` office family), so children are gated out of the box. An
-    /// entry matches a skill `name` **exactly or as a prefix** (`"bid-"` covers
-    /// every `bid-*` skill). `Some(vec![])` disables the gate for children
-    /// entirely.
+    /// ([`DEFAULT_SUBAGENT_DENIED_SKILLS`]: image generation, document OCR, the
+    /// `bid-*` office family, and the `wecom-*` enterprise-WeChat family), so
+    /// children are gated out of the box. An entry matches a skill `name`
+    /// **exactly or as a prefix** (`"bid-"` covers every `bid-*` skill).
+    /// `Some(vec![])` disables the gate for children entirely.
+    ///
+    /// The `wecom-` family is the outbound-messaging face of the gate:
+    /// `wecom-unified` posts through the user's own `wecom-cli` credentials,
+    /// which bypasses the audited `wecom-bridge` daemon (source validation,
+    /// human confirmation, audit log), so a child that could load it could fan
+    /// conversation content out of the workspace. The gate is re-applied on
+    /// every mid-session skill-discovery flush, not just at spawn — a child
+    /// cannot re-open the family by writing a `SKILL.md`.
     ///
     /// A permission boundary, not a listing projection: denied skills are
     /// removed from the child's listing *and* its activatable set under every
@@ -953,6 +961,11 @@ mod tests {
             DEFAULT_SUBAGENT_DENIED_SKILLS.contains(&"bid-"),
             "the `bid-` prefix entry must be in the built-in denylist so the \
              whole bid-* family is covered"
+        );
+        assert!(
+            DEFAULT_SUBAGENT_DENIED_SKILLS.contains(&"wecom-"),
+            "the `wecom-` prefix entry must be in the built-in denylist so the \
+             whole wecom-* outbound-messaging family is covered"
         );
         assert!(
             !DEFAULT_SUBAGENT_DENIED_SKILLS.contains(&"check-work"),
