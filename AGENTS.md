@@ -51,7 +51,7 @@
 
 ---
 
-**产品竞品分析与吸收方案**：docs/absorption/（ADM 竞品分析+吸收方案 v2 三模型审计整合定稿，2026-10-19；含 WeCom 消息桥 P0 规格、qidi-update 技能、纪律互鉴、开放问题）。
+**产品竞品分析与吸收方案**：docs/absorption/（ADM 竞品分析+吸收方案 **v3 三席审计裁决定稿，2026-10-20**；含 WeCom 消息桥 P0 规格、qidi-update 技能、纪律互鉴、开放问题。v1/v2 仅作修订记录）。**DeepInfer / deepseek-recipe 吸收分析（2026-10-20）**：`docs/absorption/deepseek-deepinfer-absorption.md`——官方 tokenizer 补 `docs/token-optimization/方案.md` P0-1 的真值源（A 批）、`max_tokens` 契约对齐（B 批）、缓存限容纪律（CVE-2025-32381）；DeepInfer 服务端代码判为不吸收。
 
 ## 3. 办公项目（方案 / 标书 / 审计 / 资料 / 纪要 等非代码交付物）
 
