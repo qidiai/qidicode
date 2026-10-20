@@ -59,18 +59,63 @@
 | cad2pdf（待 SHX 补丁） | 图纸参考副本管线 |
 | ArtCraft 冻结集成 | 退位为可选加速器，不在关键路径 |
 
-## 六、建造顺序
+## 六、建造顺序（glm-5.3 审计 82/100 后修正版 v2）
 
-| 阶段 | 内容 | 风险 |
+> 原版评级修正：P0“低风险”→“中低”；P2“研究级”→“工程级（文本锚定）”；新增 P0.5 与 P3
+
+```
+P0'  整改闭环产线化（原文 P0 同目标，三处修正）:
+     ├─ verify 改存档清单驱动（collect JSON 为真值源）——消灭 H1 假阳性
+     │    （原缺陷：python-docx 保存丢批注部件 → verify "视为已响应"直接✅，核心验证空转）
+     ├─ 预埋段落稳定 ID/书签锚点（P2' 同套定位机制，防返工）
+     └─ anchor 判定稳定化（替代 80 字截断子串匹配）
+∥
+P0.5 打印通道看门狗化（审计新增，与 P0' 并行）:
+     隔离子进程 + 进度心跳 + taskkill /T /F 杀树（移植 craft_bridge.py:70-121 现成模式）
+     + 降级链：WPS COM 主 → OnlyOffice Document Builder 兜底（标"预览版"）→ LibreOffice 末档
+→
+P1   自建 docx MCP（原文 P1，补纪律）:
+     基础 CRUD 抄 Office-Word-MCP-Server 底样不重写；自研只做四类业务命令：
+     批注 OOXML 深操作 / 整改闭环 / 门禁命令化 / PDF 交付联动
+     + 补 OnlyOffice Builder 生成引擎落点结论（哪怕结论是"不用"）
+→
+P2'  PDF 锚点映射·文本锚定级（降级自"研究级"）:
+     PDF 批注(annotation) → fitz 提取被批文本 → docx 段落模糊匹配（复用 P0' 锚点 ID）
+     → 改 → 重打印；廉价兜底永远在：版本树 + canvas diff + 重打印（已有，不弃）
+→
+P3   备选通道试点（审计新增）: WPS JSA 打印宏绕 COM / Aspose.Words 评估 / Stirling 明确"不进产线"
+```
+
+## 七、审计放行条件（C1-C5，全部满足后 P0' 开工）
+
+| # | 条件 | 状态 |
 |---|---|---|
-| **P0** | docx 整改引擎：comment→fix→verify 闭环，去 WPS COM 依赖（纯 python-docx + fitz，COM 只留打印） | 低——office-canvas 已验证雏形 |
-| **P1** | 自建 docx MCP server：命令集借 wordcraft 433 命令清单做需求参考，实现用 python-docx | 中——命令面设计工作量 |
-| **P2** | PDF 锚点映射 + 交付后修改回流 | **高——docx↔PDF 位置映射是研究级难题**，需 P0/P1 稳定后验证 |
+| C1 | verify 存档驱动重设计进入 P0 验收标准 | ✅ 已入 P0' |
+| C2 | 段落稳定 ID 进 P0 设计文档 | ✅ 已入 P0' |
+| C3 | 打印看门狗+降级链方案进入 P0.5 规格 | ✅ 已入 P0.5 |
+| C4 | 方案补“跨仓库治理”一节（单一仓库+调用边界，禁止 fork） | ✅ 见下节 |
+| C5 | Aspose/WPS JSA/docxtpl 三项评估结论写入方案（哪怕“不做”）；Stirling 收紧为“不进产线” | ✅ 见下节 |
 
-## 七、待审计要点（给 glm-5.3）
+## 八、跨仓库治理（C4）
 
-1. 战略方向：docx 真源 + PDF 锚点是否为“WPS/Word/PDF 好修改”需求的正解？
-2. 架构风险：WPS COM 仍在打印关键路径（挂起血泪史）——可接受吗？LibreOffice/OnlyOffice 是否该替换？
-3. P2 可行性：PDF 锚点映射的真实难度评估，是否有更廉价的替代（如 docx 段落 ID + PDF 书签双向表）？
-4. 资产收编声明是否属实（各资产的角色是否被高估）？
-5. 遗漏：Typst/OnlyOffice/Stirling 的引入点是否需要重新评估？
+**现状**：产线资产分裂两地——标书软件仓库（`G:\程序开发\标书软件`：final_gate/pdf_bindery/redact_audit/craft_bridge + Flask 产线）与 qidicode 工作区（skills/harness/审计链）。
+**风险**：fork 即分叉；标书软件产线仍在演进（W7a/b 就在那边做的）。
+**规则**：
+1. **禁止 fork**——qidicode 侧不复制上述四件套的代码；需要其能力时走 HTTP/CLI 调用边界（标书软件 waitress:5556 或 `python -m` 入口）
+2. 新智能层（P0'/P1）建在 qidicode 侧，对标书软件只读消费
+3. 若未来合并为单一仓库，走正式迁移评审，不做静默分叉
+
+## 九、备选引擎评估结论（C5，三项全部记录）
+
+| 选项 | 结论 | 理由 |
+|---|---|---|
+| Aspose.Words / Spire.Doc（商业库） | **记录备用，不引入** | 工业级 docx→PDF 无 COM 挂起，可用许可费消灭打印风险；但当前 WPS COM+看门狗路径成本更低，商业化授权评估留到 P0.5 实测看门狗效果后 |
+| WPS JS 宏（JSA 加载宏） | **P3 试点** | WPS 进程内 JS API 可绕 COM RPC 桥做打印自动化，独特路径；风险是 API 面窄+绑定 WPS |
+| docxtpl（模板填充） | **不引入** | 产线 docx 生成已由 python-docx 主力承担且经 1393 份语料验证，模板填充场景未成刚需 |
+| Stirling-PDF | **不进产线**（收紧） | fitz 脚本群极薄（101/305 行）、进程内、零运维、已过 9 轮审计；Stirling 是 Java/Docker web 服务，进产线=新故障域。仅作人工兜底工具箱 |
+| Typst | **不引入交付层**（维持，论据修正） | 真正理由是单一真源原则（引入 Typst=第二真源，与 docx 真源策略冲突），非“不出 docx” |
+| OnlyOffice Document Builder | **降级链第二档 + 生成引擎不替换**（python-docx 继续主力） | OOXML 原生保真强于 LibreOffice，但分页引擎非 WPS，不可作打印主通道；docx 生成替换 python-docx 无增益（进程外 JS 引擎集成链长+AGPLv3 商用评估） |
+
+## 十、原待审计要点（T1-T5）审计结论存档
+
+glm-5.3 独立审计 82/100（2026-10-20，34 次工具调用）：战略方向正解（T1 通过，附“P2 是客户反馈主通道”的优先级修正）、三层正交无循环依赖、自建 vs 轮子边界清醒。问题清单：H1 verify 假阳性（已入 P0'）/ H2 打印无看门狗（已入 P0.5）/ H3 跨仓库治理（已入 §八）/ M1-M3 风险评级修正（已入 v2）/ L1-L3 文书卫生（SKILL 漂移/docstring 过时/433 命令数为 0.5.0 时代口径——现 parity live 487/total 502，P1 需求参考时用实测值）。
