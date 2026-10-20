@@ -73,6 +73,6 @@
 
 ## 六、决策定案（2026-10-20，GLM-5.3 决策分析+用户拍板）
 
-1. **V3-3 denylist**：✅ **已定：加 `wecom-` 前缀**（GLM 推荐 A+用户拍板）。子代理禁直发微信，daemon 为唯一发送面；已落地（subagent_gate.rs + 7 测试，cf-tools 2685/0）。用户 config 的 `[skills].subagent_denied_skills` 自动合并语义保留为纠偏口
+1. **V3-3 denylist**：✅ **已定：加 `wecom-` 前缀**（GLM 推荐 A+用户拍板）。子代理禁直发微信，daemon 为唯一发送面；已落地（subagent_gate.rs：**2 个新测试+1 个扩展**，cf-tools 2685/0）。⚠️ **R1 语义更正（GLM 实施后审计）**：用户 config 的 `[skills].subagent_denied_skills` 是**显式替换**默认清单、不是合并（`explicit_override_replaces_the_default_set` 与 `explicit_empty_override_opens_the_gate` 两测试钉住）——用户写配置即整体取代默认集（wecom-/OCR/bid- 全换成用户清单），属知情强覆盖而非叠加纠偏。⚠️ **R5**：子代理会话内 discovery flush 曾不过门禁（pending 冲刷直接写 AvailableSkills），P1 修复中
 2. **V3-4 凭据托管**：✅ **已定：全站专用部署 daemon**（GLM 推荐 A）。daemon 独占凭据生命周期、与会话 owner 绑定、agent 只读；同机同权限现实下可控变量=发送面数量（A=1 个审计咽喉 vs B=每会话一个）；独立 Windows 账户+DPAPI 为后续增强路径
 3. **方向 3 中继形态**：✅ **已定：暂缓+第四方案 D**（GLM 推荐）。WeCom 实证仅支持轮询无推送 API——“中继”是伪问题；方向 3 起步 = 现有 daemon+wecom-cli 轮询收件（零新增基础设施）；确需秒级推送再上 A（ba 信任根加独立鉴权路由）；B/C 不推荐
