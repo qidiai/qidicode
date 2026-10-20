@@ -164,6 +164,11 @@ pub struct HeadlessOptions {
     pub model: Option<String>,
     pub rules: Option<String>,
     pub system_prompt_override: Option<String>,
+    /// `--session-kind`: explicit `summary.session_kind` for a **new** session.
+    /// `user`/`normal`/`none` opts back into history browsing. When absent the
+    /// agent infers `subagent_headless` from the non-interactive startup hint,
+    /// so dispatched one-shot runs stay out of the history picker.
+    pub session_kind: Option<String>,
     pub continue_last_session: bool,
     /// Fork on resume/continue (`--fork-session`).
     pub fork_session: bool,
@@ -657,6 +662,7 @@ async fn open_session(
     cwd: &Path,
     session_id_flag: Option<&str>,
     restore_code: Option<bool>,
+    session_kind: Option<&str>,
 ) -> anyhow::Result<OpenedSession> {
     // Pager opens sessions before the agent resolves per-vendor compat;
     // default (all-on) preserves existing behavior — the agent applies
@@ -689,7 +695,16 @@ async fn open_session(
     }
 
     let new_resp: acp::NewSessionResponse = acp_send(
-        acp::NewSessionRequest::new(cwd.to_path_buf()).mcp_servers(mcp_servers),
+        acp::NewSessionRequest::new(cwd.to_path_buf())
+            .mcp_servers(mcp_servers)
+            .meta(session_kind.map(|kind| {
+                let mut meta = acp::Meta::new();
+                meta.insert(
+                    "sessionKind".to_string(),
+                    serde_json::Value::String(kind.to_string()),
+                );
+                meta
+            })),
         acp_tx,
     )
     .await?;
@@ -703,19 +718,26 @@ async fn open_session_with_id(
     acp_tx: &AcpAgentTx,
     cwd: &Path,
     session_id: &str,
+    session_kind: Option<&str>,
 ) -> anyhow::Result<OpenedSession> {
     let cwd_str = cwd.to_string_lossy();
     crate::app::session_startup::ensure_session_id_available(session_id, &cwd_str)?;
     let mcp_servers =
         cli_config::load_mcp_servers(cwd, &cf_tools::types::compat::CompatConfig::default());
+    let mut meta = serde_json::json!({ "sessionId": session_id })
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    if let Some(kind) = session_kind {
+        meta.insert(
+            "sessionKind".to_string(),
+            serde_json::Value::String(kind.to_string()),
+        );
+    }
     let new_resp: acp::NewSessionResponse = acp_send(
         acp::NewSessionRequest::new(cwd.to_path_buf())
             .mcp_servers(mcp_servers)
-            .meta(
-                serde_json::json!({ "sessionId": session_id })
-                    .as_object()
-                    .cloned(),
-            ),
+            .meta(Some(meta)),
         acp_tx,
     )
     .await?;
@@ -759,7 +781,7 @@ async fn fork_then_open(
     }
     let child = fork_response_new_session_id(resp.0.get())
         .ok_or_else(|| anyhow::anyhow!("fork response missing newSessionId"))?;
-    match open_session(acp_tx, &write_cwd, Some(&child), restore_code).await {
+    match open_session(acp_tx, &write_cwd, Some(&child), restore_code, None).await {
         Ok(opened) => Ok(opened),
         Err(e) => Err(anyhow::anyhow!(
             "fork succeeded as {child} but load failed: {e}"
@@ -1233,9 +1255,24 @@ pub async fn run_single_turn(
     let restore_code = options.restore_code.then_some(true);
     let t_session = Instant::now();
     let opened = match materialized {
-        MaterializedStartup::NewAuto => open_session(&acp_tx, &session_cwd, None, None).await,
+        MaterializedStartup::NewAuto => {
+            open_session(
+                &acp_tx,
+                &session_cwd,
+                None,
+                None,
+                options.session_kind.as_deref(),
+            )
+            .await
+        }
         MaterializedStartup::NewWithId { session_id } => {
-            open_session_with_id(&acp_tx, &session_cwd, &session_id).await
+            open_session_with_id(
+                &acp_tx,
+                &session_cwd,
+                &session_id,
+                options.session_kind.as_deref(),
+            )
+            .await
         }
         MaterializedStartup::Resume {
             session_id,
@@ -1243,7 +1280,14 @@ pub async fn run_single_turn(
             ..
         } => {
             let load_cwd = original_cwd.as_deref().unwrap_or(cwd.as_path());
-            open_session(&acp_tx, load_cwd, Some(session_id.as_str()), restore_code).await
+            open_session(
+                &acp_tx,
+                load_cwd,
+                Some(session_id.as_str()),
+                restore_code,
+                None,
+            )
+            .await
         }
         MaterializedStartup::Fork {
             parent_session_id,
@@ -2230,6 +2274,7 @@ mod tests {
             model: None,
             rules: None,
             system_prompt_override: None,
+            session_kind: None,
             continue_last_session: false,
             fork_session: false,
             worktree: Some("wt-label".to_string()),

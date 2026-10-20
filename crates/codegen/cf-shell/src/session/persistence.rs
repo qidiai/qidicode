@@ -639,6 +639,76 @@ pub fn find_session_dir_by_id_in_root(session_id: &str, sessions_root: &Path) ->
     None
 }
 
+/// Maximum accepted length for a persisted `session_kind` token.
+const MAX_SESSION_KIND_LEN: usize = 64;
+
+/// Whether `kind` is a safe `session_kind` token for `summary.json`.
+pub(crate) fn valid_session_kind(kind: &str) -> bool {
+    !kind.is_empty()
+        && kind.len() <= MAX_SESSION_KIND_LEN
+        && kind
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
+/// Stamp `session_kind` onto an existing session directory's `summary.json`.
+///
+/// Goes through the sidecar-locked read-modify-write in
+/// [`crate::session::storage::summary_write`], so it serializes against the
+/// live persistence actor and any other writer instead of clobbering fields.
+pub fn set_session_kind_in_dir(session_dir: &Path, kind: &str) -> io::Result<()> {
+    if !valid_session_kind(kind) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid session kind: {kind:?}"),
+        ));
+    }
+    let summary_path = session_dir.join("summary.json");
+    let lock_path = session_dir.join("summary.json.lock");
+    if !summary_path.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("summary.json not found in {}", session_dir.display()),
+        ));
+    }
+    crate::session::storage::summary_write::apply_patch_locked(
+        &summary_path,
+        &lock_path,
+        &crate::session::storage::summary_write::SummaryPatch {
+            session_kind: Some(kind.to_string()),
+            ..Default::default()
+        },
+    )?;
+    Ok(())
+}
+
+/// Set `session_kind` on a session addressed by id, searching every
+/// workspace directory under `~/.qidi/sessions/`.
+///
+/// Backs `qidi sessions hide`: headless/dispatch sessions get
+/// `subagent_headless`, which `Summary::is_hidden` keeps out of history
+/// browsing while leaving it discoverable through search.
+pub fn set_session_kind(session_id: &str, kind: &str) -> io::Result<PathBuf> {
+    if session_id.is_empty()
+        || session_id.contains('/')
+        || session_id.contains('\\')
+        || session_id.contains("..")
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid session id: {session_id:?}"),
+        ));
+    }
+    let dir = find_session_dir_by_id(session_id).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("session not found: {session_id}"),
+        )
+    })?;
+    set_session_kind_in_dir(&dir, kind)?;
+    Ok(dir)
+}
+
 pub fn session_exists_by_id(session_id: &str) -> bool {
     let sessions_root = crate::util::grok_home::grok_home().join("sessions");
     session_exists_in_root(session_id, &sessions_root)
@@ -971,10 +1041,11 @@ impl Summary {
         })
     }
 
-    /// Whether this session is a subagent child session.
+    /// Whether this session is a subagent/task child session.
     ///
     /// Subagent children (`session_kind` of `"subagent"`, `"subagent_fork"`,
-    /// `"subagent_resume"`, …) are hidden from history listings by default so
+    /// `"subagent_resume"`, …) and dispatched headless task sessions
+    /// (`"subagent_headless"`) are hidden from history listings by default so
     /// they don't swamp the user's own sessions, but they stay discoverable:
     /// a *search* over the session list opts back in to them (see
     /// [`list_summaries_including_hidden`]).
@@ -1069,7 +1140,12 @@ mod is_hidden_tests {
 
     #[test]
     fn hidden_for_all_subagent_kinds() {
-        for kind in ["subagent", "subagent_fork", "subagent_resume"] {
+        for kind in [
+            "subagent",
+            "subagent_fork",
+            "subagent_resume",
+            "subagent_headless",
+        ] {
             assert!(
                 summary_with_kind(Some(kind)).is_hidden(),
                 "{kind} should be hidden"
@@ -2108,6 +2184,7 @@ pub(crate) async fn new(
     gateway: Option<GatewaySender>,
     session_summary_model: String,
     registry_title_sync: Option<RegistryGeneratedTitleSync>,
+    session_kind: Option<&str>,
 ) -> io::Result<PersistenceHandle> {
     let root_dir = grok_home();
     let storage: Box<dyn StorageAdapter> = Box::new(JsonlStorageAdapter::with_root(root_dir));
@@ -2115,6 +2192,22 @@ pub(crate) async fn new(
     // Initialize session in storage
     let mut summary = storage.init_session(info, model_id.clone()).await?;
     touch_worktree_for_session(info).await;
+
+    // Classify dispatch/task sessions (e.g. headless one-shot runs) so the
+    // history picker hides them while search still finds them. Best-effort:
+    // a failed metadata stamp must not abort a usable session; the failure is
+    // warned (the session simply stays visible in history).
+    if let Some(kind) = session_kind {
+        match set_session_kind_in_dir(&session_dir(info), kind) {
+            Ok(()) => summary.session_kind = Some(kind.to_string()),
+            Err(e) => tracing::warn!(
+                error = %e,
+                session_id = %info.id,
+                kind,
+                "failed to stamp session_kind; session stays visible in history"
+            ),
+        }
+    }
 
     // Update model if different
     if summary.current_model_id != model_id {
@@ -3153,6 +3246,65 @@ mod find_summary_by_session_id_tests {
         fs::write(dir.join("summary.json"), b"not-json").unwrap();
 
         assert!(find_summary_by_session_id_in_root("bad-session", &root).is_none());
+    }
+}
+
+#[cfg(test)]
+mod set_session_kind_tests {
+    use super::set_session_kind_in_dir;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn write_session(root: &std::path::Path, session_id: &str) -> std::path::PathBuf {
+        let dir = root.join("encoded_cwd").join(session_id);
+        fs::create_dir_all(&dir).unwrap();
+        let summary = serde_json::json!({
+            "info": { "id": session_id, "cwd": "/tmp" },
+            "session_summary": "task",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "num_messages": 0,
+            "current_model_id": "grok-3",
+            "head_commit": "deadbeef",
+            "head_branch": "main"
+        });
+        fs::write(dir.join("summary.json"), summary.to_string()).unwrap();
+        dir
+    }
+
+    #[test]
+    fn stamps_kind_and_preserves_other_fields() {
+        let tmp = TempDir::new().unwrap();
+        let dir = write_session(tmp.path(), "task-session");
+
+        set_session_kind_in_dir(&dir, "subagent_headless").unwrap();
+
+        let summary: crate::session::persistence::Summary = serde_json::from_slice(
+            &fs::read(dir.join("summary.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(summary.session_kind.as_deref(), Some("subagent_headless"));
+        assert!(summary.is_hidden(), "task kind must be hidden from browsing");
+        assert_eq!(summary.head_commit.as_deref(), Some("deadbeef"));
+    }
+
+    #[test]
+    fn rejects_kind_with_separators() {
+        let tmp = TempDir::new().unwrap();
+        let dir = write_session(tmp.path(), "task-session");
+        for bad in ["subagent/headless", "", "has space", "subagent\nnewline"] {
+            assert!(
+                set_session_kind_in_dir(&dir, bad).is_err(),
+                "kind {bad:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_missing_summary() {
+        let tmp = TempDir::new().unwrap();
+        let err = set_session_kind_in_dir(tmp.path(), "subagent_headless").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 }
 

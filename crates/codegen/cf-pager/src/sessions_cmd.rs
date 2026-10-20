@@ -31,6 +31,27 @@ enum SessionsCommand {
         /// Session id to delete.
         id: String,
     },
+    /// Hide task/dispatch sessions from history browsing. Hidden sessions stay
+    /// searchable and can still be resumed by id.
+    Hide {
+        /// Session ids to hide.
+        ids: Vec<String>,
+        /// Scan the current workspace for sessions created by non-interactive
+        /// (headless) runs — i.e. dispatched tasks — and hide them.
+        #[arg(long)]
+        headless: bool,
+        /// With `--headless`, scan every workspace under `~/.qidi/sessions/`
+        /// instead of just the current one.
+        #[arg(long)]
+        all_workspaces: bool,
+        /// Print what would be hidden without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+        /// With explicit ids, overwrite a session that already has a
+        /// non-subagent kind (e.g. `worktree`) instead of refusing.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
@@ -192,9 +213,178 @@ pub async fn run(args: SessionsArgs, agent_config: &AgentConfig) -> Result<()> {
                 println!("No session found with id {id}.");
             }
         }
+        SessionsCommand::Hide {
+            ids,
+            headless,
+            all_workspaces,
+            dry_run,
+            force,
+        } => {
+            if !headless && ids.is_empty() {
+                anyhow::bail!(
+                    "pass at least one session id, or --headless to scan this workspace"
+                );
+            }
+
+            let mut targets: Vec<(String, String)> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for id in &ids {
+                match cf_shell::session::persistence::find_summary_by_session_id(id) {
+                    Some(summary) => {
+                        // Explicit ids must not silently clobber a meaningful
+                        // existing kind (e.g. worktree/fork). `--force` opts in.
+                        if !may_overwrite_kind(summary.session_kind.as_deref(), force) {
+                            eprintln!(
+                                "warning: session {id} has kind {:?}; refusing to overwrite \
+                                 (pass --force to hide anyway)",
+                                summary.session_kind
+                            );
+                            continue;
+                        }
+                        if seen.insert(id.clone()) {
+                            targets.push((id.clone(), summary.display_title().to_string()));
+                        }
+                    }
+                    None => eprintln!("warning: no local session with id {id}"),
+                }
+            }
+            if headless {
+                let cwd_str = cwd.to_string_lossy().to_string();
+                for dir in session_scan_dirs(&cwd_str, all_workspaces) {
+                    for (id, title) in headless_sessions_in(&dir) {
+                        if seen.insert(id.clone()) {
+                            targets.push((id, title));
+                        }
+                    }
+                }
+            }
+
+            if targets.is_empty() {
+                println!("Nothing to hide.");
+                return Ok(());
+            }
+            if dry_run {
+                for (id, title) in &targets {
+                    println!("would hide {id}  {title}");
+                }
+                println!("Would hide {} session(s).", targets.len());
+                return Ok(());
+            }
+
+            let mut hidden = 0usize;
+            for (id, _) in &targets {
+                match cf_shell::session::persistence::set_session_kind(
+                    id,
+                    HIDDEN_TASK_SESSION_KIND,
+                ) {
+                    Ok(_) => hidden += 1,
+                    Err(e) => eprintln!("warning: could not hide {id}: {e}"),
+                }
+            }
+            println!(
+                "Hidden {hidden} session(s) as {HIDDEN_TASK_SESSION_KIND} \
+                 (removed from history browsing; still searchable and resumable by id)."
+            );
+        }
     }
 
     Ok(())
+}
+
+/// Kind stamped on dispatched/headless task sessions. It starts with
+/// `subagent`, so [`cf_shell::session::persistence::Summary::is_hidden`] keeps
+/// these sessions out of history browsing while the picker's search still
+/// finds them.
+const HIDDEN_TASK_SESSION_KIND: &str = "subagent_headless";
+
+/// Marker only the non-interactive (headless) system prompt carries. Used to
+/// recognise task sessions created before headless runs were auto-classified.
+const HEADLESS_PROMPT_MARKER: &str =
+    "an autonomous agent that completes software engineering tasks";
+
+fn is_headless_prompt(system_prompt: &str) -> bool {
+    system_prompt.contains(HEADLESS_PROMPT_MARKER)
+}
+
+/// Whether an explicit-id hide may overwrite the session's current kind.
+/// `subagent*` (already hidden) and kindless sessions are safe; anything else
+/// (`worktree`, `fork`, …) needs `--force` so a task-hiding command cannot
+/// silently erase a meaningful classification.
+fn may_overwrite_kind(existing: Option<&str>, force: bool) -> bool {
+    force
+        || existing
+            .map(|kind| kind.starts_with("subagent"))
+            .unwrap_or(true)
+}
+
+/// Workspace session directories to scan for pre-classification task sessions.
+fn session_scan_dirs(cwd: &str, all_workspaces: bool) -> Vec<std::path::PathBuf> {
+    if !all_workspaces {
+        return vec![cf_shell::util::grok_home::sessions_cwd_dir(cwd)];
+    }
+    let root = cf_shell::util::grok_home::grok_home().join("sessions");
+    let entries = match std::fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => {
+            eprintln!("warning: cannot scan {}: {e}", root.display());
+            return Vec::new();
+        }
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
+/// Session ids (and titles) under `cwd_sessions_dir` that look like unclassified
+/// headless/dispatch task sessions: no `session_kind`, not explicitly hidden,
+/// and carrying the non-interactive system prompt.
+fn headless_sessions_in(cwd_sessions_dir: &std::path::Path) -> Vec<(String, String)> {
+    let entries = match std::fs::read_dir(cwd_sessions_dir) {
+        Ok(entries) => entries,
+        // A workspace with no sessions is normal, not an error.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => {
+            eprintln!(
+                "warning: cannot scan {}: {e}",
+                cwd_sessions_dir.display()
+            );
+            return Vec::new();
+        }
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(dir.join("summary.json")) else {
+            continue;
+        };
+        let Ok(summary) = serde_json::from_slice::<cf_shell::session::persistence::Summary>(&bytes)
+        else {
+            continue;
+        };
+        // Already classified (subagent/fork/worktree) or explicitly hidden.
+        if summary.session_kind.is_some() || summary.is_hidden() {
+            continue;
+        }
+        let Ok(prompt) = std::fs::read_to_string(dir.join("system_prompt.txt")) else {
+            continue;
+        };
+        if !is_headless_prompt(&prompt) {
+            continue;
+        }
+        out.push((
+            summary.info.id.0.to_string(),
+            summary.display_title().to_string(),
+        ));
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Print sessions grouped by worktree label, preserving the original table
@@ -253,5 +443,96 @@ fn print_sessions_grouped(sessions: &[MergedSession]) {
     }
     if let Some(members) = &none_group {
         print_group("(no label)", members);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_session(
+        root: &std::path::Path,
+        id: &str,
+        kind: Option<&str>,
+        hidden: Option<bool>,
+        prompt: &str,
+    ) {
+        let dir = root.join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut summary = serde_json::json!({
+            "info": { "id": id, "cwd": "/test" },
+            "session_summary": id,
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            "num_messages": 0,
+            "current_model_id": "test-model"
+        });
+        if let Some(kind) = kind {
+            summary["session_kind"] = serde_json::Value::String(kind.to_string());
+        }
+        if let Some(hidden) = hidden {
+            summary["hidden"] = serde_json::Value::Bool(hidden);
+        }
+        std::fs::write(dir.join("summary.json"), summary.to_string()).unwrap();
+        std::fs::write(dir.join("system_prompt.txt"), prompt).unwrap();
+    }
+
+    #[test]
+    fn recognizes_only_headless_system_prompt() {
+        assert!(is_headless_prompt(
+            "You are QIDI Code. You are an autonomous agent that completes software engineering tasks."
+        ));
+        assert!(!is_headless_prompt(
+            "You are QIDI Code. You are an interactive CLI tool that helps users with software engineering tasks."
+        ));
+    }
+
+    #[test]
+    fn explicit_hide_refuses_to_clobber_non_subagent_kinds() {
+        assert!(may_overwrite_kind(None, false), "kindless is safe");
+        assert!(
+            may_overwrite_kind(Some("subagent"), false),
+            "already hidden is safe"
+        );
+        assert!(
+            may_overwrite_kind(Some("subagent_headless"), false),
+            "already a task kind is safe"
+        );
+        assert!(
+            !may_overwrite_kind(Some("worktree"), false),
+            "worktree must need --force"
+        );
+        assert!(
+            !may_overwrite_kind(Some("fork"), false),
+            "fork must need --force"
+        );
+        assert!(
+            may_overwrite_kind(Some("worktree"), true),
+            "--force allows overwrite"
+        );
+    }
+
+    /// The retroactive scan must only touch task sessions created before
+    /// classification existed: user sessions, already-classified sessions and
+    /// explicitly hidden sessions are left alone.
+    #[test]
+    fn scan_selects_only_unclassified_headless_sessions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let headless_prompt =
+            "You are QIDI Code. You are an autonomous agent that completes software engineering tasks.";
+        let interactive_prompt =
+            "You are QIDI Code. You are an interactive CLI tool that helps users.";
+
+        write_session(root, "task", None, None, headless_prompt);
+        write_session(root, "chat", None, None, interactive_prompt);
+        write_session(root, "already-kind", Some("subagent"), None, headless_prompt);
+        write_session(root, "already-hidden", None, Some(true), headless_prompt);
+
+        let ids: Vec<String> = headless_sessions_in(root)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(ids, vec!["task"]);
     }
 }

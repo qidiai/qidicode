@@ -845,6 +845,17 @@ impl acp::Agent for MvpAgent {
             .as_ref()
             .and_then(|m| m.get("modelId").and_then(|v| v.as_str()))
             .filter(|s| !s.is_empty());
+        // Dispatch/task sessions are hidden from history browsing. Explicit
+        // `_meta.sessionKind` wins; non-interactive (headless) clients default
+        // to `subagent_headless`.
+        let session_kind = super::resolve_created_session_kind(
+            arguments
+                .meta
+                .as_ref()
+                .and_then(|m| m.get("sessionKind"))
+                .and_then(|v| v.as_str()),
+            init.meta.as_ref(),
+        );
         // F8: per-session agent type from `_meta.agentName` (dashboard
         // `/agent <name>` dispatch). Unknown names fail here — never a
         // silent fallback to the default chain.
@@ -1016,6 +1027,7 @@ impl acp::Agent for MvpAgent {
                     Some(self.gateway.clone()),
                     summary_model,
                     registry_title_sync,
+                    session_kind.as_deref(),
                 )
                 .await
                 .map_err(|e| crate::session::persistence::io_error_to_acp(&e))?

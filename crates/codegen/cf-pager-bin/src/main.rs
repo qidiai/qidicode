@@ -1926,6 +1926,7 @@ async fn async_main() -> Result<()> {
                 model: args.model,
                 rules: args.rules,
                 system_prompt_override: args.system_prompt_override.clone(),
+                session_kind: args.session_kind.clone(),
                 continue_last_session: args.continue_last_session,
                 fork_session: args.fork_session,
                 worktree: args.worktree,

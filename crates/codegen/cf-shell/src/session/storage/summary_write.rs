@@ -83,6 +83,10 @@ pub(crate) struct SummaryPatch {
     pub model: Option<ModelPatch>,
     pub git_head: Option<GitHeadPatch>,
     pub collection_id: Option<String>,
+    /// Set the session kind (e.g. `subagent`, `subagent_headless`, `fork`).
+    /// Used to classify task/dispatch sessions so history browsing can hide
+    /// them while search still finds them (`Summary::is_hidden`).
+    pub session_kind: Option<String>,
     /// Set the session title unconditionally (last-writer-wins). Used by the
     /// manual `/rename` (`/title`) path, which must always win. Also marks the
     /// title manual (`Summary::title_is_manual`).
@@ -144,6 +148,9 @@ impl Summary {
         }
         if let Some(collection_id) = &patch.collection_id {
             self.collection_id = Some(collection_id.clone());
+        }
+        if let Some(kind) = &patch.session_kind {
+            self.session_kind = Some(kind.clone());
         }
         let mut absent_title_applied = false;
         if let Some(title) = &patch.generated_title {
@@ -344,6 +351,32 @@ mod tests {
             .await
             .unwrap();
         (adapter, info, session_dir.join("summary.json"))
+    }
+
+    /// `session_kind` is a first-class patch field: the headless/dispatch path
+    /// stamps it at session creation, and `is_hidden` must follow.
+    #[tokio::test]
+    async fn session_kind_patch_sets_kind_and_hides() {
+        let dir = TempDir::new().unwrap();
+        let (adapter, info, path) = new_session(&dir).await;
+
+        adapter
+            .apply_summary_patch(
+                &info,
+                SummaryPatch {
+                    session_kind: Some("subagent_headless".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let summary = read_summary(&path).unwrap();
+        assert_eq!(summary.session_kind.as_deref(), Some("subagent_headless"));
+        assert!(
+            summary.is_hidden(),
+            "a headless/task session must stay out of history browsing"
+        );
     }
 
     /// Auto title generation writes (and reports `true`) when the session has

@@ -2896,6 +2896,88 @@ fn parse_session_kind_matrix() {
     }
     assert_eq!(parse_session_kind(None), SessionKind::Build, "[none]");
 }
+
+/// New-session classification for history browsing: headless/dispatched
+/// sessions default to `subagent_headless` (hidden from browse, searchable),
+/// explicit `_meta.sessionKind` wins, and `user` opts back into history.
+#[test]
+fn created_session_kind_matrix() {
+    use super::resolve_created_session_kind;
+    use serde_json::json;
+
+    let cases: &[(&str, Option<&str>, Option<serde_json::Value>, Option<&str>)] = &[
+        ("interactive_default", None, None, None),
+        (
+            "interactive_explicit_hint",
+            None,
+            Some(json!({"startupHints": {"nonInteractive": false}})),
+            None,
+        ),
+        (
+            "headless_default",
+            None,
+            Some(json!({"startupHints": {"nonInteractive": true}})),
+            Some("subagent_headless"),
+        ),
+        (
+            "explicit_subagent",
+            Some("subagent"),
+            Some(json!({"startupHints": {"nonInteractive": true}})),
+            Some("subagent"),
+        ),
+        (
+            "explicit_subagent_headless",
+            Some("subagent_headless"),
+            None,
+            Some("subagent_headless"),
+        ),
+        (
+            "explicit_kind_without_hint",
+            Some("subagent"),
+            None,
+            Some("subagent"),
+        ),
+        (
+            "explicit_worktree_rejected",
+            Some("worktree"),
+            Some(json!({"startupHints": {"nonInteractive": true}})),
+            Some("subagent_headless"),
+        ),
+        (
+            "explicit_worktree_rejected_interactive",
+            Some("worktree"),
+            None,
+            None,
+        ),
+        (
+            "explicit_user_opts_out_of_headless",
+            Some("user"),
+            Some(json!({"startupHints": {"nonInteractive": true}})),
+            None,
+        ),
+        (
+            "blank_explicit_falls_back_to_hint",
+            Some("   "),
+            Some(json!({"startupHints": {"nonInteractive": true}})),
+            Some("subagent_headless"),
+        ),
+        (
+            "invalid_explicit_falls_back_to_hint",
+            Some("bad kind!"),
+            Some(json!({"startupHints": {"nonInteractive": true}})),
+            Some("subagent_headless"),
+        ),
+    ];
+    for (label, explicit, init_meta, expected) in cases {
+        let meta = init_meta.as_ref().and_then(|v| v.as_object());
+        assert_eq!(
+            resolve_created_session_kind(*explicit, meta).as_deref(),
+            *expected,
+            "[{label}]"
+        );
+    }
+}
+
 #[test]
 fn chat_initial_model_matrix() {
     let cases: &[(&str, bool, Option<&str>, Option<&str>)] = &[

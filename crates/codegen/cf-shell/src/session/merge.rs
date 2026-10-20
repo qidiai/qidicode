@@ -156,6 +156,9 @@ pub async fn fetch_merged_split(
     // hidden rows must be separated first or a subagent child would be merged
     // into (and could displace) the user-facing row set.
     let (hidden_local, visible_local) = split_hidden_local(local);
+    // Remote rows for a locally hidden session must not resurrect it in the
+    // browsing half (Writeback mode syncs top-level sessions to the registry).
+    let remote = drop_remote_hidden(remote, &hidden_local);
     let sessions = merge(remote, visible_local, query, &local_repo_urls, limit);
     let subagents = if subagent_limit == 0 {
         Vec::new()
@@ -178,6 +181,26 @@ pub async fn fetch_merged_split(
 /// double-listing a session.
 fn split_hidden_local(local: Vec<Summary>) -> (Vec<Summary>, Vec<Summary>) {
     local.into_iter().partition(|s| s.is_hidden())
+}
+
+/// Drop remote rows whose session id is hidden locally.
+///
+/// In Writeback mode a top-level session is synced to the registry, so a
+/// session hidden locally (subagent child, explicit `hidden: true`, or a
+/// `subagent*` dispatch kind) would otherwise come back as a visible remote
+/// row — the local hiding contract must win over the remote copy.
+fn drop_remote_hidden(remote: Vec<SessionRecord>, hidden_local: &[Summary]) -> Vec<SessionRecord> {
+    if hidden_local.is_empty() {
+        return remote;
+    }
+    let hidden_ids: std::collections::HashSet<&str> = hidden_local
+        .iter()
+        .map(|s| s.info.id.0.as_ref())
+        .collect();
+    remote
+        .into_iter()
+        .filter(|r| !hidden_ids.contains(r.session_id.as_str()))
+        .collect()
 }
 
 /// Merge remote and local results. Local entries are inserted first so
@@ -1279,6 +1302,41 @@ mod tests {
                 "{id} must not appear in both halves"
             );
         }
+    }
+
+    /// A remote row must not resurrect a session hidden locally (Writeback
+    /// mode syncs top-level sessions to the registry).
+    #[test]
+    fn remote_rows_do_not_resurrect_locally_hidden_sessions() {
+        let hidden = vec![
+            make_kind_summary(
+                "sub-1",
+                "Coder result",
+                "2026-05-02T00:00:00Z",
+                None,
+                Some("subagent"),
+            ),
+            make_kind_summary(
+                "task-1",
+                "Dispatched task",
+                "2026-05-03T00:00:00Z",
+                None,
+                Some("subagent_headless"),
+            ),
+        ];
+        let remote = vec![
+            make_remote("sub-1", "Coder result", "2026-05-02T00:00:00Z"),
+            make_remote("task-1", "Dispatched task", "2026-05-03T00:00:00Z"),
+            make_remote("user-1", "My session", "2026-05-04T00:00:00Z"),
+        ];
+
+        let kept = drop_remote_hidden(remote, &hidden);
+        let ids: Vec<&str> = kept.iter().map(|r| r.session_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["user-1"],
+            "only the non-hidden remote row may survive"
+        );
     }
 
     /// A subagent child must never consume a slot in the user-facing page: with

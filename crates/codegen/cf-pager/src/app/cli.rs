@@ -520,6 +520,13 @@ pub struct PagerArgs {
     /// Model ID to use.
     #[clap(short = 'm', long = "model", value_name = "MODEL")]
     pub model: Option<String>,
+    /// Session kind stamped into `summary.json` for a **new** session
+    /// (headless runs). Headless one-shot runs default to `subagent_headless`
+    /// so dispatched tasks stay out of history browsing while remaining
+    /// searchable. Pass `user` (or `normal`/`none`) to keep the session in
+    /// the normal history list.
+    #[clap(long = "session-kind", value_name = "KIND", env = "QIDI_SESSION_KIND")]
+    pub session_kind: Option<String>,
     /// Reasoning effort for reasoning models
     #[clap(
         long = "reasoning-effort",

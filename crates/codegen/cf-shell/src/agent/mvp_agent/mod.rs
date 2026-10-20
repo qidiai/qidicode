@@ -289,6 +289,43 @@ fn parse_session_kind(
 fn is_chat_session_kind(_meta: Option<&acp::Meta>) -> bool {
     false
 }
+
+/// Resolve the `session_kind` stamped onto a **newly created** session.
+///
+/// An explicit `_meta.sessionKind` wins; `user` / `normal` / `none` opts back
+/// into the browsable history list. Without an explicit kind, non-interactive
+/// clients (headless one-shot runs — i.e. dispatched tasks) get
+/// `subagent_headless`, so they stay out of history browsing while
+/// `Summary::is_hidden` keeps them discoverable through search.
+pub(crate) fn resolve_created_session_kind(
+    explicit: Option<&str>,
+    init_meta: Option<&acp::Meta>,
+) -> Option<String> {
+    if let Some(kind) = explicit.map(str::trim).filter(|k| !k.is_empty()) {
+        let lowered = kind.to_ascii_lowercase();
+        if matches!(lowered.as_str(), "user" | "normal" | "none") {
+            return None;
+        }
+        // Only `subagent*` kinds are accepted explicitly: they are the
+        // classification the hiding contract understands. Anything else
+        // (e.g. a typo, or a caller trying to forge `worktree`) falls back to
+        // the inferred default instead of poisoning session metadata.
+        if kind.starts_with("subagent")
+            && crate::session::persistence::valid_session_kind(kind)
+        {
+            return Some(kind.to_string());
+        }
+        tracing::warn!(
+            kind,
+            "ignoring unsupported _meta.sessionKind (expected `subagent*`, `user`, `normal`, or `none`)"
+        );
+    }
+    let non_interactive = init_meta
+        .and_then(|m| m.get("startupHints"))
+        .and_then(|v| serde_json::from_value::<crate::session::StartupHints>(v.clone()).ok())
+        .is_some_and(|h| h.non_interactive);
+    non_interactive.then(|| "subagent_headless".to_string())
+}
 fn chat_initial_model(
     is_chat_kind: bool,
     custom_model_id: Option<&str>,
