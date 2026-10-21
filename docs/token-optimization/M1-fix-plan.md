@@ -1,5 +1,7 @@
 # M1 修复方案：token 估算常数校正（v5，2026-10-21 四轮审计返工后）
 
+> **状态**：**已定稿，未实施**。2026-10-21 用户决定：不单独编译，随下次改动一起出包；不新建分支（直接在当前分支提交）。缺陷记录见 `docs/fix-plans/2026-10-21-token-estimate-underreport.md`。
+>
 > **依据**：`docs/token-optimization/tokenizer-calibration-and-plan.md` v2（分层语料 40 会话 / 6,376 项 / 3.91M 真值 token，聚合比 0.819）
 > **审计**：codely-core（GLM-5.3）**四轮**——v1 REJECT（7 项）、v2 REJECT（5 项）、v3 REJECT（1 项）、v4 REJECT（断言清单仍漏 ≥7 处，且**按符号名 grep 收口本身不完备**）。四轮均确认**核心设计、常数、公式、夹具、回滚无需改动**。本 v5 除补全清单外，**改了方法论**：把"穷举断言"降级为"已知清单 + 机械重算规则"，因为零符号测试无法被任何 grep 穷举（见 §3.0）。
 > **目标**：聚合偏差 −18.1% → ±2%；**不改变** `BYTES_PER_TOKEN` / `estimate_tokens` / `estimate_chars` 的既有语义。
