@@ -67,10 +67,12 @@ pub enum SubagentSkillListing {
 /// deliberately excluded. Only core programming skills stay resident.
 ///
 /// Two entries look surprising but are intentional:
-/// - `code-review` stays on the allowlist even though it never announces: its
-///   bundled `SKILL.md` carries `disable-model-invocation: true`, so the
-///   listing projection (`listing.rs`) filters it out of the model-visible
-///   list by design (user-only, via `/code-review`).
+/// - `code-review` is on the allowlist **and model-invocable** as of
+///   2026-10-21 (user directive: the strict maintainability review must be
+///   available to the model, especially in the main session). Its former
+///   `disable-model-invocation: true` was removed, so it now appears in both
+///   the model-visible listing and the runtime set; the two projections stay
+///   aligned at 29/29.
 /// - Headless-only built-ins (e.g. `best-of-n`) are never listed here: it is a
 ///   cf-shell compiled-in `SKILL.md` (`BEST_OF_N_SKILL_MD`, "not extracted as
 ///   a bundled skill"), and legacy cleanup deletes stale user copies on disk,

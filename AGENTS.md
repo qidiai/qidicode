@@ -155,7 +155,7 @@
 
 **纪律**：派子代理/任务分发**默认走 ①**；仅 ① 整链失败（qoder/opencode-flash/codely 全挂）才降 ②。
 **注意**：qodercli（网页版 CLI）与 Qoder 桌面 IDE 是**两个应用、登录态独立**——本机链的 qoder 工具依赖 qodercli 已登录（2026-10-20 已登，若报 Not logged in 则重新 `qodercli /login`）。
-铁律：指挥官不写码（写规格/审计/质检/提交）；编码手与子代理**禁止 commit**；每项修复必须有对应测试；审计规格须按 **audit-rubrics 技能**执行（先自由审查、后对照清单，适用条目注入 ≤5，报告落文档私有库 `G:\qidiwork-docs-local\审计评审\`，见 §3），返工闭环后教训合入 `docs/audit-rubrics/RUBRICS.md`。
+铁律：指挥官不写码（写规格/审计/质检/提交）；编码手与子代理**禁止 commit**；每项修复必须有对应测试；**所有代码改动提交前必须用 `code-review` 技能做严格质量审查（模型可主动调用，重点查“只修表面/不修根源/结构变烂”；2026-10-21 用户指令）**；审计规格须按 **audit-rubrics 技能**执行（先自由审查、后对照清单，适用条目注入 ≤5，报告落文档私有库 `G:\qidiwork-docs-local\审计评审\`，见 §3），返工闭环后教训合入 `docs/audit-rubrics/RUBRICS.md`。
 
 **子代理失败回报契约（2026-10-20 修复，B1）**：`insert_pending` 之后的失败**必须**走 `handle_request.rs::fail_post_pending`（`PendingGuard::set_error` + `send_failure`），不得只调 `send_failure`——只调它时后台调用方（oneshot 接收端早已丢弃）只能看到 `PendingGuard::drop` 的泛化兜底 `"Subagent failed during initialization"`，真实原因（resume 仍在运行/未找到/身份冲突、cwd 非法、源模型缺失、resume 拷贝中止）全丢。失败记录进 `completed` 快照 + **恰好 1 条** completion summary；**条数由 `surface_completion` 决定，`set_error` 只保证消息保真**（勿再把"防重复呈现"记在 `set_error` 账上）。回归：`post_pending_*_records_reason_{foreground,background}` 6 例（`tests/mod.rs`）。另：`is_valid_resume_id` 的哨兵容忍（只排除 `""`/`null`/`none`/`undefined`/空白）是**设计**，非标准 id 走 not-found 分支属受支持行为，**不要**改成显式报错。
 
