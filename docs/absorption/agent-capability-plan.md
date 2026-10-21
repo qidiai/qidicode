@@ -1,4 +1,4 @@
-# Agent 能力提升方案（v2，2026-10-21 双席联合审计返工后）
+# Agent 能力提升方案（v4，2026-10-21 三席审计返工后）
 
 > 来源：`docs/absorption/deepseek-deepinfer-absorption.md`（两仓库实读）+ 代码盘点
 > 审计：**GLM-5.3（codely-core）** 判 ACCEPT WITH NITS（8 项）；**Qwen3.8-Flash** 判 REJECT（"结论对、证据全错"）。两席独立作业、结论高度收敛，本 v2 已逐条吸收。
@@ -12,7 +12,7 @@
 |---|---|
 | "截断在 `retry.rs:424` 判 fatal" | `:424` 只是**人读文案**。产生点 `cf-sampler/src/actor/request_task.rs:654-658`（`stop_reason == Length` → `AttemptOutcome::Failed`）；不 failover 的判定在 `retry.rs:294`（`is_failover_error`，`:305` 把该类归入不 failover 分支）；对上层成终态在 `cf-shell/src/sampling/error.rs:108`。**术语也要改**：failover ≠ retry |
 | "logprobs 字段全为 None ⇒ 没采集" | 那些 `None` 全在**响应结构体**与测试 mock 里。**请求侧根本没有这个字段**——`SamplingConfig`（`cf-sampling-types/src/types.rs:1069-1090`）里没有 `logprobs`。所以这是**建设**（3 天），不是接线（1 天） |
-| "json_schema 主循环未用" | 不准确：**最终结构化输出路径在用**（`turn.rs:1773-1889`，含 schema violation 重试；e2e 在 `test_built_binary_e2e.rs:843`，**该 e2e 带 `#[ignore]`，需 `--ignored` 才跑**）。真正没用的只是**工具参数**路径 |
+| "json_schema 主循环未用" | 不准确：**最终结构化输出路径在用**（`turn.rs:1773-1891`，含 schema violation 重试；e2e 在 `test_built_binary_e2e.rs:842-843`，**该 e2e 带 `#[ignore]`，需 `--ignored` 才跑**）。真正没用的只是**工具参数**路径 |
 
 另外，"接续"我们确实已有两条（用户指出的没错）：
 
@@ -28,7 +28,7 @@
 
 | 能力 | 现状 | 证据 |
 |---|---|---|
-| 截断后续写 | **无** | `request_task.rs:655-659` → `error.rs:108` 终态 |
+| 截断后续写 | **无** | `request_task.rs:654-658` → `error.rs:108` 终态 |
 | 半截文本 | **已有捕获**：`cf-shell/src/session/streaming_capture.rs`（`StreamingTurnCapture`，有字节上限） | 当前只导 trace，未回流给模型 |
 | logprobs | **请求侧无字段**；响应类型有但恒 `None` | `SamplingConfig` 无该字段 |
 | 结构化输出（最终） | **已有且带重试** | `turn.rs:1773-1891`；`test_built_binary_e2e.rs:843` |
@@ -44,9 +44,15 @@
 
 **Step 0（新增，最便宜，1–1.5 人日）**：`stop_reason == Length` 时把**本次实际下发的** `max_tokens` 翻倍重发一次，再失败才终态。
 
-- **改动位置（复审修正）**：预算不在 retry 层——它由三条 wire 的请求构造点灌入（`cf-sampler/src/client.rs:815 / :1139 / :1847`，源头 `SamplerDefaults`，`config.rs:53`）。因此 Step 0 = 这三处 + 新增"预算提升重试"类别 + actor 里每请求预算可变。
-- **起点与封顶**：以本次实际下发的值为准；`None` 时取该模型目录默认；上限 = `context_window − 已占 prompt token − 安全余量`（**不是直接用 `context_window`**）；超上限被 provider 返回 400 时按失败处理并回落 Step 1。
-- **必须同步的既有设计决策**（否则会被现有测试挡住）：`retry.rs:26-31` 的"by design 不重试"文档、`:489` 的透传分支、`:636` 的 `assert!(!is_failover_error(...))` 回归、`stream/messages.rs:459` 的 Anthropic 抛出点——这四处要一并改成"预算提升≠failover，允许一次"。
+- **改动位置（三席修正）**：预算不在 retry 层。灌入点共 **4 处**：
+  - chat-completions `client.rs:814-816`
+  - Responses `client.rs:1137-1140`
+  - 另一条 `client.rs:1846-1848`
+  - **Anthropic Messages `client.rs:1510-1521`**（`apply_message_defaults`：`max_tokens==0` 时回填常量 `ANTHROPIC_DEFAULT_MAX_TOKENS`，因为 Messages 线该字段是必填 `u32`）
+  源头是 `SamplerConfig.max_completion_tokens`（`config.rs:49/:53`，client 侧装配为 `ClientDefaults`，`client.rs:535`）。**另有运行时覆盖源**：`client.rs:233-256` 从响应头读 `x-grok-max-completion-tokens` / context-window 覆盖默认值——封顶公式要声明取哪一份。
+- **起点与封顶**：以本次实际下发的值为准；`None` 时取该模型目录默认（**Messages 线是常量回填，不是目录默认**）；上限 = `context_window − 已占 prompt token − 安全余量`（**不是直接用 `context_window`**）；超上限被 provider 返回 400 时按失败处理并回落 Step 1。`context_window` 现服务于 auto-compact 阈值（`types.rs:1082`），二者不冲突：cap 保证单请求不超窗，只会让下一回合更早触发压缩。
+- **止损（新增）**：`MaxTokensTruncation` 是**双语义**——`stream/messages.rs:385-390` 把"生成中撞到上下文窗口上限"也归入此类。**该类翻倍必无效**：决策前先判 `prompt_tokens + 首轮 completion ≥ context_window`，成立则**跳过翻倍直接落 Step 1**。翻倍后仍截断 → 不再翻第二次（一次为止），并在 `turn_completed` 记 `truncation_retry` 与作废的首轮输出 token（成本口径见 §6）。
+- **必须同步的既有设计决策**（否则会被现有测试挡住）：`retry.rs:26-31` 的"by design 不重试"文档、`:489` 的透传分支、`:636` 的 `assert!(!is_failover_error(...))` 回归、`stream/messages.rs:459` 的 Anthropic 抛出点——这四处要一并改成"预算提升≠failover，允许一次"。**`cf-shell/src/sampling/error.rs` 不动**（Step 0 在 cf-sampler 内消化，二次失败按原样成终态；`error_kind` 标记必须原样保留给 Step 1）。
 
 **Step 1（主路径，1.5 天）**：通用兜底续写。
 
@@ -64,7 +70,8 @@
 **两个必须处理的坑**（审计指出）：
 
 1. **工具参数中途截断**：半截 JSON 作为 assistant 消息追加 → 非法 `tool_calls` → 下一次请求大概率 400。
-   **默认策略（复审定稿）：一律不续写，且无需检测**——`streaming_capture` 不捕获 tool 参数，截断路径又丢弃 `response`，做"检测"要先新建通道，成本不值。所以规则就是"tool 参数截断 → 走 Step 0 / 整请求重发"，**判定门槛降到最低**。
+   **可执行规则（三席定稿）**：`StreamingTurnCapture` **只收文本/推理，从不含 tool 参数**（已实测），因此**"把 capture 文本灌回消息"结构上安全**；"不续写"的准确含义是**不得把原始 `response`/`tool_calls` 灌回消息**。这样既不需要检测截断点位置，也不会误伤可续写的文本截断。
+   **代价（必须知道）**：工具参数截断走整请求重发 = 首轮输出 token 全废，同内容从头重生成（输出成本 ≈2×）；长文件写入被截断时是整个文件重写。该成本记入 §6。
 2. **前缀缓存口径**（原草案写反了）：**纯追加 assistant 消息是追加、前缀不变 → 缓存友好**；真正会 miss 的是**去重裁剪改写了已生成前缀**。所以去重只在"重复确实发生"时启用，且成本口径要把"放弃一次缓存命中"算进去。
 
 **验收**：构造"生成 6000 字章节"的回归任务，比较 Step 0 / Step 1 / 现状的成稿完整率、总 token（含缓存命中差异）、轮数。
@@ -94,7 +101,7 @@
 ### M2b logprob 门控反思（**实验项，3–5 天，带退出判据**）
 
 - 判据：`mean_logprob < τ1` 或 `p10 < τ2` 或 `low_conf_ratio > θ` → 追加一次"逐条核对结论与证据"；
-- **硬门槛（复审修正）**：40 条样本、阳性约 15 条时，AUC 的 95% CI 约 ±0.13，0.6 这条线区分不了"无用"与"中等有用"。改为：**bootstrap 置信区间上界 < 0.65 才砍**；或用生产 `turn_completed` 攒大样本标定，评测集只作复核。
+- **硬门槛（三席修正）**：40 条样本、阳性约 15 条时，AUC 的 95% CI 约 ±0.13（**该值为 Hanley–McNeil 闭式推导，非实测**）。改为：**bootstrap 置信区间上界 < 0.65 才砍**；并用 Hanley–McNeil 闭式 SE 交叉核对（percentile bootstrap 对 AUC 这类 U-统计量方差偏低）；**判据冻结前必须用 M0 基线对成功/失败例双向实测**。首选仍是"用生产 `turn_completed` 攒大样本标定，评测集只作复核"。
 - 理由：LLM 的置信校准本身很差（错答常常同样自信），不设退出判据的话 3–5 天大概率沉没。
 
 ---
@@ -122,6 +129,14 @@ M1b  logprobs 采集（3 天）─────────────┴→ M2b
 
 依赖与并行（复审修正）：**M1-b 不依赖 M1-a**（原串行链画错）；**Step 0 与 M2a 可并行**（不同 crate）；但 **Step 1 与 M2a 撞车**——两者都改 cf-shell 的会话/回合装配（一个注入续写 assistant 消息，一个在执行前插自检钩子），按 AGENTS.md §9 应串行或交给同一人。
 
+### 5.1 若只能先做一件（三席要求给出单一推荐）
+
+**单人力 → 先做 M2a（规则型高风险自检，2 天）**：收益确定、零依赖、不碰 cf-sampler 的重试语义。
+
+**多人力 → M0 与 Step 0/M2a 并行**，M0 作为方法论地基仍最先起跑。
+
+原 §4 "评测集最先做"是**方法论默认**（没有度量就没有改进），但它是 3 天的间接收益；若只能投一个人，M2a 的直接收益更硬。两者不冲突，只是"先"的判据不同，这里写死避免执行时再纠结。
+
 ---
 
 ## 6. 风险
@@ -131,7 +146,8 @@ M1b  logprobs 采集（3 天）─────────────┴→ M2b
 | 续写重复/跑偏 | 去重阈值 + 轮数上限 + 原文不覆盖（可回看） |
 | 去重破坏前缀缓存 | 只在确实重复时裁剪；成本口径含缓存差异 |
 | tool-call 参数截断 | 该情形**不续写**，走提预算重发 |
-| logprob 与正确性弱相关 | AUC < 0.6 砍掉 M2b（硬门槛） |
+| logprob 与正确性弱相关 | 门槛：CI 上界 < 0.65 即砍 M2b（与 §3 同口径） |
+| **截断重试的代价** | 翻倍重试会让首轮输出作废（输出成本接近 2×）；`prompt + 首轮 ≥ context_window` 时直接跳过翻倍；工具参数截断只能整请求重发，长文件写入成本翻倍——均记入 `turn_completed.truncation_retry` 便于事后核算 |
 | 评测集选择偏差 | 记录丢弃率；>50% 时改用 judge/人工抽评 |
 | Anthropic 线无 logprob | 只做同模型内相对比较，不跨模型 |
 
@@ -173,3 +189,17 @@ M1b  logprobs 采集（3 天）─────────────┴→ M2b
 | N-5 | 40 样本上 AUC 门槛不可靠 | 已改：bootstrap CI 上界 < 0.65 |
 | N-7 | Step1 与 M2a 都改 cf-shell 会话装配，不能并行 | 已改里程碑：两者串行或同一人 |
 | N-8 | 行号偏移（`654-658`、`turn.rs` 区间、e2e 带 `#[ignore]`） | 已修正 |
+
+### 第四轮（v3 → v4，GLM-5.3 复审）
+
+判定 **ACCEPT WITH NITS**：8 项返工 6 项到位、2 项半到位（缺可执行规则/成本口径）。另提 5 项，已全部吸收：
+
+| # | 发现 | 处置 |
+|---|---|---|
+| NP-1 | **§6 残留 v2 旧门槛"AUC<0.6"**，与 §3 的 CI 上界口径矛盾 | 已改 §6 为同口径 |
+| NP-2 | **Step 1/坑 1 缺可执行规则**：`error_kind` 单值，区分不了"文本截断 vs 工具参数截断" | 已改为"capture 只含文本、灌回结构安全；'不续写'仅指不得灌回原始 response/tool_calls" |
+| NP-3 | **Step 0 收益高估**：`MaxTokensTruncation` 双语义，context-window-hit 类翻倍必无效 | 已加止损：先判 `prompt+首轮 ≥ context_window` 则跳过；并记作废成本 |
+| NP-4 | 优先级信号分裂（§3"最高性价比"/§4"最先做"/§5"最早见效"） | 已加 §5.1 单一推荐 |
+| NP-5 | 文档残留：标题 v2、`655-659`、turn.rs 区间两值、"SamplerDefaults" 类型名不存在 | 已全清（标题 v4、654-658、1773-1891、`SamplerConfig`/`ClientDefaults`） |
+
+同轮修正：Step 0 灌入点由"三条 wire"更正为**四条**（补 Anthropic `client.rs:1510-1521`）+ 运行时覆盖源（`client.rs:233-256`）。
