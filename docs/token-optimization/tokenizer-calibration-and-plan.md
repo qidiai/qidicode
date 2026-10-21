@@ -232,7 +232,9 @@
    ASCII_TOKENS_NUM / ASCII_TOKENS_DEN = 10 / 34   // ≈ 0.294 token/byte ≈ bytes÷3.4
    CJK_TOKENS_NUM / CJK_TOKENS_DEN     = 4 / 5     // 0.80 token/字
    ```
-   整数运算：`ceil(ascii_bytes*10/34)`、`ceil(cjk*4/5)`；`BYTES_PER_TOKEN=4` 原样保留给上述几条路径。
+   整数运算：`ascii_bytes*10/34`（**整数除法 = floor，与 `grid.py` 的 `a // bpt` 一致**）、`ceil(cjk*4/5)`；`BYTES_PER_TOKEN=4` 原样保留给上述几条路径。
+
+   > **⚠️ 勘误（2026-10-21，审计 R3）**：本行初稿误写为 `ceil(ascii_bytes*10/34)`，与标定脚本 `grid.py:59` 的 `a // bpt`（floor）矛盾——实测量全部按 floor 得出，**实现必须用 floor**。另：`grid.py` 的 `other` 桶当年也除以 3.4，而实现按 `other/4`，差异 <0.3pp；**验收数字以 `M1-fix-plan.md` §6 的实现公式复算值（0.9811）为准**，不要用本表 0.984。
 2. **`estimate_chars` 会失去互逆性**（审计 F5）：`tokens×4` 与新速率 3.4 差 +17.6%；`overflow.rs:174` 用 `estimate_chars(context_window)` 反推字符预算，M1 后同预算实际可塞入更多 token（方向=溢出）。短期在该处显式降额，或让 `estimate_chars` 跟随新速率并统一测试。
 3. 更新被锁定的单测（`lib.rs:203-208` 锁 3/5）**与 `lib.rs:24-30`/`:59-65` 的 doc comment**（那里仍写"对中文高估 30–50%"，M1 后即相反）。
 4. **回归夹具必须分层**：~200 条覆盖"5 类内容 × 大/中/小会话规模"，断言 `Σh/Σe ∈ [0.95, 1.05]`。用双尾语料做夹具等于拟合了一个偏斜分布（§2.7）。
