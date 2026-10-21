@@ -268,6 +268,10 @@ pages = doc.ComputeStatistics(2)   # 2 = wdStatisticPages
 （Word COM 本机不稳）**：Word COM 在本机多次返回错误页数（Repaginate 时机不稳），WPS COM 实测稳定，
 故以 WPS COM 为准；两者结果不一致时以 PDF 导出后的实际页数为最终复核。
 
+**二次勘误（2026-10-21，T10 返工 R1-2）**：13.3 节末尾原残留相反口径（"WPS 返回 9 页为错误值 →
+优先使用 Word COM"），已同步改为勘误说明并作废。至此全文页数口径单点唯一：
+**页数 = WPS COM `ComputeStatistics(2)`；Word COM 只用于 PDF 导出与列宽回读，不作页数依据。**
+
 ---
 
 ## 十一、修改操作规程（最高优先级·违反必出新bug）
@@ -430,8 +434,14 @@ finally:
 
 - ProgID为 Kwps.Application（不是Word.Application）
 - WPS的DisplayAlerts可能不支持数字枚举——用 word.DisplayAlerts = False
-- WPS的PageNumbers.Add参数名可能与Word不同（本机测试返回9页为错误值）
-- **优先使用Word COM**，WPS COM仅作备选
+- WPS的PageNumbers.Add参数名可能与Word不同（页码 API 与 Word 不通用，跨 COM 复用会报参数错）
+- **勘误（2026-10-21，T10 返工 R1-2）：本条历史结论作废**。原文为"本机测试返回 9 页为错误值
+  → **优先使用 Word COM**，WPS COM 仅作备选"，与第十节、13.5 节的"WPS COM 为准绳"自相矛盾。
+  作废原因是两条实测被混为一谈：① 那个"9 页"是**误用 `PageNumbers.Add`/分页未就绪**读出来的值，
+  不是 `ComputeStatistics(2)` 的结果；② Word COM 在本机多次 `Repaginate` 后仍返回错误页数
+  （时机不稳、进程残留即失真），WPS COM `ComputeStatistics(2)` 实测稳定。故现行口径只有一条：
+  **页数统计以 WPS COM `ComputeStatistics(2)` 为准绳（Word COM 本机不稳，不作页数依据）**，
+  PDF 导出仍走 Word COM（见 13.5 与第九节），两者结果不一致时以 PDF 实际页数复核。
 
 ### 13.4 COM报错排查顺序
 

@@ -25,6 +25,13 @@ v3.0 变更说明（2026-10-20，T10 规格书 v2）
 5. 禁用项：python-docx 的 `line_spacing` 属性（house 铁律，EMU 值不稳致黑块）；
    pip install / pandoc / Node 一律不调用（依赖仅 stdlib + python-docx + markdown）。
 
+v3.0.1（2026-10-21，T10 返工单 R1；零回退，仅加固）：
+   a. 畸形 HTML：转换前标签配平检查（不配平 → 告警"未闭合…可能吞并后续内容"）；
+      转换后兜底——叶子块/裸文本节点若残留 `**`/`##`/md 链接/`~~` → 告警。
+   b. 畸形表超列：markdown tables 扩展按表头列数静默截断多余单元格，转换前先逐行告警。
+   c. 列宽：单列内容权重封顶 46（format-lessons 2.2），防超长工程量描述独占版心。
+   d. 任务列表：`- [ ] 文本` 渲染为 "☐ 文本"（不再叠加项目符号 "•"），与规格 A1 一致。
+
 用法:
     python md2docx.py 方案.md --project "XX项目" --bidder "XX公司" -o 投标文件.docx
 
@@ -41,10 +48,11 @@ v3.0 变更说明（2026-10-20，T10 规格书 v2）
     0 正常；1 存在缺失图片（清单已打印）；2 依赖缺失/输入文件不存在
 """
 
-__version__ = "3.0"
+__version__ = "3.0.1"
 __all__ = [
-    "convert", "ConversionResult", "LEAK_PATTERNS", "scan_leaks",
-    "resolve_body_font", "main",
+    "convert", "ConversionResult", "LEAK_PATTERNS", "INLINE_RESIDUE_KINDS",
+    "scan_leaks", "scan_unclosed_html", "warn_unconverted_blocks",
+    "resolve_body_font", "font_file_present", "main",
 ]
 
 import argparse
@@ -95,6 +103,11 @@ EN_FONT = "Times New Roman"
 HEI_FONT = "黑体"
 PAGEBREAK_SENTINEL = "\ue000"   # markdown 前处理：\pagebreak → 私有区字符
 SUSPICIOUS_TABLE_MSG = "疑似表格未识别，请检查头尾竖线"
+COL_WEIGHT_CAP = 46.0           # 单列内容权重封顶（format-lessons 2.2：防超长列独占版心）
+TABLE_OVERCOL_MSG = "表格第 {row} 行超列，已截断 {n} 列（表头 {head} 列）"
+HTML_UNCLOSED_MSG = "检测到未闭合 HTML 标签，可能吞并后续内容"
+UNCONVERTED_INLINE_MSG = "检测到未转换的 markdown 行内标记（疑似被 HTML 块吞并）"
+
 
 # 字体降级链（值为 C:\Windows\Fonts 下的候选文件名，全部小写比对）
 FONT_FILES = {
@@ -132,6 +145,105 @@ def scan_leaks(text):
         for m in pat.finditer(text or ""):
             hits.append((name, m.group(0)))
     return hits
+
+
+# 「解析后兜底」用的行内标记子集：只挑正文绝不该出现的形态（pipe 转义、`
+# 行内代码` 等属合法内容，故不纳入），命中即说明被 HTML 块吞并、原文泄漏。
+# 注意：task_list_marker（`[ ]`）不在其中——任务列表是渲染期才转 ☐ 的，
+# 解析树里 `[ ]` 属正常中间态（见 Converter._normalize_task_item）。
+INLINE_RESIDUE_KINDS = (
+    "double_asterisk", "single_asterisk", "hash_heading",
+    "md_link", "tilde_strike",
+)
+
+
+# =============================================================================
+# A1 畸形 HTML 检测：① 转换前标签配平 ② 转换后行内标记残留兜底
+# =============================================================================
+
+# 只认「已知 HTML 元素名」：避免把 `<https://x>` 之类自动链接误判成标签
+_HTML_TAGS = {
+    "a", "abbr", "address", "article", "aside", "b", "bdi", "bdo", "blockquote",
+    "br", "caption", "center", "cite", "code", "col", "colgroup", "dd", "del",
+    "details", "dfn", "div", "dl", "dt", "em", "figcaption", "figure", "font",
+    "footer", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hr", "html",
+    "i", "img", "input", "ins", "kbd", "label", "li", "main", "mark", "nav", "ol",
+    "p", "pre", "q", "rp", "rt", "ruby", "s", "samp", "section", "small", "span",
+    "strike", "strong", "sub", "summary", "sup", "table", "tbody", "td", "tfoot",
+    "th", "thead", "tr", "tt", "u", "ul", "var", "wbr",
+}
+_HTML_VOID = {"br", "hr", "img", "input", "wbr", "col", "area", "base", "embed",
+              "link", "meta", "param", "source"}
+_HTML_TAG_RE = re.compile(
+    r"<\s*(/?)\s*([a-zA-Z][a-zA-Z0-9]*)((?:[^<>\"']|\"[^\"]*\"|'[^']*')*?)(/?)\s*>"
+)
+# 代码块/行内代码/HTML 注释里的尖括号不参与配平
+_HTML_MASK_RE = re.compile(r"```.*?```|~~~.*?~~~|<!--.*?-->|`[^`\n]*`", re.S)
+
+
+def _mask_spans(text, pattern):
+    """把匹配片段替换为等长空白（保留换行），使行号不变。"""
+    return pattern.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text or "")
+
+
+def scan_unclosed_html(text):
+    """简易标签配平检查（栈）。返回未闭合标签 [(tag, 行号), ...]。
+
+    跳过：代码围栏/行内代码/注释、void 元素、自闭合标签、非已知 HTML 元素名。
+    """
+    masked = _mask_spans(text, _HTML_MASK_RE)
+    stack = []
+    for m in _HTML_TAG_RE.finditer(masked):
+        closing, tag, selfclose = m.group(1), m.group(2).lower(), m.group(4)
+        if tag not in _HTML_TAGS or tag in _HTML_VOID or selfclose:
+            continue
+        if closing:
+            for i in range(len(stack) - 1, -1, -1):
+                if stack[i][0] == tag:
+                    del stack[i:]
+                    break
+        else:
+            stack.append((tag, masked.count("\n", 0, m.start()) + 1))
+    return stack
+
+
+# 渲染后的叶子块：这些块里的文本若残留 md 行内标记，说明解析器把它们当纯文本了
+_LEAF_BLOCK_TAGS = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "td", "th"}
+
+
+def warn_unconverted_blocks(root, warnings, limit=3):
+    """② 解析后兜底：块内/裸文本节点残留未转换 md 行内标记 → 告警（复用 LEAK_PATTERNS）。
+
+    正常解析时 `**`/`##`/`[a](b)` 早已变成元素节点；它们以字面字符留在文本里，
+    只可能是"HTML 块吞并后原文整段当纯文本"这一类畸形。
+    """
+    found = []
+
+    def check(text, tag):
+        for kind, frag in scan_leaks(text):
+            if kind in INLINE_RESIDUE_KINDS:
+                found.append((kind, frag, tag))
+                return
+
+    def walk(node):
+        for child in node.children:
+            if child.tag in ("pre", "code"):
+                continue                               # 代码内容原样保留，不算泄漏
+            if child.tag == "#text":
+                if child.data.strip():
+                    check(child.data, "#text")
+            elif child.tag in _LEAF_BLOCK_TAGS:
+                check(child.flatten(), child.tag)
+            else:
+                walk(child)
+
+    walk(root)
+    for kind, frag, tag in found[:limit]:
+        label = tag if tag == "#text" else f"<{tag}>"
+        warnings.append(f"{UNCONVERTED_INLINE_MSG}：{label} 内残留 {kind} {frag!r}")
+    if len(found) > limit:
+        warnings.append(f"{UNCONVERTED_INLINE_MSG}：另有 {len(found) - limit} 处")
+    return found
 
 
 # =============================================================================
@@ -284,12 +396,50 @@ def repair_suspicious_tables(text, warnings):
     return "\n".join(out)
 
 
+def warn_over_column_tables(text, warnings):
+    """畸形表超列告警：markdown tables 扩展按表头列数**静默截断**多余单元格，
+    截断发生在解析器内部（HTML 里已看不到多出的格），故必须在转换前逐行告警。"""
+    lines = text.split("\n")
+    i, in_fence = 0, False
+    while i < len(lines):
+        line = lines[i]
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            i += 1
+            continue
+        pipeish = (not in_fence) and ("|" in line) and not line[:1].isspace()
+        if not pipeish:
+            i += 1
+            continue
+        j = i
+        while j < len(lines) and lines[j].strip() and "|" in lines[j] and not lines[j][:1].isspace():
+            j += 1
+        run = lines[i:j]
+        if len(run) >= 2 and _parses_as_table("\n".join(run)):
+            head = len(split_row_cells(run[0]))
+            for k in range(1, len(run)):
+                cells = split_row_cells(run[k])
+                real = [c for c in cells if c]
+                if real and all(_SEP_CELL_RE.match(c) for c in real):
+                    continue                          # 分隔行不计列数
+                extra = len(cells) - head
+                if head and extra > 0:
+                    warnings.append(TABLE_OVERCOL_MSG.format(
+                        row=i + k + 1, n=extra, head=head))
+        i = j
+
+
 def prepare_markdown(text, warnings):
-    """预归一化 → 疑似表格修复，返回可交给 Python-Markdown 的文本。"""
+    """预归一化 → 畸形检测 → 疑似表格修复，返回可交给 Python-Markdown 的文本。"""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    unclosed = scan_unclosed_html(text)
+    if unclosed:
+        tag_list = "、".join(sorted({f"<{t}>" for t, _ in unclosed}))
+        warnings.append(f"{HTML_UNCLOSED_MSG}：{tag_list}（第 {unclosed[0][1]} 行起）")
     text = normalize_syntax(text)
     text = _protect_paths(text)
     text = repair_suspicious_tables(text, warnings)
+    warn_over_column_tables(text, warnings)
     return text
 
 
@@ -902,13 +1052,15 @@ class Converter(object):
                     inline_children.extend(c.children)
                 else:
                     inline_children.append(c)
-            marker = f"{idx}." if ordered else "•"
             # 任务列表：首文本节点 "[ ] xxx" / "[x] xxx" → "☐ xxx" / "☑ xxx"
-            inline_children = self._normalize_task_item(inline_children, ordered)
+            # 规格 A1：`- [ ] 文本` → "☐ 文本"（不再叠加项目符号 "•"，否则成 "• ☐"）
+            inline_children, is_task = self._normalize_task_item(inline_children, ordered)
+            marker = "" if is_task else (f"{idx}." if ordered else "•")
             p = self.body_par(indent_left=420 * level, first_line_chars=0,
                               quote=0)
             p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-            self.add_run(p, marker + " ", size=12.0, bold=False)
+            if marker:
+                self.add_run(p, marker + " ", size=12.0, bold=False)
             self.add_inline(p, inline_children, {})
             self._drop_trailing_blank_runs(p)
             self.result.list_items += 1
@@ -917,18 +1069,19 @@ class Converter(object):
             idx += 1
 
     def _normalize_task_item(self, children, ordered):
+        """返回 (children, is_task)；is_task=True 时不再加项目符号（规格 A1）。"""
         if ordered or not children:
-            return children
+            return children, False
         first = children[0]
         if first.tag != "#text":
-            return children
+            return children, False
         m = re.match(r"^\[([ xX])\]\s*", first.data)
         if not m:
-            return children
+            return children, False
         mark = "☑ " if m.group(1).lower() == "x" else "☐ "
         out = list(children)
         out[0] = first.shallow(mark + first.data[m.end():])
-        return out
+        return out, True
 
     def render_blockquote(self, node):
         self.render_blocks(node.children, quote=1)
@@ -1182,7 +1335,7 @@ class Converter(object):
             s.name for s in self.doc.styles] else None
         table.alignment = 1  # WD_TABLE_ALIGNMENT.CENTER
 
-        # —— 列宽：内容权重 → 总和=版心宽 ——
+        # —— 列宽：内容权重（单列封顶 46，防超长工程量列独占版心）→ 总和=版心宽 ——
         weights = []
         for j in range(ncols):
             mx = 0.0
@@ -1190,7 +1343,7 @@ class Converter(object):
                 cells = self._row_cells(tr)
                 if j < len(cells):
                     mx = max(mx, _text_width(cells[j].flatten()))
-            weights.append(max(mx, 3.0))
+            weights.append(max(min(mx, COL_WEIGHT_CAP), 3.0))
         widths = distribute_widths(weights, self.content_tw, int(1.6 * TWIP_PER_CM))
 
         tblPr = table._tbl.tblPr
@@ -1237,6 +1390,9 @@ class Converter(object):
                         set_cell_borders(cell, bottom={"sz": 12})
                 para = cell.paragraphs[0]
                 para.style = self.doc.styles["BidTableCell"]
+                # 行超列（单元格数 > 表头列数）在 prepare_markdown 阶段已告警：
+                # markdown tables 扩展在解析时就按表头列数截断了多余格。此处只处理
+                # 行短于表头的情形（补空格），不留任何静默路径。
                 if j < len(cells):
                     src = cells[j]
                     aligned = is_header or (src.tag == "th")
@@ -1310,6 +1466,7 @@ class Converter(object):
         prepared = prepare_markdown(raw, self.warnings)
         html = _new_markdown().convert(prepared)
         root = html_to_tree(html)
+        warn_unconverted_blocks(root, self.warnings)
         self.render(root)
 
         self.apply_core_properties()          # 必须在 save 之前写入文档属性
