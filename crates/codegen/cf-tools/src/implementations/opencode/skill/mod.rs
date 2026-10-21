@@ -17,12 +17,11 @@ use crate::types::tool::{ToolKind, ToolNamespace};
 
 const DESCRIPTION: &str = r#"Load a specialized skill that provides domain-specific instructions and workflows.
 
-When you recognize that a task matches one of the available skills listed below, use this tool to load the full skill instructions.
+When you recognize that a task matches an available skill, use this tool to load the full skill instructions.
 
 The skill will inject detailed instructions, workflows, and access to bundled resources into the conversation via a `<skill_content name="...">` block with the loaded content.
 
-The following skills provide specialized sets of instructions for particular tasks.
-Invoke this tool to load a skill when a task matches one of the available skills listed below:
+Skill names are provided in the session's available-skills reminder. If the `<available_skills>` block below lists skills, it is authoritative; otherwise use the names from the reminder (or the `find-skills` skill to discover one).
 
 <available_skills>
 ${%- if skills %}
@@ -34,7 +33,7 @@ ${%- for skill in skills %}
   </skill>
 ${%- endfor %}
 ${%- else %}
-(No skills available. Skills can be added in ~/.qidi/skills/ or .qidi/skills/)
+(No inline list here; use the skill names from the session's available-skills reminder.)
 ${%- endif %}
 </available_skills>"#;
 
@@ -422,6 +421,11 @@ mod tests {
         assert!(desc.contains("available_skills"));
         assert!(desc.contains("${%- for skill in skills %}"));
         assert!(desc.contains("${{ skill.name }}"));
+        assert!(
+            !desc.contains("No skills available"),
+            "must not claim there are no skills when the session reminder carries them"
+        );
+        assert!(desc.contains("session's available-skills reminder"));
     }
 
     #[test]
