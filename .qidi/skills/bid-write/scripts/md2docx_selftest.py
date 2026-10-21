@@ -1061,6 +1061,14 @@ def run_selftest(verbose=False, keep=False, mutation=False):
     return rc
 
 
+def _tolerate_unencodable_output():
+    """变异副本的 FAIL 行按 utf-8 读取、含 U+FFFD；写进 Windows GBK 控制台会抛
+    UnicodeEncodeError 中断整个验收环。保留本机编码，只把不可编码字符降级替换。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="md2docx v3.0 自测（验收环）")
     ap.add_argument("--verbose", action="store_true", help="打印每条 PASS")
@@ -1069,6 +1077,7 @@ def main(argv=None):
                     help="追加变异自证：在 %%TEMP%% 副本上做 A4→Letter / 强制宋体 / 去边框，"
                          "三处变异必须都被抓成 FAIL")
     args = ap.parse_args(argv)
+    _tolerate_unencodable_output()
     return run_selftest(verbose=args.verbose, keep=args.keep, mutation=args.mutation)
 
 
