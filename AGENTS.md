@@ -133,7 +133,7 @@
 | 编码手 | **默认 `agnes-2.5-flash`（限时免费，0.4s）/ `agnes-3.0-flash`（免费，512K，需强推理时开 Thinking）**；成本口径（以 deepseek-flash 为 1×）：`codely-flash` = deepseek-flash 别名 **1×**、`codely-core` = glm-5.3 别名 **4×**、`kimi-k3` **10×**。升级位 `jw/kimi-k3-1` 仅用于关键任务。**不要把 codely-core 当默认**（4 倍成本、质量同 glm-5.3）。 | 按规格书写码+自测；**并行前提：任务文件零交集**（同 crate 不同文件可并行，同 crate 高内聚改动合并给一人） |
 **?? luyou ????????2026-10-17 ?????????????**??????????**?????????????????**??? intern key ??ocr-4 ?????? 429?quota exceeded ? key??? codely ?? free ??**??? GLM ??codely-core?**?K3 ????free ?????? pro ? GLM ????? K3 ????? **pro/????'39640','58863'?????????K3 ?????**?? K3 ??? = pro/??????????? 10-20 ????????????? 429??? ?????**K3/kimi ? 429 = pro ?????????/????GLM ? 429 = free ????????? pro??DeepSeek ? = ?????deepseek-v4-pro ???**?
 
-| 审计 | **首席深审 `GLM-5.3-FLASHX`**（codely pro 账号 39640，3.4s，池模型只能直选、不能做兜底）；**巡查 `Qwen/Qwen3.8-Flash-Next`**（ModelScope 免费池 0.6s）或 `agnes-2.5-flash`（免费 0.4s）；**第二席 `jw/kimi-k3-1`**（jiuwei，6/6 硬题，10× 成本）。apigoto `GLM-5.3-222` / `claude-haiku-5-5` 自 2026-10-22 起余额 0.1 元不可用。 | 双模型交叉审计；结论分歧时以代码证据裁决 |
+| 审计 | **首席深审 `GLM-5.3-FLASHX`**（codely pro 账号 39640，3.4s，**计费 1×（与 deepseek-flash 同价）**，池模型只能直选、不能做兜底）；**巡查 `Qwen/Qwen3.8-Flash-Next`**（ModelScope 免费池 0.6s）或 `agnes-2.5-flash`（免费 0.4s）；**第二席 `jw/kimi-k3-1`**（jiuwei，6/6 硬题，10× 成本）。apigoto `GLM-5.3-222` / `claude-haiku-5-5` 自 2026-10-22 起余额 0.1 元不可用。 | 双模型交叉审计；结论分歧时以代码证据裁决 |
 | 只读探查 | `subagent_type="explore"` / `plan`（只读侦察/方案规划；**2026-10-19 起可指定 `Qwen/Qwen3.8-Flash-Next`（modelscope 魔粒池，slug `qwen3.8-flash-next-ms-222`）——零成本白嫖池，6/6 推理基准支撑规划质量；重规划仍建议 GLM/haiku**） | 只读侦察/规划 |
 | 隔离 | `isolation="worktree"` | 需要隔离时用（有冷构建代价） |
 
@@ -147,6 +147,7 @@
 | `codely-flash` | deepseek-flash | **1×** | 与主模型同源，可放心用 |
 | `codely-basic` / `codely-air` | DeepSeek-V4.1-Flash 1017 | 1× 级 | 别名池，免费 |
 | `codely-core` | **glm-5.3** | **4×** | 质量更好但贵 4 倍，不要当默认 |
+| `GLM-5.3-FLASHX` / `glm-5.3-flash` | GLM-5.3 轻量档 | **1×** | **与 deepseek-flash 同价**，审计首席可放心用（2026-10-22 用户口径） |
 | `kimi-k3` | Kimi K3 | **10×** | 仅关键任务 |
 | `agnes-2.5-flash` / `agnes-3.0-flash` | Agnes | **免费（限时）** | 512K 上下文、10 RPM |
 
@@ -163,6 +164,15 @@
 | 52duck / openrouter | ✓ 0.6 / 3.4s | 免费档 |
 | Gemini `gs/*`（11 个） | ✓ 1–40s | 免费档，按日重置 |
 | apigoto 付费档 | ✗ 429 欠费（余额 0.1 元） | 待充值 ≥1 元或推广收入 |
+
+**Agnes key 池实测（2026-10-22）**：
+
+- 配置里 9 把 key：**5 把文本有效**（主号 / 新2 / 新3 / 新4 / 新5），4 把（图1–图4）是图像模型令牌，
+  对文本模型返回 `401 无效的令牌`，**已按 F14 语义停用**（config 备份 `config.json.bak-agneskeys-*`）。
+- 限流实测：同一把 key 5 秒内连打 12 次 → **12/12 成功**，说明 10 RPM 并非严格硬限（或按账号宽松计）。
+- 规划口径：有效文本 key 5 把 × 10 RPM ≈ **50 RPM 池**；派子代理时**同模型并行不超过 5 个**
+  （每个并行任务会钉住一把 key 的 RPM），批量任务串行。
+- 图像模型（`agnes-image-*` / `agnes-video-*`）需要单独建渠道并用图1–图4 的 key，文本渠道不复用。
 
 **Agnes 3.0 Flash 的 Thinking 模式（实测经 relay 透传可用）**：
 
