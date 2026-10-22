@@ -101,6 +101,10 @@ pub const DEFAULT_ESSENTIAL_SKILLS: &[&str] = &[
     // ── Audit / review ──────────────────────────────────────────────
     "audit-rubrics",
     "skill-auditor",
+    // ── Model / provider integration ────────────────────────────────
+    // 2026-10-22：官方 Agnes 技能（文本/图像/视频/agent 接入 + 错误码表）。
+    // 子代理默认只拿 Essential 投影，不加入此表则 skill() 报 not found。
+    "agnes-ai-models",
     // ── Docs / git workflow ─────────────────────────────────────────
     "gitcode-publish",
     "git-commit-author-fix",
