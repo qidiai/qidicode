@@ -238,7 +238,7 @@
 不限制 `skill()` 按名读盘（工具层仍可加载任意已安装技能）。
 
 **Agnes 接入速查（官方 skill 口径）**：图像 `agnes-image-2.5-flash`（2.1 亦可），
-`size` 用 **`1K`/`2K`/`3K`/`4K` 档位 + `extra_body.ratio`**，`response_format` 放 `extra_body`；
+`size` 用 **`1K`/`2K`/`3K`/`4K` 档位 + `extra_body.ratio`**（2026-10-22 实测：1K+1:1=1024²，2K+1:1=2048²，2K+16:9=2624×1472，各 7–11s；旧像素写法会被吸附——`1024x768` 实际出 1152×864），`response_format` 放 `extra_body`；
 视频 `mode` ∈ {text,keyframe,reference}，**Flash 仅 720P**（基座 720P–2K，支持 reference 视频）；
 官方 401 = **provider key 失效**（与我们媒体路由的 `provider_auth_failed` 归一化一致）。
 
