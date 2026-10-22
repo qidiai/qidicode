@@ -52,3 +52,7 @@ qidiwork-docs/
 MEMORY_SCOPE.md
 __pycache__/
 *.py[cod]
+
+# 2026-10-22: 工作区内技能目录（避免第三方技能内容进公开仓库；
+# 放在工作区内是为了让子代理能通过工作区边界读到 SKILL.md 正文）
+.qidi-skills/
