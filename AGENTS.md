@@ -219,21 +219,28 @@
 
 纪律：**简单任务不开 Thinking**（更慢且更易截断）；Thinking 只用于规划/调试，且 `max_tokens` 要给到 1500+。
 
-**子代理技能可见性（2026-10-22 实测，agnes-ai-models 案例）**：
+**子代理技能可见性（2026-10-22 最终方案，已实测闭环）**：
 
-- 子代理拿的是 **Essential 投影**（29 个白名单技能），新装技能**不会自动可见**；
-  实测：`skill(name="agnes-ai-models")` 返回 `not found`，且 `read_file` 读
-  `C:\Users\ASUS\.qidi\skills\...` 被工作区边界拒绝（`resolves outside the workspace root`）。
-- 两条使用路径：
-  1. **根治（已提交，下次构建生效）**：`crates/codegen/cf-tools/src/types/skill_discovery_tracker/essential.rs`
-     的 Essential 白名单已加入 `"agnes-ai-models"`；
-  2. **当前可用（免构建）**：官方技能已复制到仓库内 `docs/agnes-models/`
-     （SKILL.md + references/{model_catalog,error_codes,troubleshooting,agent_compatibility}.md + scripts/smoke_chat.py），
-     派活时让子代理直接 `read_file docs/agnes-models/SKILL.md`。
+三层限制与对应解法：
+1. **列表面**：子代理只拿 Essential 投影（`DEFAULT_ESSENTIAL_SKILLS`，编译在二进制里）。
+   → 已把 `agnes-ai-models` 加入 `essential.rs` 默认名单（下次构建生效）；
+   → 免构建覆盖：`config.toml` 的 `[skills].essential_allow`（**替换语义，必须列全**，现 30 项），
+     实测子代理清单从 29 → 30 且含 agnes。
+2. **正文可读性**：`skill()` 读 `C:\Users\ASUS\.qidi\skills\...` 会被工作区边界拒绝
+   （`file_system.rs:97`，fail-closed，无白名单接口）。
+   → 技能改放**工作区内** `G:\qidicode\.qidi-skills\agnes-ai-models\`，并配置
+     `[paths] extra_skill_dirs = ["G:\\qidicode\\.qidi-skills"]`；
+     实测子代理 `skill("agnes-ai-models")` **加载成功并读到正文**。
+3. **公开仓库卫生**：第三方技能内容不进货仓。
+   → `.qidi-skills/` 已加入 `.gitignore`；此前误提交的 `docs/agnes-models/` 已撤回（`e7509bce`）。
 
-**Agnes 接入速查（摘自官方 skill）**：图像用 `agnes-image-2.1/2.5-flash`，
-`response_format` 必须放 `extra_body`；视频 `POST /v1/videos` 的 `mode` ∈ {text,keyframe,reference}，
-`size` 常用 `720P`、`seconds` 4–12；官方错误码 401 = **provider key 失效/无效**（不是客户端 key 问题）。
+注意：`[skills].mode = "essential"` 只收敛**主会话的清单投影**（400+ → 30），
+不限制 `skill()` 按名读盘（工具层仍可加载任意已安装技能）。
+
+**Agnes 接入速查（官方 skill 口径）**：图像 `agnes-image-2.5-flash`（2.1 亦可），
+`size` 用 **`1K`/`2K`/`3K`/`4K` 档位 + `extra_body.ratio`**，`response_format` 放 `extra_body`；
+视频 `mode` ∈ {text,keyframe,reference}，**Flash 仅 720P**（基座 720P–2K，支持 reference 视频）；
+官方 401 = **provider key 失效**（与我们媒体路由的 `provider_auth_failed` 归一化一致）。
 
 **角色映射（2026-10-22 起）**：
 
