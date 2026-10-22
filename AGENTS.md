@@ -209,6 +209,16 @@
   `/v1/models` 列 29 个模型，但**该 key 只有 `u2-flash` 有权限**（glm-5.3 / kimi-k3 / deepseek-v4.1-flash
   等一律 404 model_not_found）；已在 relay 里把模型清单收敛为 `u2-flash` 一个。
 
+**Agnes 编程基准（6 题 HumanEval 风格，真实执行判分，2026-10-22）**：
+
+| 配置 | 得分 | 单题耗时 | 结论 |
+|---|---|---|---|
+| `agnes-2.5-flash`（不思考） | **5/6** | **0.9–1.7s** | 简单/常规编码首选，最快 |
+| `agnes-3.0-flash`（不思考） | **6/6** | 4.4–57s | 复杂题用它，质量满分但慢 |
+| `agnes-3.0-flash` + Thinking | 3/6 | 10–120s | **3 题因推理过长被截断无代码**；简单任务不要开 |
+
+纪律：**简单任务不开 Thinking**（更慢且更易截断）；Thinking 只用于规划/调试，且 `max_tokens` 要给到 1500+。
+
 **角色映射（2026-10-22 起）**：
 
 - **编码手**：`a`agnes-2.5-flash``（默认，免费）→ `a`agnes-3.0-flash``（复杂任务，可开 Thinking）→ `codely-flash`（1×）
