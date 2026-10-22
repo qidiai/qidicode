@@ -1,0 +1,219 @@
+{
+  "sheet": [
+    400.0,
+    320.0
+  ],
+  "frame_rect": [
+    0,
+    0,
+    400.0,
+    320.0
+  ],
+  "units": "mm",
+  "fonts_available": {
+    "simhei.ttf": true,
+    "simfang.ttf": true,
+    "simsun.ttc": true,
+    "gben.shx": false,
+    "chineset.shx": false
+  },
+  "zones": {
+    "Z_LINES": {
+      "rect": [
+        15,
+        220,
+        130,
+        310
+      ],
+      "expect": []
+    },
+    "Z_LWPOLY": {
+      "rect": [
+        135,
+        220,
+        255,
+        310
+      ],
+      "expect": []
+    },
+    "Z_ARC": {
+      "rect": [
+        260,
+        262,
+        322,
+        312
+      ],
+      "expect": []
+    },
+    "Z_ELLIPSE": {
+      "rect": [
+        326,
+        262,
+        388,
+        302
+      ],
+      "expect": []
+    },
+    "Z_CIRCLE": {
+      "rect": [
+        262,
+        220,
+        300,
+        258
+      ],
+      "expect": []
+    },
+    "Z_TEXT_CNHEI": {
+      "rect": [
+        18,
+        178,
+        195,
+        210
+      ],
+      "expect": [
+        "一层平面图"
+      ]
+    },
+    "Z_TEXT_CNFANG": {
+      "rect": [
+        18,
+        152,
+        195,
+        176
+      ],
+      "expect": [
+        "仿宋标题栏"
+      ]
+    },
+    "Z_MTEXT_CN": {
+      "rect": [
+        200,
+        150,
+        392,
+        214
+      ],
+      "expect": [
+        "标题栏",
+        "±0.000",
+        "比例"
+      ]
+    },
+    "Z_TEXT_SHX": {
+      "rect": [
+        18,
+        122,
+        195,
+        148
+      ],
+      "expect": [
+        "GSHX-01",
+        "轴线"
+      ]
+    },
+    "Z_MTEXT_SHX": {
+      "rect": [
+        200,
+        104,
+        392,
+        150
+      ],
+      "expect": [
+        "SHX",
+        "覆盖测试"
+      ]
+    },
+    "Z_SYMBOL": {
+      "rect": [
+        305,
+        218,
+        388,
+        258
+      ],
+      "expect": []
+    },
+    "Z_BLOCK_FRAME": {
+      "rect": [
+        12,
+        12,
+        388,
+        92
+      ],
+      "expect": []
+    },
+    "Z_ATTRIB_NAME": {
+      "rect": [
+        20,
+        66,
+        190,
+        90
+      ],
+      "expect": [
+        "某某建筑工程有限公司"
+      ]
+    },
+    "Z_ATTRIB_TITLE": {
+      "rect": [
+        196,
+        66,
+        300,
+        90
+      ],
+      "expect": [
+        "给排水管网"
+      ]
+    },
+    "Z_ATTRIB_NO": {
+      "rect": [
+        300,
+        66,
+        386,
+        90
+      ],
+      "expect": [
+        "建施-01"
+      ]
+    },
+    "Z_ATTRIB_SCALE": {
+      "rect": [
+        20,
+        40,
+        130,
+        62
+      ],
+      "expect": [
+        "1:500"
+      ]
+    },
+    "Z_ATTRIB_DATE": {
+      "rect": [
+        136,
+        40,
+        250,
+        62
+      ],
+      "expect": [
+        "2026-10-22"
+      ]
+    },
+    "Z_ATTRIB_SHX": {
+      "rect": [
+        256,
+        40,
+        386,
+        62
+      ],
+      "expect": [
+        "审 核"
+      ]
+    }
+  },
+  "variants": [
+    "empty",
+    "frame",
+    "geom",
+    "text_ttf",
+    "text_shx",
+    "block",
+    "full"
+  ]
+}

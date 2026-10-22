@@ -1,0 +1,442 @@
+{
+  "render": {
+    "A/empty": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\A_empty.png",
+      "wall_s": 1.766,
+      "peak_rss_mb": 95.5,
+      "px": [
+        2400,
+        1600
+      ],
+      "canvas": [
+        2400,
+        1600
+      ]
+    },
+    "A/frame": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\A_frame.png",
+      "wall_s": 0.156,
+      "peak_rss_mb": 111.3,
+      "px": [
+        2400,
+        1600
+      ],
+      "canvas": [
+        2400,
+        1600
+      ]
+    },
+    "A/geom": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\A_geom.png",
+      "wall_s": 0.172,
+      "peak_rss_mb": 127.2,
+      "px": [
+        2400,
+        1600
+      ],
+      "canvas": [
+        2400,
+        1600
+      ]
+    },
+    "A/text_ttf": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\A_text_ttf.png",
+      "wall_s": 0.672,
+      "peak_rss_mb": 163.4,
+      "px": [
+        2400,
+        1600
+      ],
+      "canvas": [
+        2400,
+        1600
+      ]
+    },
+    "A/text_shx": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\A_text_shx.png",
+      "wall_s": 0.25,
+      "peak_rss_mb": 167.7,
+      "px": [
+        2400,
+        1600
+      ],
+      "canvas": [
+        2400,
+        1600
+      ]
+    },
+    "A/block": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\A_block.png",
+      "wall_s": 0.281,
+      "peak_rss_mb": 182.8,
+      "px": [
+        2400,
+        1600
+      ],
+      "canvas": [
+        2400,
+        1600
+      ]
+    },
+    "A/full": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\A_full.png",
+      "wall_s": 0.453,
+      "peak_rss_mb": 198.9,
+      "px": [
+        2400,
+        1600
+      ],
+      "canvas": [
+        2400,
+        1600
+      ]
+    },
+    "B1/empty": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_empty.png",
+      "wall_s": 0.079,
+      "peak_rss_mb": 33.5,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_empty.png (86117 bytes)"
+    },
+    "B1/frame": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_frame.png",
+      "wall_s": 0.062,
+      "peak_rss_mb": 31.9,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_frame.png (153096 bytes)"
+    },
+    "B1/geom": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_geom.png",
+      "wall_s": 0.078,
+      "peak_rss_mb": 11.8,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_geom.png (211972 bytes)"
+    },
+    "B1/text_ttf": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_text_ttf.png",
+      "wall_s": 0.125,
+      "peak_rss_mb": 41.9,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_text_ttf.png (258119 bytes)"
+    },
+    "B1/text_shx": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_text_shx.png",
+      "wall_s": 0.094,
+      "peak_rss_mb": 21.7,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_text_shx.png (209554 bytes)"
+    },
+    "B1/block": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_block.png",
+      "wall_s": 0.141,
+      "peak_rss_mb": 65.5,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_block.png (269155 bytes)"
+    },
+    "B1/full": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_full.png",
+      "wall_s": 0.187,
+      "peak_rss_mb": 56.9,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B1_full.png (489524 bytes)"
+    },
+    "B2/empty": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_empty.png",
+      "wall_s": 0.047,
+      "peak_rss_mb": 1.6,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_empty.png (86117 bytes)"
+    },
+    "B2/frame": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_frame.png",
+      "wall_s": 0.078,
+      "peak_rss_mb": 1.6,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_frame.png (153096 bytes)"
+    },
+    "B2/geom": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_geom.png",
+      "wall_s": 0.078,
+      "peak_rss_mb": 18.9,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_geom.png (211972 bytes)"
+    },
+    "B2/text_ttf": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_text_ttf.png",
+      "wall_s": 0.094,
+      "peak_rss_mb": 55.5,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_text_ttf.png (258119 bytes)"
+    },
+    "B2/text_shx": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_text_shx.png",
+      "wall_s": 0.109,
+      "peak_rss_mb": 44.7,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_text_shx.png (221694 bytes)"
+    },
+    "B2/block": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_block.png",
+      "wall_s": 0.125,
+      "peak_rss_mb": 40.9,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_block.png (271024 bytes)"
+    },
+    "B2/full": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_full.png",
+      "wall_s": 0.125,
+      "peak_rss_mb": 52.0,
+      "px": [
+        2400,
+        1600
+      ],
+      "stderr": "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\B2_full.png (503533 bytes)"
+    },
+    "C/empty": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\C_empty.png",
+      "wall_s": 0.828,
+      "peak_rss_mb": 60.1,
+      "px": [
+        1299,
+        1299
+      ]
+    },
+    "C/frame": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\C_frame.png",
+      "wall_s": 1.11,
+      "peak_rss_mb": 125.4,
+      "px": [
+        4842,
+        3897
+      ]
+    },
+    "C/geom": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\C_geom.png",
+      "wall_s": 1.109,
+      "peak_rss_mb": 125.6,
+      "px": [
+        4842,
+        3897
+      ]
+    },
+    "C/text_ttf": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\C_text_ttf.png",
+      "wall_s": 1.047,
+      "peak_rss_mb": 126.5,
+      "px": [
+        4842,
+        3897
+      ]
+    },
+    "C/text_shx": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\C_text_shx.png",
+      "wall_s": 1.031,
+      "peak_rss_mb": 126.6,
+      "px": [
+        4842,
+        3897
+      ]
+    },
+    "C/block": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\C_block.png",
+      "wall_s": 1.078,
+      "peak_rss_mb": 125.8,
+      "px": [
+        4842,
+        3897
+      ]
+    },
+    "C/full": {
+      "status": "OK",
+      "png": "C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\C_full.png",
+      "wall_s": 1.079,
+      "peak_rss_mb": 126.6,
+      "px": [
+        4842,
+        3897
+      ]
+    },
+    "C/full 生产默认调用(无 --layout)": {
+      "status": "FAIL",
+      "error": "rc=1 out=DWG 布局列表: ['Model', 'Layout1']\n err_tail= File \"G:\\程序开发\\标书软件\\skill_assets\\bid-drawing\\scripts\\dwg_to_png.py\", line 134, in main\n    ps = [l for l in doc.layouts if l.is_paper_space]\n                                    ^^^^^^^^^^^^^^^^\nAttributeError: 'Modelspace' object has no attribute 'is_paper_space'. Did you mean: 'is_any_paperspace'?\n"
+    },
+    "C/empty 生产默认调用(无 --layout)": {
+      "status": "FAIL",
+      "error": "rc=1 out=DWG 布局列表: ['Model', 'Layout1']\n err_tail= File \"G:\\程序开发\\标书软件\\skill_assets\\bid-drawing\\scripts\\dwg_to_png.py\", line 134, in main\n    ps = [l for l in doc.layouts if l.is_paper_space]\n                                    ^^^^^^^^^^^^^^^^\nAttributeError: 'Modelspace' object has no attribute 'is_paper_space'. Did you mean: 'is_any_paperspace'?\n"
+    },
+    "C/full 生产调用(--layout Model)": {
+      "status": "FAIL",
+      "error": "rc=1 out=DWG 布局列表: ['Model', 'Layout1']\n err_tail=skill_assets\\bid-drawing\\scripts\\dwg_to_png.py\", line 157, in <module>\n    main()\n  File \"G:\\程序开发\\标书软件\\skill_assets\\bid-drawing\\scripts\\dwg_to_png.py\", line 131, in main\n    targets = [doc.layouts[args.layout]]\n               ~~~~~~~~~~~^^^^^^^^^^^^^\nTypeError: 'Layouts' object is not subscriptable\n"
+    },
+    "C/empty 生产调用(--layout Model)": {
+      "status": "FAIL",
+      "error": "rc=1 out=DWG 布局列表: ['Model', 'Layout1']\n err_tail=skill_assets\\bid-drawing\\scripts\\dwg_to_png.py\", line 157, in <module>\n    main()\n  File \"G:\\程序开发\\标书软件\\skill_assets\\bid-drawing\\scripts\\dwg_to_png.py\", line 131, in main\n    targets = [doc.layouts[args.layout]]\n               ~~~~~~~~~~~^^^^^^^^^^^^^\nTypeError: 'Layouts' object is not subscriptable\n"
+    }
+  },
+  "bench": {
+    "A": {
+      "reps": 5,
+      "ok": 5,
+      "wall_median_s": 0.437,
+      "wall_min_s": 0.406,
+      "wall_max_s": 0.469,
+      "walls_all": [
+        0.406,
+        0.437,
+        0.469,
+        0.438,
+        0.437
+      ],
+      "peak_rss_median_mb": 231.7,
+      "peak_rss_max_mb": 232.4,
+      "errors": [],
+      "mode": "in-process 复用已加载模块（热路径）"
+    },
+    "B1": {
+      "reps": 5,
+      "ok": 5,
+      "wall_median_s": 0.141,
+      "wall_min_s": 0.125,
+      "wall_max_s": 0.172,
+      "walls_all": [
+        0.125,
+        0.141,
+        0.14,
+        0.172,
+        0.141
+      ],
+      "peak_rss_median_mb": 61.6,
+      "peak_rss_max_mb": 67.3,
+      "errors": [
+        "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\bench_B1_0.png (489524 bytes)",
+        "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\bench_B1_1.png (489524 bytes)",
+        "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\bench_B1_2.png (489524 bytes)"
+      ],
+      "mode": "子进程冷启动"
+    },
+    "B2": {
+      "reps": 5,
+      "ok": 5,
+      "wall_median_s": 0.141,
+      "wall_min_s": 0.125,
+      "wall_max_s": 0.156,
+      "walls_all": [
+        0.141,
+        0.125,
+        0.125,
+        0.141,
+        0.156
+      ],
+      "peak_rss_median_mb": 43.0,
+      "peak_rss_max_mb": 57.4,
+      "errors": [
+        "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\bench_B2_0.png (503533 bytes)",
+        "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\bench_B2_1.png (503533 bytes)",
+        "wrote C:\\Users\\28970\\AppData\\Local\\Temp\\wb_drawing_probe\\out\\bench_B2_2.png (503533 bytes)"
+      ],
+      "mode": "子进程冷启动"
+    },
+    "C": {
+      "reps": 5,
+      "ok": 5,
+      "wall_median_s": 1.047,
+      "wall_min_s": 1.015,
+      "wall_max_s": 1.141,
+      "walls_all": [
+        1.047,
+        1.141,
+        1.015,
+        1.031,
+        1.125
+      ],
+      "peak_rss_median_mb": 126.5,
+      "peak_rss_max_mb": 126.7,
+      "errors": [],
+      "mode": "子进程冷启动"
+    },
+    "A_cold": {
+      "reps": 5,
+      "ok": 5,
+      "wall_median_s": 2.312,
+      "wall_min_s": 2.219,
+      "wall_max_s": 2.438,
+      "walls_all": [
+        2.266,
+        2.312,
+        2.328,
+        2.219,
+        2.438
+      ],
+      "peak_rss_median_mb": 166.4,
+      "peak_rss_max_mb": 166.7,
+      "errors": [],
+      "mode": "子进程冷启动（含 import）"
+    }
+  }
+}

@@ -1,0 +1,1207 @@
+{
+  "meta": {
+    "ink_tau": 40,
+    "manifest_fonts": {
+      "simhei.ttf": true,
+      "simfang.ttf": true,
+      "simsun.ttc": true,
+      "gben.shx": false,
+      "chineset.shx": false
+    },
+    "ocr_error": null,
+    "zone_variant": {
+      "Z_LINES": "geom",
+      "Z_LWPOLY": "geom",
+      "Z_ARC": "geom",
+      "Z_ELLIPSE": "geom",
+      "Z_CIRCLE": "geom",
+      "Z_TEXT_CNHEI": "text_ttf",
+      "Z_TEXT_CNFANG": "text_ttf",
+      "Z_MTEXT_CN": "text_ttf",
+      "Z_TEXT_SHX": "text_shx",
+      "Z_MTEXT_SHX": "text_shx",
+      "Z_BLOCK_FRAME": "block",
+      "Z_SYMBOL": "block",
+      "Z_ATTRIB_NAME": "block",
+      "Z_ATTRIB_TITLE": "block",
+      "Z_ATTRIB_NO": "block",
+      "Z_ATTRIB_SCALE": "block",
+      "Z_ATTRIB_DATE": "block",
+      "Z_ATTRIB_SHX": "block"
+    }
+  },
+  "methods": {
+    "A": {
+      "label": "ezdxf matplotlib 后端",
+      "paper_bg_rgb": [
+        255,
+        255,
+        255
+      ],
+      "blank_ink_px": 0,
+      "calib": {
+        "px_per_unit_x": 4.545,
+        "px_per_unit_y": 4.5438,
+        "frame_px_bbox": [
+          291,
+          73,
+          2109,
+          1527
+        ],
+        "canvas": [
+          2400,
+          1600
+        ]
+      },
+      "frame_edges_closed": {
+        "left": 1.0,
+        "right": 1.0,
+        "top": 1.0,
+        "bottom": 1.0,
+        "side_len_px": [
+          1818,
+          1454
+        ]
+      },
+      "variant_bbox_check": {
+        "block": {
+          "ink_bbox": [
+            291,
+            73,
+            2109,
+            1527
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 45150
+        },
+        "geom": {
+          "ink_bbox": [
+            291,
+            73,
+            2109,
+            1527
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 22426
+        },
+        "full": {
+          "ink_bbox": [
+            291,
+            73,
+            2109,
+            1527
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 125665
+        },
+        "text_shx": {
+          "ink_bbox": [
+            291,
+            73,
+            2109,
+            1527
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 33382
+        },
+        "text_ttf": {
+          "ink_bbox": [
+            291,
+            73,
+            2109,
+            1527
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 63323
+        }
+      },
+      "full_ink_px": 125665,
+      "full_ink_ratio": 0.03273,
+      "zones": {
+        "Z_LINES": {
+          "variant": "geom",
+          "ink_px": 2770,
+          "ink_ratio": 0.01262,
+          "crop": "A_Z_LINES_geom.png"
+        },
+        "Z_LWPOLY": {
+          "variant": "geom",
+          "ink_px": 3557,
+          "ink_ratio": 0.01556,
+          "crop": "A_Z_LWPOLY_geom.png"
+        },
+        "Z_ARC": {
+          "variant": "geom",
+          "ink_px": 1475,
+          "ink_ratio": 0.02196,
+          "crop": "A_Z_ARC_geom.png"
+        },
+        "Z_ELLIPSE": {
+          "variant": "geom",
+          "ink_px": 1103,
+          "ink_ratio": 0.02044,
+          "crop": "A_Z_ELLIPSE_geom.png"
+        },
+        "Z_CIRCLE": {
+          "variant": "geom",
+          "ink_px": 649,
+          "ink_ratio": 0.02048,
+          "crop": "A_Z_CIRCLE_geom.png"
+        },
+        "Z_TEXT_CNHEI": {
+          "variant": "text_ttf",
+          "ink_px": 20075,
+          "ink_ratio": 0.16413,
+          "crop": "A_Z_TEXT_CNHEI_text_ttf.png",
+          "ocr_raw": "层 平 面 图",
+          "ocr_recall": {
+            "一层平面图": 0.8
+          },
+          "ocr_recall_mean": 0.8,
+          "placeholder_Aa": false
+        },
+        "Z_TEXT_CNFANG": {
+          "variant": "text_ttf",
+          "ink_px": 9339,
+          "ink_ratio": 0.10026,
+          "crop": "A_Z_TEXT_CNFANG_text_ttf.png",
+          "ocr_raw": "仿 宋 标 题栏",
+          "ocr_recall": {
+            "仿宋标题栏": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_MTEXT_CN": {
+          "variant": "text_ttf",
+          "ink_px": 20905,
+          "ink_ratio": 0.08035,
+          "crop": "A_Z_MTEXT_CN_text_ttf.png",
+          "ocr_raw": "标题栏 ±0.000 比例1:100 层高3.6m",
+          "ocr_recall": {
+            "标题栏": 1.0,
+            "±0.000": 1.0,
+            "比例": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_TEXT_SHX": {
+          "variant": "text_shx",
+          "ink_px": 11222,
+          "ink_ratio": 0.11173,
+          "crop": "A_Z_TEXT_SHX_text_shx.png",
+          "ocr_raw": "GSHX- 01 G ■",
+          "ocr_recall": {
+            "GSHX-01": 1.0,
+            "轴线": 0.0
+          },
+          "ocr_recall_mean": 0.5,
+          "placeholder_Aa": false
+        },
+        "Z_MTEXT_SHX": {
+          "variant": "text_shx",
+          "ink_px": 9288,
+          "ink_ratio": 0.04915,
+          "crop": "A_Z_MTEXT_SHX_text_shx.png",
+          "ocr_raw": "SHX □□□□ 3.500",
+          "ocr_recall": {
+            "SHX": 1.0,
+            "覆盖测试": 0.0
+          },
+          "ocr_recall_mean": 0.5,
+          "placeholder_Aa": false
+        },
+        "Z_SYMBOL": {
+          "variant": "block",
+          "ink_px": 767,
+          "ink_ratio": 0.01071,
+          "crop": "A_Z_SYMBOL_block.png"
+        },
+        "Z_BLOCK_FRAME": {
+          "variant": "block",
+          "ink_px": 31511,
+          "ink_ratio": 0.04982,
+          "crop": "A_Z_BLOCK_FRAME_block.png"
+        },
+        "Z_ATTRIB_NAME": {
+          "variant": "block",
+          "ink_px": 7574,
+          "ink_ratio": 0.08455,
+          "crop": "A_Z_ATTRIB_NAME_block.png",
+          "ocr_raw": "某某建筑工程有限公司 司",
+          "ocr_recall": {
+            "某某建筑工程有限公司": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_TITLE": {
+          "variant": "block",
+          "ink_px": 7799,
+          "ink_ratio": 0.14188,
+          "crop": "A_Z_ATTRIB_TITLE_block.png",
+          "ocr_raw": "给排水管网",
+          "ocr_recall": {
+            "给排水管网": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_NO": {
+          "variant": "block",
+          "ink_px": 1571,
+          "ink_ratio": 0.03441,
+          "crop": "A_Z_ATTRIB_NO_block.png",
+          "ocr_raw": "□□ -01",
+          "ocr_recall": {
+            "建施-01": 0.6
+          },
+          "ocr_recall_mean": 0.6,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_SCALE": {
+          "variant": "block",
+          "ink_px": 2294,
+          "ink_ratio": 0.04277,
+          "crop": "A_Z_ATTRIB_SCALE_block.png",
+          "ocr_raw": "500 1 .",
+          "ocr_recall": {
+            "1:500": 0.8
+          },
+          "ocr_recall_mean": 0.8,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_DATE": {
+          "variant": "block",
+          "ink_px": 4427,
+          "ink_ratio": 0.0797,
+          "crop": "A_Z_ATTRIB_DATE_block.png",
+          "ocr_raw": "2026-10-22",
+          "ocr_recall": {
+            "2026-10-22": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_SHX": {
+          "variant": "block",
+          "ink_px": 1032,
+          "ink_ratio": 0.01634,
+          "crop": "A_Z_ATTRIB_SHX_block.png",
+          "ocr_raw": "口",
+          "ocr_recall": {
+            "审 核": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        }
+      },
+      "ocr_full_text": "标题栏±0.000 一层平面图 比例1:100层高3.6m 仿宋标题栏 SHX  3.500 GSHX-01 某某建筑工程有限公司 给排水管网 □-01 1:500 2026-10-22"
+    },
+    "B1": {
+      "label": "cadcraft-cli L2（默认字体）",
+      "paper_bg_rgb": [
+        33,
+        40,
+        48
+      ],
+      "blank_ink_px": 0,
+      "calib": {
+        "px_per_unit_x": 4.7525,
+        "px_per_unit_y": 4.7531,
+        "frame_px_bbox": [
+          249,
+          39,
+          2150,
+          1560
+        ],
+        "canvas": [
+          2400,
+          1600
+        ]
+      },
+      "frame_edges_closed": {
+        "left": 1.0,
+        "right": 1.0,
+        "top": 1.0,
+        "bottom": 1.0,
+        "side_len_px": [
+          1901,
+          1521
+        ]
+      },
+      "variant_bbox_check": {
+        "block": {
+          "ink_bbox": [
+            249,
+            39,
+            2150,
+            1560
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 67565
+        },
+        "geom": {
+          "ink_bbox": [
+            249,
+            39,
+            2150,
+            1560
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 31583
+        },
+        "full": {
+          "ink_bbox": [
+            249,
+            39,
+            2150,
+            1560
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 154578
+        },
+        "text_shx": {
+          "ink_bbox": [
+            249,
+            39,
+            2150,
+            1560
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 41900
+        },
+        "text_ttf": {
+          "ink_bbox": [
+            249,
+            39,
+            2150,
+            1560
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 74397
+        }
+      },
+      "full_ink_px": 154578,
+      "full_ink_ratio": 0.04025,
+      "zones": {
+        "Z_LINES": {
+          "variant": "geom",
+          "ink_px": 3363,
+          "ink_ratio": 0.01404,
+          "crop": "B1_Z_LINES_geom.png"
+        },
+        "Z_LWPOLY": {
+          "variant": "geom",
+          "ink_px": 4906,
+          "ink_ratio": 0.01967,
+          "crop": "B1_Z_LWPOLY_geom.png"
+        },
+        "Z_ARC": {
+          "variant": "geom",
+          "ink_px": 1349,
+          "ink_ratio": 0.01843,
+          "crop": "B1_Z_ARC_geom.png"
+        },
+        "Z_ELLIPSE": {
+          "variant": "geom",
+          "ink_px": 1062,
+          "ink_ratio": 0.018,
+          "crop": "B1_Z_ELLIPSE_geom.png"
+        },
+        "Z_CIRCLE": {
+          "variant": "geom",
+          "ink_px": 614,
+          "ink_ratio": 0.01765,
+          "crop": "B1_Z_CIRCLE_geom.png"
+        },
+        "Z_TEXT_CNHEI": {
+          "variant": "text_ttf",
+          "ink_px": 21160,
+          "ink_ratio": 0.15812,
+          "crop": "B1_Z_TEXT_CNHEI_text_ttf.png",
+          "ocr_raw": "平面 层 图",
+          "ocr_recall": {
+            "一层平面图": 0.8
+          },
+          "ocr_recall_mean": 0.8,
+          "placeholder_Aa": false
+        },
+        "Z_TEXT_CNFANG": {
+          "variant": "text_ttf",
+          "ink_px": 10544,
+          "ink_ratio": 0.10288,
+          "crop": "B1_Z_TEXT_CNFANG_text_ttf.png",
+          "ocr_raw": "仿 宋 标 题栏 二",
+          "ocr_recall": {
+            "仿宋标题栏": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_MTEXT_CN": {
+          "variant": "text_ttf",
+          "ink_px": 22387,
+          "ink_ratio": 0.07867,
+          "crop": "B1_Z_MTEXT_CN_text_ttf.png",
+          "ocr_raw": "标题栏 ±0.000 比例1:100层高3.6m",
+          "ocr_recall": {
+            "标题栏": 1.0,
+            "±0.000": 1.0,
+            "比例": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_TEXT_SHX": {
+          "variant": "text_shx",
+          "ink_px": 9423,
+          "ink_ratio": 0.08624,
+          "crop": "B1_Z_TEXT_SHX_text_shx.png",
+          "ocr_raw": "轴线",
+          "ocr_recall": {
+            "GSHX-01": 0.0,
+            "轴线": 1.0
+          },
+          "ocr_recall_mean": 0.5,
+          "placeholder_Aa": false
+        },
+        "Z_MTEXT_SHX": {
+          "variant": "text_shx",
+          "ink_px": 12188,
+          "ink_ratio": 0.05901,
+          "crop": "B1_Z_MTEXT_SHX_text_shx.png",
+          "ocr_raw": "SH× 覆盖测试3.500",
+          "ocr_recall": {
+            "SHX": 0.667,
+            "覆盖测试": 1.0
+          },
+          "ocr_recall_mean": 0.834,
+          "placeholder_Aa": false
+        },
+        "Z_SYMBOL": {
+          "variant": "block",
+          "ink_px": 854,
+          "ink_ratio": 0.01089,
+          "crop": "B1_Z_SYMBOL_block.png"
+        },
+        "Z_BLOCK_FRAME": {
+          "variant": "block",
+          "ink_px": 46422,
+          "ink_ratio": 0.06707,
+          "crop": "B1_Z_BLOCK_FRAME_block.png"
+        },
+        "Z_ATTRIB_NAME": {
+          "variant": "block",
+          "ink_px": 8580,
+          "ink_ratio": 0.08784,
+          "crop": "B1_Z_ATTRIB_NAME_block.png",
+          "ocr_raw": "某某建筑工程有限公司 司",
+          "ocr_recall": {
+            "某某建筑工程有限公司": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_TITLE": {
+          "variant": "block",
+          "ink_px": 8318,
+          "ink_ratio": 0.13836,
+          "crop": "B1_Z_ATTRIB_TITLE_block.png",
+          "ocr_raw": "给排水管网",
+          "ocr_recall": {
+            "给排水管网": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_NO": {
+          "variant": "block",
+          "ink_px": 3796,
+          "ink_ratio": 0.07641,
+          "crop": "B1_Z_ATTRIB_NO_block.png",
+          "ocr_raw": "建施一( 01",
+          "ocr_recall": {
+            "建施-01": 0.8
+          },
+          "ocr_recall_mean": 0.8,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_SCALE": {
+          "variant": "block",
+          "ink_px": 2956,
+          "ink_ratio": 0.05034,
+          "crop": "B1_Z_ATTRIB_SCALE_block.png",
+          "ocr_raw": "500 1",
+          "ocr_recall": {
+            "1:500": 0.8
+          },
+          "ocr_recall_mean": 0.8,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_DATE": {
+          "variant": "block",
+          "ink_px": 5253,
+          "ink_ratio": 0.08636,
+          "crop": "B1_Z_ATTRIB_DATE_block.png",
+          "ocr_raw": "2026-10-22",
+          "ocr_recall": {
+            "2026-10-22": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_SHX": {
+          "variant": "block",
+          "ink_px": 3891,
+          "ink_ratio": 0.05627,
+          "crop": "B1_Z_ATTRIB_SHX_block.png",
+          "ocr_raw": "审 核",
+          "ocr_recall": {
+            "审 核": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        }
+      },
+      "ocr_full_text": "标题栏±0.000 一层平面图 比例1:100层高3.6m 仿宋标题栏 SH×覆盖测试3.500 轴线 GSHX-O1  某某建筑工程有限公司 给排水管网 建施-O1 1:500 2026-10-22 审核"
+    },
+    "B2": {
+      "label": "cadcraft-cli L2 + FONTALT=SimHei（SHX→TTF）",
+      "paper_bg_rgb": [
+        33,
+        40,
+        48
+      ],
+      "blank_ink_px": 0,
+      "calib": {
+        "px_per_unit_x": 4.7525,
+        "px_per_unit_y": 4.7531,
+        "frame_px_bbox": [
+          249,
+          39,
+          2150,
+          1560
+        ],
+        "canvas": [
+          2400,
+          1600
+        ]
+      },
+      "frame_edges_closed": {
+        "left": 1.0,
+        "right": 1.0,
+        "top": 1.0,
+        "bottom": 1.0,
+        "side_len_px": [
+          1901,
+          1521
+        ]
+      },
+      "variant_bbox_check": {
+        "block": {
+          "ink_bbox": [
+            249,
+            39,
+            2150,
+            1560
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 68862
+        },
+        "geom": {
+          "ink_bbox": [
+            249,
+            39,
+            2150,
+            1560
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 31583
+        },
+        "full": {
+          "ink_bbox": [
+            249,
+            39,
+            2150,
+            1560
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 171947
+        },
+        "text_shx": {
+          "ink_bbox": [
+            249,
+            39,
+            2150,
+            1560
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 57972
+        },
+        "text_ttf": {
+          "ink_bbox": [
+            249,
+            39,
+            2150,
+            1560
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 74397
+        }
+      },
+      "full_ink_px": 171947,
+      "full_ink_ratio": 0.04478,
+      "zones": {
+        "Z_LINES": {
+          "variant": "geom",
+          "ink_px": 3363,
+          "ink_ratio": 0.01404,
+          "crop": "B2_Z_LINES_geom.png"
+        },
+        "Z_LWPOLY": {
+          "variant": "geom",
+          "ink_px": 4906,
+          "ink_ratio": 0.01967,
+          "crop": "B2_Z_LWPOLY_geom.png"
+        },
+        "Z_ARC": {
+          "variant": "geom",
+          "ink_px": 1349,
+          "ink_ratio": 0.01843,
+          "crop": "B2_Z_ARC_geom.png"
+        },
+        "Z_ELLIPSE": {
+          "variant": "geom",
+          "ink_px": 1062,
+          "ink_ratio": 0.018,
+          "crop": "B2_Z_ELLIPSE_geom.png"
+        },
+        "Z_CIRCLE": {
+          "variant": "geom",
+          "ink_px": 614,
+          "ink_ratio": 0.01765,
+          "crop": "B2_Z_CIRCLE_geom.png"
+        },
+        "Z_TEXT_CNHEI": {
+          "variant": "text_ttf",
+          "ink_px": 21160,
+          "ink_ratio": 0.15812,
+          "crop": "B2_Z_TEXT_CNHEI_text_ttf.png",
+          "ocr_raw": "平面 层 图",
+          "ocr_recall": {
+            "一层平面图": 0.8
+          },
+          "ocr_recall_mean": 0.8,
+          "placeholder_Aa": false
+        },
+        "Z_TEXT_CNFANG": {
+          "variant": "text_ttf",
+          "ink_px": 10544,
+          "ink_ratio": 0.10288,
+          "crop": "B2_Z_TEXT_CNFANG_text_ttf.png",
+          "ocr_raw": "仿 宋 标 题栏 二",
+          "ocr_recall": {
+            "仿宋标题栏": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_MTEXT_CN": {
+          "variant": "text_ttf",
+          "ink_px": 22387,
+          "ink_ratio": 0.07867,
+          "crop": "B2_Z_MTEXT_CN_text_ttf.png",
+          "ocr_raw": "标题栏 ±0.000 比例1:100层高3.6m",
+          "ocr_recall": {
+            "标题栏": 1.0,
+            "±0.000": 1.0,
+            "比例": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_TEXT_SHX": {
+          "variant": "text_shx",
+          "ink_px": 18163,
+          "ink_ratio": 0.16623,
+          "crop": "B2_Z_TEXT_SHX_text_shx.png",
+          "ocr_raw": "轴线 GSHX- -01",
+          "ocr_recall": {
+            "GSHX-01": 1.0,
+            "轴线": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_MTEXT_SHX": {
+          "variant": "text_shx",
+          "ink_px": 19520,
+          "ink_ratio": 0.0945,
+          "crop": "B2_Z_MTEXT_SHX_text_shx.png",
+          "ocr_raw": "SHX 覆盖测试 3.500",
+          "ocr_recall": {
+            "SHX": 1.0,
+            "覆盖测试": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_SYMBOL": {
+          "variant": "block",
+          "ink_px": 854,
+          "ink_ratio": 0.01089,
+          "crop": "B2_Z_SYMBOL_block.png"
+        },
+        "Z_BLOCK_FRAME": {
+          "variant": "block",
+          "ink_px": 47719,
+          "ink_ratio": 0.06895,
+          "crop": "B2_Z_BLOCK_FRAME_block.png"
+        },
+        "Z_ATTRIB_NAME": {
+          "variant": "block",
+          "ink_px": 8580,
+          "ink_ratio": 0.08784,
+          "crop": "B2_Z_ATTRIB_NAME_block.png",
+          "ocr_raw": "某某建筑工程有限公司 司",
+          "ocr_recall": {
+            "某某建筑工程有限公司": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_TITLE": {
+          "variant": "block",
+          "ink_px": 8318,
+          "ink_ratio": 0.13836,
+          "crop": "B2_Z_ATTRIB_TITLE_block.png",
+          "ocr_raw": "给排水管网",
+          "ocr_recall": {
+            "给排水管网": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_NO": {
+          "variant": "block",
+          "ink_px": 4792,
+          "ink_ratio": 0.09646,
+          "crop": "B2_Z_ATTRIB_NO_block.png",
+          "ocr_raw": "建施-01",
+          "ocr_recall": {
+            "建施-01": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_SCALE": {
+          "variant": "block",
+          "ink_px": 2956,
+          "ink_ratio": 0.05034,
+          "crop": "B2_Z_ATTRIB_SCALE_block.png",
+          "ocr_raw": "500 1",
+          "ocr_recall": {
+            "1:500": 0.8
+          },
+          "ocr_recall_mean": 0.8,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_DATE": {
+          "variant": "block",
+          "ink_px": 5253,
+          "ink_ratio": 0.08636,
+          "crop": "B2_Z_ATTRIB_DATE_block.png",
+          "ocr_raw": "2026-10-22",
+          "ocr_recall": {
+            "2026-10-22": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_SHX": {
+          "variant": "block",
+          "ink_px": 4192,
+          "ink_ratio": 0.06062,
+          "crop": "B2_Z_ATTRIB_SHX_block.png",
+          "ocr_raw": "审 核",
+          "ocr_recall": {
+            "审 核": 1.0
+          },
+          "ocr_recall_mean": 1.0,
+          "placeholder_Aa": false
+        }
+      },
+      "ocr_full_text": "标题栏±0.000 一层平面图 比例1:100层高3.6m 仿宋标题栏 SHX  覆盖测试3.500 轴线 GSHX-01 某某建筑工程有限公司 给排水管网 建施-01 1:500 2026-10-22 审核"
+    },
+    "C": {
+      "label": "现状 dwg_to_png.py Pillow 占位",
+      "paper_bg_rgb": [
+        255,
+        255,
+        255
+      ],
+      "blank_ink_px": 0,
+      "calib": {
+        "px_per_unit_x": 11.81,
+        "px_per_unit_y": 11.8094,
+        "frame_px_bbox": [
+          59,
+          59,
+          4783,
+          3838
+        ],
+        "canvas": [
+          4842,
+          3897
+        ]
+      },
+      "frame_edges_closed": {
+        "left": 0.001,
+        "right": 1.0,
+        "top": 1.0,
+        "bottom": 1.0,
+        "side_len_px": [
+          4724,
+          3779
+        ]
+      },
+      "variant_bbox_check": {
+        "block": {
+          "ink_bbox": [
+            59,
+            59,
+            4783,
+            3838
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 26033
+        },
+        "geom": {
+          "ink_bbox": [
+            59,
+            59,
+            4783,
+            3838
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 31881
+        },
+        "full": {
+          "ink_bbox": [
+            59,
+            59,
+            4783,
+            3838
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 32243
+        },
+        "text_shx": {
+          "ink_bbox": [
+            59,
+            59,
+            4783,
+            3838
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 26214
+        },
+        "text_ttf": {
+          "ink_bbox": [
+            59,
+            59,
+            4783,
+            3838
+          ],
+          "dev_vs_frame_px": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "ink_px": 26214
+        }
+      },
+      "full_ink_px": 32243,
+      "full_ink_ratio": 0.00171,
+      "zones": {
+        "Z_LINES": {
+          "variant": "geom",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_LINES_geom.png"
+        },
+        "Z_LWPOLY": {
+          "variant": "geom",
+          "ink_px": 5848,
+          "ink_ratio": 0.00384,
+          "crop": "C_Z_LWPOLY_geom.png"
+        },
+        "Z_ARC": {
+          "variant": "geom",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_ARC_geom.png"
+        },
+        "Z_ELLIPSE": {
+          "variant": "geom",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_ELLIPSE_geom.png"
+        },
+        "Z_CIRCLE": {
+          "variant": "geom",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_CIRCLE_geom.png"
+        },
+        "Z_TEXT_CNHEI": {
+          "variant": "text_ttf",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_TEXT_CNHEI_text_ttf.png",
+          "ocr_raw": "",
+          "ocr_recall": {
+            "一层平面图": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        },
+        "Z_TEXT_CNFANG": {
+          "variant": "text_ttf",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_TEXT_CNFANG_text_ttf.png",
+          "ocr_raw": "",
+          "ocr_recall": {
+            "仿宋标题栏": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        },
+        "Z_MTEXT_CN": {
+          "variant": "text_ttf",
+          "ink_px": 181,
+          "ink_ratio": 0.0001,
+          "crop": "C_Z_MTEXT_CN_text_ttf.png",
+          "ocr_raw": "",
+          "ocr_recall": {
+            "标题栏": 0.0,
+            "±0.000": 0.0,
+            "比例": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        },
+        "Z_TEXT_SHX": {
+          "variant": "text_shx",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_TEXT_SHX_text_shx.png",
+          "ocr_raw": "",
+          "ocr_recall": {
+            "GSHX-01": 0.0,
+            "轴线": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        },
+        "Z_MTEXT_SHX": {
+          "variant": "text_shx",
+          "ink_px": 181,
+          "ink_ratio": 0.00014,
+          "crop": "C_Z_MTEXT_SHX_text_shx.png",
+          "ocr_raw": "",
+          "ocr_recall": {
+            "SHX": 0.0,
+            "覆盖测试": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        },
+        "Z_SYMBOL": {
+          "variant": "block",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_SYMBOL_block.png"
+        },
+        "Z_BLOCK_FRAME": {
+          "variant": "block",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_BLOCK_FRAME_block.png"
+        },
+        "Z_ATTRIB_NAME": {
+          "variant": "block",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_ATTRIB_NAME_block.png",
+          "ocr_raw": "",
+          "ocr_recall": {
+            "某某建筑工程有限公司": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_TITLE": {
+          "variant": "block",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_ATTRIB_TITLE_block.png",
+          "ocr_raw": "",
+          "ocr_recall": {
+            "给排水管网": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_NO": {
+          "variant": "block",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_ATTRIB_NO_block.png",
+          "ocr_raw": "",
+          "ocr_recall": {
+            "建施-01": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_SCALE": {
+          "variant": "block",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_ATTRIB_SCALE_block.png",
+          "ocr_raw": "",
+          "ocr_recall": {
+            "1:500": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_DATE": {
+          "variant": "block",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_ATTRIB_DATE_block.png",
+          "ocr_raw": "",
+          "ocr_recall": {
+            "2026-10-22": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        },
+        "Z_ATTRIB_SHX": {
+          "variant": "block",
+          "ink_px": 0,
+          "ink_ratio": 0.0,
+          "crop": "C_Z_ATTRIB_SHX_block.png",
+          "ocr_raw": "",
+          "ocr_recall": {
+            "审 核": 0.0
+          },
+          "ocr_recall_mean": 0.0,
+          "placeholder_Aa": false
+        }
+      },
+      "ocr_full_text": ""
+    }
+  }
+}
