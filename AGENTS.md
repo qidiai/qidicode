@@ -128,13 +128,43 @@
 
 | 角色 | 模型 / 类型 | 用途 |
 |---|---|---|
-**⚠️ step-5（阶跃）订阅时限（2026-10-17 用户告知，勘误 v2：非 apigoto）**：step-5 订阅 **2026-10-20 过期**——step-5 系模型（step-5-preview-222/step-5-preview/opencode-go step-5-preview-free）届时失效或降级。222 池（DeepSeek/K3/GLM 系）不受影响。step-5 位替代：luyou sonnet-5-5（今日实测可用）/zen 免费位其他模型/kimi 系。| 编码手 | 主力 `spawn_subagent(model="deepseek-flash-222", capability_mode="all")`（2026-10-16 用户指令：编码手切 deepseek-flash——DeepSeek 官方 V4.1 Flash 的**正式调用名**，10-17 起 1017 版专为 WorkBuddy/CodeBuddy/Harness 编码框架优化；sensenova 托管免费层 RPM 限流**偶发 429，重试即可**；DeepSeek 系 slug 的 spawn 序列化畸形率≈0，天然避开 10-15 发现的 model 参数 bug）。前史：ling-3.1-flash 10-02~10-15（永久下线，多模态看图偶可特批）→ DeepSeek-V4.1-Flash-222 10-15~10-16（`deepseek-v4-pro-222` 保留为复杂/高风险升级位） | 按规格书写码+自测；**并行前提：任务文件零交集**（同 crate 不同文件可并行，同 crate 高内聚改动合并给一人） |
+**⚠️ step-5（阶跃）订阅时限（2026-10-17 用户告知，勘误 v2：非 apigoto）**：step-5 订阅 **2026-10-20 过期**——step-5 系模型（step-5-preview-222/step-5-preview/opencode-go step-5-preview-free）届时失效或降级。222 池（DeepSeek/K3/GLM 系）不受影响。step-5 位替代：luyou sonnet-5-5（今日实测可用）/zen 免费位其他模型/kimi 系。
+
+| 编码手 | **默认 `codely-core`**（codely 别名池，免费；2026-10-22 用户指定，`codely-flash` 备选）；**升级位 `jw/kimi-k3-1`**（jiuwei 中转，6/6 硬题，额度有限只给关键任务）；额度池场景用 `deepseek-ai/DeepSeek-V4.1-Flash-1017`（ModelScope，3 key × 250 魔粒/日）。前史：ling-3.1-flash → DeepSeek-V4.1-Flash-222 → deepseek-flash-222（sensenova，**2026-10-22 起降为备用，池级 429 频发**）。 | 按规格书写码+自测；**并行前提：任务文件零交集**（同 crate 不同文件可并行，同 crate 高内聚改动合并给一人） |
 **?? luyou ????????2026-10-17 ?????????????**??????????**?????????????????**??? intern key ??ocr-4 ?????? 429?quota exceeded ? key??? codely ?? free ??**??? GLM ??codely-core?**?K3 ????free ?????? pro ? GLM ????? K3 ????? **pro/????'39640','58863'?????????K3 ?????**?? K3 ??? = pro/??????????? 10-20 ????????????? 429??? ?????**K3/kimi ? 429 = pro ?????????/????GLM ? 429 = free ????????? pro??DeepSeek ? = ?????deepseek-v4-pro ???**?
 
-| 审计 | `GLM-5.3-222`（首席，最深）/ `claude-haiku-5-5-ago-222`（高频巡查官）/ `step-5-preview`（**2026-10-19 用户决定：KIMI-K3-222 退役；claude-haiku-5-5 上线测试通过，顶替审计/第二席**——qidi headless 通道 366s 完成 R-A 实现审计：REJECT + 9 重要 + 10 次要，file:line 抽查 5 处 4 坐实 1 部分失实、零造假，grep 故障自愈改 python 脚本；分工 = GLM 任高风险深审、haiku 任每 commit 例行巡查，快 2-3 倍且输出价便宜 34x）。**巡查二席：`Qwen/Qwen3.8-Flash-Next`（ModelScope 魔粒池，条目 `qwen3.8-flash-next-ms-222`）——2026-10-19 试毒通过转正：审“面板②”功能 ACCEPT WITH NITS，2 重要（J-1 徽章展开态被 60s 轮询打回、J-2 刷新模态 lost update）+ 8 次要全部实证（跑 pytest 验证、rubrics 3 PASS/1 FAIL/1 附条件）。分工：haiku 任上线门禁（严）、Qwen 任日常巡查（准+免费池），GLM 任首席深审**。`kimi-k2.7-code-highspeed-222` 降级备选；GLM 席位遇网关故障可换 `GLM-5.3-FLASH-222`（opencode/glm-5.3-flash，免费池，代价=禁 run_all/附件，无 resume） | 双模型交叉审计；结论分歧时以代码证据裁决 |
+| 审计 | **首席深审 `GLM-5.3-FLASHX`**（codely pro 账号 39640，实测 3.4s，**直选位、不能做兜底目标**——池模型不被 providers.match 识别）；**巡查 `Qwen/Qwen3.8-Flash-Next`**（ModelScope 免费池，0.6s）；**第二席 `jw/kimi-k3-1`**（jiuwei，6/6 硬题）。`claude-haiku-5-5-ago-222` 暂不可用（apigoto 余额 0.1 元）；apigoto `GLM-5.3-222` 同因不可用（2026-10-22）。历史：KIMI-K3-222 退役、step-5 订阅过期。 | 双模型交叉审计；结论分歧时以代码证据裁决 |
 | 只读探查 | `subagent_type="explore"` / `plan`（只读侦察/方案规划；**2026-10-19 起可指定 `Qwen/Qwen3.8-Flash-Next`（modelscope 魔粒池，slug `qwen3.8-flash-next-ms-222`）——零成本白嫖池，6/6 推理基准支撑规划质量；重规划仍建议 GLM/haiku**） | 只读侦察/规划 |
 | 隔离 | `isolation="worktree"` | 需要隔离时用（有冷构建代价） |
 
+
+### 2026-10-22 资源盘点与角色重排（codely 付费池到期后）
+
+**触发**：codely 付费池（Go 订阅）额度用尽——`KIMI-K3` 返回 `GoUsageLimitError`；
+apigoto 账户余额 0.1 元、无法自动兑换（推广收入未达 1 元门槛）。**别名池（core/flash/basic/air）不受影响。**
+
+**实测可用面**（2026-10-22 逐项探测，含延迟）：
+
+| 资源 | 状态 | 额度 / 限制 |
+|---|---|---|
+| codely 别名池 `codely-core/flash/basic/air` | ✓ 1.7–2.5s | 免费 |
+| codely 池 `GLM-5.3-FLASHX` | ✓ 3.4s | 账号池（39640）；**不能作为兜底目标**（providers.match 只认外部渠道） |
+| ModelScope 魔搭 | ✓ 0.6–1.4s（DeepSeek-1017 / Qwen3.8-27B / GLM-5.2 / Qwen3.8-Flash-Next） | 3 key × 约 250 魔粒/日，0 点刷新 |
+| jiuwei `jw/kimi-k3-1` / `k2.8-preview` | ✓ 8–13s（6/6 硬题） | 10 元余额，用完即止 |
+| intern `intern-s2` | ✓ 1.8s | 月额度，月初恢复（provider_watchdog 自动启用） |
+| 52duck `Deepseek-v4-flash` | ✓ 0.6s | 单 key |
+| openrouter `deepseek/deepseek-chat` / `minimax-...:free` | ✓ 3.4 / 3.6s | 免费档 |
+| Gemini `gs/*`（11 个） | ✓ 1–40s | AI Studio 免费档，按日重置；经云端→首尔出口 |
+| apigoto 付费档（claude / grok / gpt / qwen3.7 / glm-5.3-flash） | ✗ 429 欠费 | 待推广收入回血或充值 ≥1 元 |
+
+**角色映射（2026-10-22 起）**：
+
+- **编码手**：`codely-core`（默认）→ `jw/kimi-k3-1`（复杂/高风险）→ ModelScope DeepSeek-1017（额度池）
+- **审计首席**：`GLM-5.3-FLASHX`（直选）｜**巡查**：`Qwen/Qwen3.8-Flash-Next`｜**第二席**：`jw/kimi-k3-1`
+- **长文/研究/多模态**：`gs/gemini-3.5-flash`（免费档，省魔粒）
+- **relay 兜底链**：GLM 系 → openrouter `deepseek/deepseek-chat`；Qwen 系 → ModelScope `Qwen/Qwen3.8-27B` → 52duck；Kimi → jiuwei
+
+**纪律**：魔粒（约 750/日）与 jiuwei（10 元）是**有限额度**，只用于高价值任务；批量试错走 codely 别名池与 Gemini 免费档。
 
 ### 笔记本侧 AI 工具调用双路径（2026-10-20 用户裁定：**默认走本机**，两条路都留）
 
