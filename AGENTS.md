@@ -186,6 +186,25 @@
 - 适用：复杂调试、重构、多步骤规划、智能体工作流；常规编码不必开（免费档 10 RPM，开了更慢）。
 - 限制：qidicode 的模型条目**没有透传自定义参数的字段**，Thinking 只在脚本/headless/自建调用里可用。
 
+**Agnes 媒体能力与 Unisound 渠道（2026-10-22 实测）**：
+
+- **Key 池**：10 把中 **8 把有效**（主号 / 新2–新5 / 图1–图3）；`图4` 粘贴后仍 401，需重取。
+  key 是**通用**的（同一把既能调文本也能调图像），"图N" 只是命名习惯。
+- **图像**：用 `agnes-image-2.1-flash` / `agnes-image-2.5-flash`（**限时免费**，1K–4K 全 ¥0）；
+  `agnes-image-2.0-flash` 在本账号**未开通**（所有 key 都返回 404 model_not_found，勿再试）。
+  - 端点：`POST https://api.agnes-ai.cn/v1/images/generations`
+  - 必填 `model` / `prompt` / `size`（如 `1024x1024`）；`response_format` 必须放在 `extra_body` 内
+  - 返回 `data[0].url`（COS 地址），出图实测 < 20s
+- **视频**：`agnes-video-2.5-flash`（**限时免费**，720P）
+  - 创建：`POST /v1/videos`，必填 `model` / `prompt` / `mode`（text|keyframe|reference）/ `size="720P"`，`seconds` 取 "4"–"12"
+  - 轮询：`GET /agnesapi?video_id=<id>&model_name=agnes-video-2.5-flash`，完成后取顶层 `url`
+  - 实测：任务创建成功但免费档**排队严重**（150s 仍 pending），端点偶发 **503**——高负载时段不可依赖
+- **relay 不支持媒体**：`routes/` 下没有 `/v1/images/generations`、`/v1/videos` 路由，图像/视频只能
+  **直连 Agnes**（脚本或自建服务）；要统一入口需给 relay 加透传路由（未做）。
+- **Unisound（讯飞）渠道**：`https://maas-api.unisound.com/v1`，key 标签 `U2`。
+  `/v1/models` 列 29 个模型，但**该 key 只有 `u2-flash` 有权限**（glm-5.3 / kimi-k3 / deepseek-v4.1-flash
+  等一律 404 model_not_found）；已在 relay 里把模型清单收敛为 `u2-flash` 一个。
+
 **角色映射（2026-10-22 起）**：
 
 - **编码手**：`agnes-2.5-flash`（默认，免费）→ `agnes-3.0-flash`（复杂任务，可开 Thinking）→ `codely-flash`（1×）
