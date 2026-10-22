@@ -130,41 +130,61 @@
 |---|---|---|
 **⚠️ step-5（阶跃）订阅时限（2026-10-17 用户告知，勘误 v2：非 apigoto）**：step-5 订阅 **2026-10-20 过期**——step-5 系模型（step-5-preview-222/step-5-preview/opencode-go step-5-preview-free）届时失效或降级。222 池（DeepSeek/K3/GLM 系）不受影响。step-5 位替代：luyou sonnet-5-5（今日实测可用）/zen 免费位其他模型/kimi 系。
 
-| 编码手 | **默认 `codely-core`**（codely 别名池，免费；2026-10-22 用户指定，`codely-flash` 备选）；**升级位 `jw/kimi-k3-1`**（jiuwei 中转，6/6 硬题，额度有限只给关键任务）；额度池场景用 `deepseek-ai/DeepSeek-V4.1-Flash-1017`（ModelScope，3 key × 250 魔粒/日）。前史：ling-3.1-flash → DeepSeek-V4.1-Flash-222 → deepseek-flash-222（sensenova，**2026-10-22 起降为备用，池级 429 频发**）。 | 按规格书写码+自测；**并行前提：任务文件零交集**（同 crate 不同文件可并行，同 crate 高内聚改动合并给一人） |
+| 编码手 | **默认 `agnes-2.5-flash`（限时免费，0.4s）/ `agnes-3.0-flash`（免费，512K，需强推理时开 Thinking）**；成本口径（以 deepseek-flash 为 1×）：`codely-flash` = deepseek-flash 别名 **1×**、`codely-core` = glm-5.3 别名 **4×**、`kimi-k3` **10×**。升级位 `jw/kimi-k3-1` 仅用于关键任务。**不要把 codely-core 当默认**（4 倍成本、质量同 glm-5.3）。 | 按规格书写码+自测；**并行前提：任务文件零交集**（同 crate 不同文件可并行，同 crate 高内聚改动合并给一人） |
 **?? luyou ????????2026-10-17 ?????????????**??????????**?????????????????**??? intern key ??ocr-4 ?????? 429?quota exceeded ? key??? codely ?? free ??**??? GLM ??codely-core?**?K3 ????free ?????? pro ? GLM ????? K3 ????? **pro/????'39640','58863'?????????K3 ?????**?? K3 ??? = pro/??????????? 10-20 ????????????? 429??? ?????**K3/kimi ? 429 = pro ?????????/????GLM ? 429 = free ????????? pro??DeepSeek ? = ?????deepseek-v4-pro ???**?
 
-| 审计 | **首席深审 `GLM-5.3-FLASHX`**（codely pro 账号 39640，实测 3.4s，**直选位、不能做兜底目标**——池模型不被 providers.match 识别）；**巡查 `Qwen/Qwen3.8-Flash-Next`**（ModelScope 免费池，0.6s）；**第二席 `jw/kimi-k3-1`**（jiuwei，6/6 硬题）。`claude-haiku-5-5-ago-222` 暂不可用（apigoto 余额 0.1 元）；apigoto `GLM-5.3-222` 同因不可用（2026-10-22）。历史：KIMI-K3-222 退役、step-5 订阅过期。 | 双模型交叉审计；结论分歧时以代码证据裁决 |
+| 审计 | **首席深审 `GLM-5.3-FLASHX`**（codely pro 账号 39640，3.4s，池模型只能直选、不能做兜底）；**巡查 `Qwen/Qwen3.8-Flash-Next`**（ModelScope 免费池 0.6s）或 `agnes-2.5-flash`（免费 0.4s）；**第二席 `jw/kimi-k3-1`**（jiuwei，6/6 硬题，10× 成本）。apigoto `GLM-5.3-222` / `claude-haiku-5-5` 自 2026-10-22 起余额 0.1 元不可用。 | 双模型交叉审计；结论分歧时以代码证据裁决 |
 | 只读探查 | `subagent_type="explore"` / `plan`（只读侦察/方案规划；**2026-10-19 起可指定 `Qwen/Qwen3.8-Flash-Next`（modelscope 魔粒池，slug `qwen3.8-flash-next-ms-222`）——零成本白嫖池，6/6 推理基准支撑规划质量；重规划仍建议 GLM/haiku**） | 只读侦察/规划 |
 | 隔离 | `isolation="worktree"` | 需要隔离时用（有冷构建代价） |
 
 
 ### 2026-10-22 资源盘点与角色重排（codely 付费池到期后）
 
-**触发**：codely 付费池（Go 订阅）额度用尽——`KIMI-K3` 返回 `GoUsageLimitError`；
-apigoto 账户余额 0.1 元、无法自动兑换（推广收入未达 1 元门槛）。**别名池（core/flash/basic/air）不受影响。**
+**成本基准（用户口径，deepseek-flash = 1×）**：
 
-**实测可用面**（2026-10-22 逐项探测，含延迟）：
+| 别名 / 模型 | 实际模型 | 相对成本 | 备注 |
+|---|---|---|---|
+| `codely-flash` | deepseek-flash | **1×** | 与主模型同源，可放心用 |
+| `codely-basic` / `codely-air` | DeepSeek-V4.1-Flash 1017 | 1× 级 | 别名池，免费 |
+| `codely-core` | **glm-5.3** | **4×** | 质量更好但贵 4 倍，不要当默认 |
+| `kimi-k3` | Kimi K3 | **10×** | 仅关键任务 |
+| `agnes-2.5-flash` / `agnes-3.0-flash` | Agnes | **免费（限时）** | 512K 上下文、10 RPM |
+
+**实测可用面**（2026-10-22 逐项探测）：
 
 | 资源 | 状态 | 额度 / 限制 |
 |---|---|---|
-| codely 别名池 `codely-core/flash/basic/air` | ✓ 1.7–2.5s | 免费 |
-| codely 池 `GLM-5.3-FLASHX` | ✓ 3.4s | 账号池（39640）；**不能作为兜底目标**（providers.match 只认外部渠道） |
-| ModelScope 魔搭 | ✓ 0.6–1.4s（DeepSeek-1017 / Qwen3.8-27B / GLM-5.2 / Qwen3.8-Flash-Next） | 3 key × 约 250 魔粒/日，0 点刷新 |
-| jiuwei `jw/kimi-k3-1` / `k2.8-preview` | ✓ 8–13s（6/6 硬题） | 10 元余额，用完即止 |
-| intern `intern-s2` | ✓ 1.8s | 月额度，月初恢复（provider_watchdog 自动启用） |
-| 52duck `Deepseek-v4-flash` | ✓ 0.6s | 单 key |
-| openrouter `deepseek/deepseek-chat` / `minimax-...:free` | ✓ 3.4 / 3.6s | 免费档 |
-| Gemini `gs/*`（11 个） | ✓ 1–40s | AI Studio 免费档，按日重置；经云端→首尔出口 |
-| apigoto 付费档（claude / grok / gpt / qwen3.7 / glm-5.3-flash） | ✗ 429 欠费 | 待推广收入回血或充值 ≥1 元 |
+| `agnes-2.5-flash` / `agnes-3.0-flash` | ✓ 0.4s / 7.6s | **限时免费**；512K 窗口 / 65K 输出；免费档 10 RPM |
+| codely 别名池 core/flash/basic/air | ✓ 1.7–2.5s | 免费（core 计费 4×） |
+| codely 池 `GLM-5.3-FLASHX` | ✓ 3.4s | 账号池（39640）；**不能作为兜底目标** |
+| ModelScope 魔搭 | ✓ 0.6–1.4s | 3 key × 约 250 魔粒/日 |
+| jiuwei `jw/kimi-k3-1` | ✓ 8–13s（6/6 硬题） | 10 元，10× 成本 |
+| intern `intern-s2` | ✓ 1.8s | 月额度，月初恢复 |
+| 52duck / openrouter | ✓ 0.6 / 3.4s | 免费档 |
+| Gemini `gs/*`（11 个） | ✓ 1–40s | 免费档，按日重置 |
+| apigoto 付费档 | ✗ 429 欠费（余额 0.1 元） | 待充值 ≥1 元或推广收入 |
+
+**Agnes 3.0 Flash 的 Thinking 模式（实测经 relay 透传可用）**：
+
+```json
+{"model": "agnes-3.0-flash",
+ "messages": [{"role": "user", "content": "..."}],
+ "chat_template_kwargs": {"enable_thinking": true}}
+```
+
+- 实测：普通调用 7.6s；开 Thinking 后 33.5s 并返回 `reasoning_content`（104 字符）。
+- 适用：复杂调试、重构、多步骤规划、智能体工作流；常规编码不必开（免费档 10 RPM，开了更慢）。
+- 限制：qidicode 的模型条目**没有透传自定义参数的字段**，Thinking 只在脚本/headless/自建调用里可用。
 
 **角色映射（2026-10-22 起）**：
 
-- **编码手**：`codely-core`（默认）→ `jw/kimi-k3-1`（复杂/高风险）→ ModelScope DeepSeek-1017（额度池）
-- **审计首席**：`GLM-5.3-FLASHX`（直选）｜**巡查**：`Qwen/Qwen3.8-Flash-Next`｜**第二席**：`jw/kimi-k3-1`
-- **长文/研究/多模态**：`gs/gemini-3.5-flash`（免费档，省魔粒）
-- **relay 兜底链**：GLM 系 → openrouter `deepseek/deepseek-chat`；Qwen 系 → ModelScope `Qwen/Qwen3.8-27B` → 52duck；Kimi → jiuwei
+- **编码手**：`agnes-2.5-flash`（默认，免费）→ `agnes-3.0-flash`（复杂任务，可开 Thinking）→ `codely-flash`（1×）
+- **审计首席**：`GLM-5.3-FLASHX`（4× 级，直选）｜**巡查**：`Qwen/Qwen3.8-Flash-Next` 或 `agnes-2.5-flash`（免费）｜**第二席**：`jw/kimi-k3-1`（10×）
+- **长文/研究/多模态**：`gs/gemini-3.5-flash`（免费档）
+- **relay 兜底链（3 跳上限）**：DeepSeek/Qwen/GLM 系 → 同族 → `agnes-3.0-flash`（免费）→ `gs/gemini-3.5-flash`（免费）
 
-**纪律**：魔粒（约 750/日）与 jiuwei（10 元）是**有限额度**，只用于高价值任务；批量试错走 codely 别名池与 Gemini 免费档。
+**纪律**：免费额度（agnes 10 RPM、Gemini 日配额、魔粒 750/日、jiuwei 10 元）优先用于高价值任务；`codely-core`（4×）与 `kimi-k3`（10×）只在确有必要时用。
+
 
 ### 笔记本侧 AI 工具调用双路径（2026-10-20 用户裁定：**默认走本机**，两条路都留）
 
