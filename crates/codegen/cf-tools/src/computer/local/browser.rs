@@ -83,9 +83,16 @@ struct Inner {
     /// Keep the browser handle alive for the process lifetime.
     _browser: chromiumoxide::Browser,
     /// Owned profile dir. The default backend lives in a static OnceCell,
-    /// which Rust never drops: on exit the Edge process tree and this
-    /// profile dir are left to OS temp cleanup (see default_shared).
+    /// which Rust never drops: on exit this temp profile dir is left to OS
+    /// temp cleanup (tracked as F9.1). The Edge process tree is enrolled in
+    /// the `ProcessGroup` held by `_group` below (best-effort coverage -- see
+    /// `launch`).
     _user_data: tempfile::TempDir,
+    /// Owns the Job Object / process group that reaps the Edge tree.
+    /// MUST be kept alive for the process lifetime: `ProcessScope::register`
+    /// stores only a `Weak`, so dropping this `Arc` would turn the exit-path
+    /// `kill_all` into a silent no-op.
+    _group: Option<std::sync::Arc<crate::util::ProcessGroup>>,
     page: chromiumoxide::Page,
 }
 
@@ -104,12 +111,29 @@ struct RefLookup {
 }
 
 /// Browser backend bound to a lazily-launched local Chromium-family process.
-#[derive(Default)]
 pub struct LocalBrowserBackend {
     inner: OnceCell<Inner>,
+    /// Reaper for the launched browser tree. The Edge child is enrolled here
+    /// at launch (Windows: Job Object) so the TUI exit paths can `kill_all()`
+    /// it. Defaults to the process-global scope; tests inject their own to
+    /// avoid latching the global.
+    scope: crate::util::ProcessScope,
     /// Serializes snapshot/click/type sequences so a stale ref map can never
     /// race a concurrent snapshot.
     op_lock: Mutex<()>,
+}
+
+impl Default for LocalBrowserBackend {
+    fn default() -> Self {
+        Self {
+            inner: OnceCell::new(),
+            // The process-global scope is what cf-pager's exit paths
+            // `kill_all()`; `ProcessScope::default()` would be an unrelated
+            // empty scope and would leave the Edge tree unreaped.
+            scope: crate::util::global_process_scope().clone(),
+            op_lock: Mutex::new(()),
+        }
+    }
 }
 
 impl LocalBrowserBackend {
@@ -118,9 +142,13 @@ impl LocalBrowserBackend {
     }
 
     async fn page(&self) -> Result<&chromiumoxide::Page, ComputerError> {
+        // Clone the scope before entering the `OnceCell` initializer: the
+        // closure must own it, otherwise it would borrow `self.scope` while
+        // `self.inner` is already borrowed by `get_or_try_init`.
+        let scope = self.scope.clone();
         let inner = self
             .inner
-            .get_or_try_init(|| async { launch().await })
+            .get_or_try_init(|| async move { launch(&scope).await })
             .await
             .map_err(|e: ComputerError| e)?;
         Ok(&inner.page)
@@ -575,18 +603,104 @@ fn build_browser_config(
     builder.build()
 }
 
+/// Enroll an already-spawned browser process into `scope` so its tree is
+/// reaped at exit (Windows: Job Object, also crash-safe via kill-on-close).
+///
+/// Coverage is **best-effort**, not a guarantee: `AssignProcessToJobObject`
+/// only captures processes forked *after* the assignment, so children Edge
+/// had already forked by the time this runs stay outside the Job. See
+/// [`launch`] for the exact boundary and the tracked root fix (F9.3).
+///
+/// Builds a [`crate::util::ProcessGroup`], attaches the already-spawned pid,
+/// registers the owning `Arc` with `scope`, and returns that `Arc`. The caller
+/// must keep it alive for the process lifetime, because `register` stores only
+/// a `Weak`.
+#[cfg(windows)]
+fn enroll_browser_tree(
+    scope: &crate::util::ProcessScope,
+    pid: u32,
+) -> std::io::Result<std::sync::Arc<crate::util::ProcessGroup>> {
+    let mut group = crate::util::ProcessGroup::new()?;
+    group.attach_pid(pid)?;
+    let group = std::sync::Arc::new(group);
+    scope.register(&group);
+    Ok(group)
+}
+
+/// Non-Windows enrollment is deliberately inert (tracked as F9.2).
+///
+/// On unix `ProcessGroup::new()` builds an empty group and `attach_pid` only
+/// records the pid as a group-leader id; `killpg` then requires that pid to be
+/// a process-group leader. chromiumoxide exposes no pre-exec hook to `setpgid`
+/// the Edge child, so the child inherits qidi's group and enrolling it would
+/// be either a no-op (ESRCH) or -- worse -- a `killpg` of qidi's own group,
+/// killing qidi and the whole shell tree. Returning an unattached,
+/// unregistered group keeps `launch` platform-uniform without ever calling
+/// `killpg` on an unverified group.
+#[cfg(not(windows))]
+fn enroll_browser_tree(
+    _scope: &crate::util::ProcessScope,
+    _pid: u32,
+) -> std::io::Result<std::sync::Arc<crate::util::ProcessGroup>> {
+    Ok(std::sync::Arc::new(crate::util::ProcessGroup::new()?))
+}
+
 /// Launch a hidden browser and open a blank page.
-async fn launch() -> Result<Inner, ComputerError> {
+///
+/// The spawned Edge process tree is enrolled in `scope` (Windows: Job Object)
+/// so it does not normally outlive this process -- best-effort; the coverage
+/// boundary is stated at the enrollment site below.
+async fn launch(scope: &crate::util::ProcessScope) -> Result<Inner, ComputerError> {
     let user_data = tempfile::Builder::new()
         .prefix("qidi-browser-")
         .tempdir()
         .map_err(|e| ComputerError::io(format!("profile dir failed: {e}")))?;
     let config = build_browser_config(user_data.path()).map_err(ComputerError::io)?;
-    let (browser, mut handler) = chromiumoxide::Browser::launch(config)
+    let (mut browser, mut handler) = chromiumoxide::Browser::launch(config)
         .await
         .map_err(|e| ComputerError::io(format!("browser launch failed: {e}")))?;
     // The CDP connection needs its event handler pumped continuously.
     tokio::spawn(async move { while let Some(_event) = handler.next().await {} });
+    // Enroll the Edge tree right after launch. What this actually buys, stated
+    // precisely (the earlier "the Job Object is what reaps it" was an
+    // over-claim):
+    //
+    // - Covered: the browser process itself -- kill-on-close fires on a normal
+    //   exit, a panic, and a force-kill -- plus every child Edge forks from the
+    //   moment the assignment lands (renderers/GPU spawned later, for instance).
+    // - NOT covered: children already forked inside this spawn->enroll window
+    //   (CDP handshake, crashpad handler). `AssignProcessToJobObject` only
+    //   captures forks that happen *after* it, so those processes never join
+    //   the Job and no scope-level kill can reach them. In practice they are
+    //   reclaimed by Chromium's own parent-watch (the browser dies, its
+    //   helpers follow), which is why the tree looks fully clean today -- but
+    //   that is Chromium's behaviour, not a property of this code.
+    //
+    // Overall this is best-effort reaping, not a guarantee. The root fix --
+    // start the child inside the Job (suspend->assign->resume, or
+    // PROC_THREAD_ATTRIBUTE_JOB_LIST) so enrollment has no pre-existing
+    // window -- is tracked as F9.3 and deliberately not done here.
+    let pid = browser.get_mut_child().and_then(|c| c.as_mut_inner().id());
+    let _group = match pid {
+        Some(pid) => match enroll_browser_tree(scope, pid) {
+            Ok(group) => Some(group),
+            Err(e) => {
+                // Not fatal: the browser still works, it just may be orphaned.
+                tracing::warn!(
+                    pid,
+                    error = %e,
+                    "failed to enroll browser process tree; it may be orphaned on exit"
+                );
+                None
+            }
+        },
+        None => {
+            tracing::warn!(
+                "browser launch returned no child pid; its process tree cannot be reaped on exit"
+            );
+            None
+        }
+    };
     let page = browser
         .new_page("about:blank")
         .await
@@ -594,6 +708,7 @@ async fn launch() -> Result<Inner, ComputerError> {
     Ok(Inner {
         _browser: browser,
         _user_data: user_data,
+        _group,
         page,
     })
 }
@@ -605,10 +720,17 @@ async fn launch() -> Result<Inner, ComputerError> {
 /// Known MVP limitations, stated here deliberately: the single page is
 /// shared by the main session AND every subagent (their snapshots and
 /// clicks act on the same page -- cross-session interference is possible),
-/// and neither the Edge process tree nor the temp profile dir is cleaned
-/// up on process exit (statics never drop; orphaned headless Edge is left
-/// to the OS). The `Browser` resource seam above is where a per-session
-/// lifecycle would plug in.
+/// and the temp profile dir is not cleaned up on process exit (the static
+/// backend is never dropped; tracked as F9.1). The Edge process tree is
+/// reaped on exit only **best-effort**: `launch` enrolls it in this backend's
+/// `ProcessScope` (the process-global one by default), whose Job Object kills
+/// the browser process and everything Edge forks *after* enrollment when the
+/// handle closes -- including qidi crashing or being force-killed -- and whose
+/// exit-path `kill_all()` kills them immediately on a normal exit. Children
+/// forked before enrollment are outside the Job and rely on Chromium's own
+/// parent-watch instead (see `launch`; root fix tracked as F9.3). The
+/// `Browser` resource seam above is where a per-session lifecycle would plug
+/// in.
 static DEFAULT: OnceCell<Arc<LocalBrowserBackend>> = OnceCell::const_new();
 
 pub async fn default_shared() -> Arc<LocalBrowserBackend> {
@@ -621,6 +743,83 @@ pub async fn default_shared() -> Arc<LocalBrowserBackend> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serializes tests that observe or mutate the process-global scope: the
+    /// regression probe below registers a group there, and the E2E asserts a
+    /// browser group is enrolled there. Without this lock the probe's
+    /// transient registration could make the E2E assertion pass spuriously.
+    static GLOBAL_SCOPE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Windows-only: enrolling an already-spawned child and killing the scope
+    /// must actually reap it. `kill_all` is the exit path's active kill; the
+    /// Job Object's kill-on-close (same handle, closed when the process ends)
+    /// is what makes this crash-safe.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn browser_tree_enrollment_reaps_child() {
+        use std::process::Stdio;
+
+        // Never latch the process-global scope: use a self-owned one.
+        let scope = crate::util::ProcessScope::new();
+
+        let mut cmd = tokio::process::Command::new("cmd");
+        cmd.args(["/c", "ping", "-n", "60", "127.0.0.1"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[allow(clippy::disallowed_methods)] // test: spawns the child to enroll
+        let mut child = cmd.spawn().expect("spawn long-lived child");
+        let pid = child.id().expect("spawned child must have a pid");
+
+        let group = enroll_browser_tree(&scope, pid).expect("enroll child process tree");
+        assert_eq!(
+            scope.live_count(),
+            1,
+            "the enrolled group must be live while its owner Arc is held"
+        );
+
+        scope.kill_all();
+        let died = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
+        if died.is_err() {
+            // Don't leak the child if the assertion below fails.
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+        }
+        drop(group);
+        assert!(
+            died.is_ok(),
+            "kill_all must terminate the enrolled child within 3s; \
+             wait() timing out means the Job Object did not reap it"
+        );
+    }
+
+    /// Regression: `default()` must attach the process-global scope, not the
+    /// unrelated empty `ProcessScope::default()`.
+    ///
+    /// `ProcessScope` exposes no identity accessor, so this pins the observable
+    /// contract instead: a group registered through the backend's own `scope`
+    /// must become visible to `global_process_scope()` -- exactly the set the
+    /// cf-pager exit path's `kill_all()` operates on. The probe is an
+    /// unattached (hence inert) `ProcessGroup`, dropped before returning; the
+    /// lock keeps the E2E from observing it.
+    #[test]
+    fn default_backend_uses_global_process_scope() {
+        let _guard = GLOBAL_SCOPE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let backend = LocalBrowserBackend::default();
+        let global = crate::util::global_process_scope();
+        let before = global.live_count();
+        let probe = Arc::new(crate::util::ProcessGroup::new().expect("process group"));
+        backend.scope.register(&probe);
+        let after = global.live_count();
+        assert!(
+            after >= before + 1,
+            "default() must use the process-global scope: a group registered on \
+             the backend scope was not visible to global_process_scope() \
+             (before={before}, after={after})"
+        );
+        drop(probe);
+    }
 
     #[test]
     fn html_to_markdown_strips_markup() {
@@ -752,6 +951,22 @@ mod tests {
             .await
             .expect("navigate");
         assert_eq!(nav.title, "t");
+
+        // End-to-end evidence that the real launch path enrolled the Edge tree
+        // in the process-global scope -- the exact set cf-pager's exit path
+        // `kill_all()`s. Non-Windows enrollment is deliberately inert (F9.2),
+        // so only Windows can assert it.
+        #[cfg(windows)]
+        {
+            let _scope_guard = GLOBAL_SCOPE_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            assert!(
+                crate::util::global_process_scope().live_count() >= 1,
+                "launch must enroll the browser process tree in the global scope"
+            );
+        }
+
         let snap = backend.snapshot().await.expect("snapshot");
         assert!(
             snap.refs.iter().any(|r| r.role == "button"),
@@ -819,6 +1034,175 @@ mod tests {
 
     fn stale_context_error() -> ComputerError {
         ComputerError::io("snapshot refs failed: Cannot find context with specified id")
+    }
+
+    /// Windows-only snapshot of the Chromium-family process table as
+    /// `(pid, parent_pid, command_line)`, via WMI.
+    ///
+    /// The kill assertion below has to observe the whole browser *tree*,
+    /// including children forked before Job enrollment -- precisely the set
+    /// `AssignProcessToJobObject` cannot describe. Enumerating the system table
+    /// is the only way to see them from a test, and WMI is the one enumerator
+    /// that needs no extra crate feature (the workspace `windows` pin enables
+    /// neither `ToolHelp` nor `Diagnostics`).
+    #[cfg(windows)]
+    async fn chromium_process_table() -> std::io::Result<Vec<(u32, u32, String)>> {
+        // Single quotes throughout: nothing to escape when this crosses the
+        // `powershell -Command` argument boundary.
+        const SCRIPT: &str = r#"Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(msedge|chrome|chromium)\.exe$' } | ForEach-Object { '{0}|{1}|{2}' -f $_.ProcessId, $_.ParentProcessId, $_.CommandLine }"#;
+        let output = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+            .output()
+            .await?;
+        if !output.status.success() {
+            return Err(std::io::Error::other(format!(
+                "process enumeration failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut rows = Vec::new();
+        for line in text.lines() {
+            // `splitn(3, ..)` keeps `|` characters inside the command line.
+            let mut fields = line.trim().splitn(3, '|');
+            let (Some(pid), Some(parent)) = (fields.next(), fields.next()) else {
+                continue;
+            };
+            let (Ok(pid), Ok(parent)) = (pid.trim().parse(), parent.trim().parse()) else {
+                continue;
+            };
+            rows.push((pid, parent, fields.next().unwrap_or_default().to_owned()));
+        }
+        Ok(rows)
+    }
+
+    /// Size of the browser tree rooted at the process whose command line
+    /// carries `profile_marker` (the launch's unique `--user-data-dir` name):
+    /// the root plus its transitive children among `rows`.
+    #[cfg(windows)]
+    fn chromium_tree_size(rows: &[(u32, u32, String)], profile_marker: &str) -> usize {
+        use std::collections::{HashMap, HashSet};
+
+        let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+        for (pid, parent, _) in rows {
+            children.entry(*parent).or_default().push(*pid);
+        }
+        let mut pending: Vec<u32> = rows
+            .iter()
+            .filter(|(_, _, command_line)| command_line.contains(profile_marker))
+            .map(|(pid, _, _)| *pid)
+            .collect();
+        let mut seen: HashSet<u32> = HashSet::new();
+        while let Some(pid) = pending.pop() {
+            if !seen.insert(pid) {
+                continue;
+            }
+            if let Some(kids) = children.get(&pid) {
+                pending.extend(kids.iter().copied());
+            }
+        }
+        seen.len()
+    }
+
+    /// Real-browser E2E: `kill_all()` must actually reap the Edge tree, not
+    /// merely close a handle. Opt-in (`QIDI_BROWSER_E2E=1`) because it needs a
+    /// real Chromium-family browser on the host:
+    /// `QIDI_BROWSER_E2E=1 cargo test -p cf-tools browser_e2e_kill_all -- --nocapture`.
+    ///
+    /// Runs on its own [`crate::util::ProcessScope`], never the process-global
+    /// one: `kill_all` latches a scope closed, so killing the global scope here
+    /// would break every other test that enrolls into it.
+    ///
+    /// The assertion is deliberately **not** "the tree is instantaneously
+    /// empty". Reaping is best-effort (see `launch`): children forked before
+    /// Job enrollment are outside the Job and exit only when Chromium's own
+    /// parent-watch reaches them, on a timing this code does not control. So
+    /// the test polls (bounded) for the tree to drain and accepts a tree that
+    /// shrank but has not yet reached zero; it fails only when the kill
+    /// demonstrably did nothing (as many processes alive as before it).
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn browser_e2e_kill_all_reaps_edge_tree() {
+        if std::env::var("QIDI_BROWSER_E2E").is_err() {
+            return; // not a failure: browserless hosts must stay green
+        }
+        let scope = crate::util::ProcessScope::new();
+        let backend = LocalBrowserBackend {
+            inner: OnceCell::new(),
+            scope: scope.clone(),
+            op_lock: Mutex::new(()),
+        };
+        backend
+            .navigate(BrowserNavigateRequest {
+                url: "data:text/html,<title>kill</title><p>kill me</p>".to_owned(),
+                wait_ms: Some(0),
+            })
+            .await
+            .expect("navigate");
+        assert_eq!(
+            scope.live_count(),
+            1,
+            "launch must enroll exactly one browser tree in the backend's scope"
+        );
+
+        // The launch's temp profile name is unique per run and appears in the
+        // browser's own command line, so it identifies this tree's root.
+        let marker = backend
+            .inner
+            .get()
+            .expect("navigate succeeded, so Inner is initialised")
+            ._user_data
+            .path()
+            .file_name()
+            .expect("temp profile dir has a name")
+            .to_string_lossy()
+            .into_owned();
+
+        let before = match chromium_process_table().await {
+            Ok(rows) => chromium_tree_size(&rows, &marker),
+            Err(e) => {
+                eprintln!("[browser_e2e] skipping kill assertion: {e}");
+                return;
+            }
+        };
+        if before == 0 {
+            eprintln!(
+                "[browser_e2e] skipping kill assertion: no process found for profile {marker:?} \
+                 (WMI could not see the browser tree on this host)"
+            );
+            return;
+        }
+
+        scope.kill_all();
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+        let mut remaining = before;
+        loop {
+            remaining = chromium_process_table()
+                .await
+                .map(|rows| chromium_tree_size(&rows, &marker))
+                .unwrap_or(remaining);
+            if remaining == 0 || tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+
+        assert!(
+            remaining < before,
+            "kill_all must reap the enrolled browser tree, but {remaining} of {before} \
+             process(es) for profile {marker:?} were still running -- the kill had no effect"
+        );
+        if remaining > 0 {
+            // Best-effort residue, explicitly not a failure: these are the
+            // pre-enrollment children Chromium's parent-watch reclaims on its
+            // own schedule (F9.3 makes the coverage exact).
+            eprintln!(
+                "[browser_e2e] best-effort: {remaining} of {before} process(es) for profile \
+                 {marker:?} still visible after kill_all (pre-enrollment children; see F9.3)"
+            );
+        }
     }
 
     /// A stale-context failure is retried (bounded) and the second attempt
