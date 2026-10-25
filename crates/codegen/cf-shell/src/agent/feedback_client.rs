@@ -129,6 +129,20 @@ pub struct SessionTurnDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub itl_mean_ms: Option<i64>,
 
+    /// **[turn-level]** Whether any response this turn needed the sampler's
+    /// one-shot `max_tokens` budget boost (a truncated attempt was re-sampled
+    /// with a larger budget). `None` when the turn never truncated — the field
+    /// is never sent as `false`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncation_retry: Option<bool>,
+
+    /// **[turn-level]** Output tokens discarded by this turn's truncated
+    /// attempts, summed across the turn's boosted retries. `Some(0)` means a
+    /// retry happened but nothing was wasted, which is distinct from `None`
+    /// (no retry).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncation_retry_tokens_wasted: Option<i64>,
+
     // ── Accumulated / snapshot session-level values ─────────────────────
     /// **[accumulated]** Current context window usage as a percentage (0–100)
     /// at turn end. Read from cumulative `SessionSignals.context_window_usage`.
@@ -834,6 +848,9 @@ pub fn snapshot_to_turn_delta(
         itl_p99_ms: d.last_itl_p99_ms.map(|v| v as i64),
         itl_max_ms: d.last_itl_max_ms.map(|v| v as i64),
         itl_mean_ms: d.last_itl_mean_ms.map(|v| v as i64),
+        // Truncation retries (signals uses u64; wire type uses i64)
+        truncation_retry: d.last_truncation_retry,
+        truncation_retry_tokens_wasted: d.last_truncation_retry_tokens_wasted.map(|v| v as i64),
         context_window_usage: c.context_window_usage as i64,
         model_id: c.primary_model_id.clone(),
         turn_duration_ms,
@@ -1005,6 +1022,96 @@ mod tests {
         assert_eq!(delta.turn_duration_ms, Some(1500));
         assert_eq!(delta.turn_outcome.as_deref(), Some("completed"));
         assert_eq!(delta.model_fingerprint.as_deref(), Some("fp_test_123"));
+    }
+
+    /// A truncated turn's retry must reach the wire payload, and a retry that
+    /// wasted nothing (`Some(0)`) must not be collapsed to "no retry".
+    #[test]
+    fn test_snapshot_to_turn_delta_carries_truncation_retry() {
+        let snapshot = crate::session::signals::TurnDeltaSnapshot {
+            current: crate::session::signals::SessionSignals::default(),
+            delta: crate::session::signals::SessionSignalsDelta {
+                turn_number: 1,
+                last_truncation_retry: Some(true),
+                last_truncation_retry_tokens_wasted: Some(0),
+                ..Default::default()
+            },
+            start_prompt_mode: None,
+            end_prompt_mode: None,
+            turn_input_tokens: 0,
+            turn_output_tokens: 0,
+            turn_cached_input_tokens: 0,
+        };
+
+        let delta = snapshot_to_turn_delta(
+            &snapshot,
+            ClientType::Agent,
+            None,
+            0,
+            None,
+            false,
+            None,
+            None,
+            None,
+        );
+
+        assert_eq!(delta.truncation_retry, Some(true));
+        assert_eq!(delta.truncation_retry_tokens_wasted, Some(0));
+
+        let json = serde_json::to_value(&delta).unwrap();
+        assert_eq!(
+            json.get("truncationRetry"),
+            Some(&serde_json::json!(true)),
+            "retry flag must be present in the payload: {json}"
+        );
+        assert_eq!(
+            json.get("truncationRetryTokensWasted"),
+            Some(&serde_json::json!(0)),
+            "a zero wasted count must survive serialization: {json}"
+        );
+    }
+
+    /// A turn that never truncated sends neither field — no nulls in the
+    /// data surface.
+    #[test]
+    fn test_snapshot_to_turn_delta_omits_truncation_retry_when_absent() {
+        let snapshot = crate::session::signals::TurnDeltaSnapshot {
+            current: crate::session::signals::SessionSignals::default(),
+            delta: crate::session::signals::SessionSignalsDelta {
+                turn_number: 1,
+                ..Default::default()
+            },
+            start_prompt_mode: None,
+            end_prompt_mode: None,
+            turn_input_tokens: 0,
+            turn_output_tokens: 0,
+            turn_cached_input_tokens: 0,
+        };
+
+        let delta = snapshot_to_turn_delta(
+            &snapshot,
+            ClientType::Agent,
+            None,
+            0,
+            None,
+            false,
+            None,
+            None,
+            None,
+        );
+
+        assert_eq!(delta.truncation_retry, None);
+        assert_eq!(delta.truncation_retry_tokens_wasted, None);
+
+        let json = serde_json::to_value(&delta).unwrap();
+        assert!(
+            json.get("truncationRetry").is_none(),
+            "no-retry turn must omit the flag entirely: {json}"
+        );
+        assert!(
+            json.get("truncationRetryTokensWasted").is_none(),
+            "no-retry turn must omit the wasted count: {json}"
+        );
     }
 
     #[test]

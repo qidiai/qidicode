@@ -179,6 +179,15 @@ pub struct SessionSignalsDelta {
     pub last_itl_max_ms: Option<u64>,
     /// ITL mean for the most recent response in this turn
     pub last_itl_mean_ms: Option<u64>,
+    /// Whether any response this turn needed the sampler's one-shot
+    /// `max_tokens` budget boost (the truncated attempt was re-sampled with a
+    /// larger budget). `None` when the turn never truncated — never
+    /// `Some(false)`.
+    pub last_truncation_retry: Option<bool>,
+    /// Output tokens discarded by this turn's truncated attempts.
+    /// `Some(0)` means a retry happened but nothing was wasted, which is
+    /// distinct from `None` (no retry).
+    pub last_truncation_retry_tokens_wasted: Option<u64>,
     /// Number of response (completion - reasoning) tokens generated this turn.
     /// `None` when no token usage was reported (e.g. old client or no inference).
     pub response_tokens: Option<u32>,
@@ -533,6 +542,11 @@ pub enum SignalEvent {
     },
     /// Record detailed inference metrics including inter-token latency
     RecordInferenceMetrics(InferenceLatencyStats),
+    /// Record that a response needed the sampler's `max_tokens` budget boost
+    /// (the truncated attempt's output was discarded). Emitted only for a
+    /// retry that actually happened, so the turn-level fields can never
+    /// degrade to `Some(false)`.
+    RecordTruncationRetry { tokens_wasted: u64 },
     /// Record token usage from a model response (completion + reasoning tokens).
     /// Accumulated per turn and reset at each `TakeTurnEndSnapshot`.
     RecordTokenUsage {
@@ -883,6 +897,25 @@ impl SessionSignalsHandle {
         let _ = self.tx.send(SignalEvent::RecordInferenceMetrics(stats));
     }
 
+    /// Record the sampler's truncation-retry observability for a response.
+    ///
+    /// Fed with `cf_sampler::InferenceLatencyStats::truncation_retry` /
+    /// `truncation_retry_tokens_wasted`. Only a *confirmed* retry
+    /// (`Some(true)`) is recorded: `None` (the turn never truncated) and
+    /// `Some(false)` (never emitted by the sampler, and semantically useless)
+    /// are dropped, so the turn delta carries `None` rather than a
+    /// `Some(false)` that would pollute the data surface. A missing
+    /// wasted-token count with a confirmed retry records `0`, which stays
+    /// distinguishable from `None`.
+    pub fn record_truncation_retry(&self, retried: Option<bool>, tokens_wasted: Option<u64>) {
+        if retried != Some(true) {
+            return;
+        }
+        let _ = self.tx.send(SignalEvent::RecordTruncationRetry {
+            tokens_wasted: tokens_wasted.unwrap_or(0),
+        });
+    }
+
     /// Record token usage from a model response.
     ///
     /// - `completion_tokens`: total output tokens (includes reasoning tokens)
@@ -1044,6 +1077,15 @@ pub struct SessionSignalsActor {
     last_turn_response_time_ms: Option<u64>,
     /// Accumulated ITL intervals for the current turn (cleared at turn end).
     turn_itl_intervals: Vec<u64>,
+    /// Whether any response this turn needed the sampler's `max_tokens` budget
+    /// boost (a truncated attempt re-sampled with a larger budget).
+    /// Reset after each `TakeTurnEndSnapshot`.
+    turn_truncation_retried: bool,
+    /// Output tokens discarded by this turn's truncated attempts, summed
+    /// across the turn's boosted retries. Only meaningful while
+    /// `turn_truncation_retried` is true. Reset after each
+    /// `TakeTurnEndSnapshot`.
+    turn_truncation_retry_tokens_wasted: u64,
     /// Accumulated response (completion - reasoning) tokens for the current turn.
     /// `None` until the first `RecordTokenUsage` event in this turn.
     /// Reset to `None` after each `TakeTurnEndSnapshot`.
@@ -1142,6 +1184,8 @@ impl SessionSignalsActor {
             last_turn_ttft_ms: None,
             last_turn_response_time_ms: None,
             turn_itl_intervals: Vec::new(),
+            turn_truncation_retried: false,
+            turn_truncation_retry_tokens_wasted: 0,
             turn_response_tokens: None,
             turn_thinking_tokens: None,
             prs_created_this_turn: Vec::new(),
@@ -1362,6 +1406,14 @@ impl SessionSignalsActor {
                         self.update_latency_stats(ttfb, stats.time_to_last_byte_ms);
                     }
                 }
+                SignalEvent::RecordTruncationRetry { tokens_wasted } => {
+                    // Sticky for the rest of the turn: any boosted retry this
+                    // turn has to survive later rounds that did not truncate.
+                    self.turn_truncation_retried = true;
+                    self.turn_truncation_retry_tokens_wasted = self
+                        .turn_truncation_retry_tokens_wasted
+                        .saturating_add(tokens_wasted);
+                }
                 SignalEvent::RecordTokenUsage {
                     completion_tokens,
                     reasoning_tokens,
@@ -1480,6 +1532,10 @@ impl SessionSignalsActor {
                         last_itl_p99_ms: turn_itl_p99,
                         last_itl_max_ms: turn_itl_max,
                         last_itl_mean_ms: turn_itl_mean,
+                        last_truncation_retry: self.turn_truncation_retried.then_some(true),
+                        last_truncation_retry_tokens_wasted: self
+                            .turn_truncation_retried
+                            .then_some(self.turn_truncation_retry_tokens_wasted),
                         response_tokens: self.turn_response_tokens.take(),
                         thinking_tokens: self.turn_thinking_tokens.take(),
                         // LOC deltas
@@ -1517,6 +1573,11 @@ impl SessionSignalsActor {
                             - prev.map_or(0, |p| p.pr_merged_count as i64),
                         prs_created_this_turn: std::mem::take(&mut self.prs_created_this_turn),
                     };
+
+                    // Reset the per-turn truncation-retry accumulators so the
+                    // next turn reports its own retries (or `None`).
+                    self.turn_truncation_retried = false;
+                    self.turn_truncation_retry_tokens_wasted = 0;
 
                     // Deduplicate and cap tools_this_turn at 100 entries.
                     // With tool_outcomes_this_turn providing per-tool counts,
@@ -1940,6 +2001,67 @@ mod tests {
         let json = serde_json::to_string(&turn.delta).unwrap();
         assert!(json.contains("\"deltaPrsCreated\":0"));
         assert!(!json.contains("prsCreatedThisTurn"));
+
+        handle.shutdown();
+        actor_handle.await.unwrap();
+    }
+
+    /// The sampler's truncation-retry fields must reach the turn delta, and a
+    /// retry that wasted nothing must stay distinguishable from "no retry".
+    #[tokio::test]
+    async fn test_truncation_retry_projects_into_turn_delta() {
+        let (handle, actor) = SessionSignalsActor::new();
+        let actor_handle = tokio::spawn(actor.run());
+
+        // `Some(true)` + `Some(0)` = a real retry that burned no output.
+        handle.record_truncation_retry(Some(true), Some(0));
+
+        let turn = handle.take_turn_end_snapshot().await.unwrap();
+        assert_eq!(turn.delta.last_truncation_retry, Some(true));
+        assert_eq!(turn.delta.last_truncation_retry_tokens_wasted, Some(0));
+
+        // Both survive serialization — the payload must not drop a zero.
+        let json = serde_json::to_string(&turn.delta).unwrap();
+        assert!(
+            json.contains("\"lastTruncationRetry\":true"),
+            "serialized delta must carry the retry flag: {json}"
+        );
+        assert!(
+            json.contains("\"lastTruncationRetryTokensWasted\":0"),
+            "serialized delta must keep a zero wasted count: {json}"
+        );
+
+        handle.shutdown();
+        actor_handle.await.unwrap();
+    }
+
+    /// A turn that never truncated reports `None`, and the accumulators are
+    /// per-turn (a later clean turn must not inherit the retry).
+    #[tokio::test]
+    async fn test_truncation_retry_absent_when_not_retried() {
+        let (handle, actor) = SessionSignalsActor::new();
+        let actor_handle = tokio::spawn(actor.run());
+
+        // Absent sampler values and `Some(false)` are both non-events: a
+        // `Some(false)` must never reach the wire.
+        handle.record_truncation_retry(None, None);
+        handle.record_truncation_retry(Some(false), Some(9));
+
+        let turn = handle.take_turn_end_snapshot().await.unwrap();
+        assert_eq!(turn.delta.last_truncation_retry, None);
+        assert_eq!(turn.delta.last_truncation_retry_tokens_wasted, None);
+
+        // Real retries in the next turn are summed and reported...
+        handle.record_truncation_retry(Some(true), Some(120));
+        handle.record_truncation_retry(Some(true), Some(30));
+        let turn = handle.take_turn_end_snapshot().await.unwrap();
+        assert_eq!(turn.delta.last_truncation_retry, Some(true));
+        assert_eq!(turn.delta.last_truncation_retry_tokens_wasted, Some(150));
+
+        // ...and the turn after it starts clean again.
+        let turn = handle.take_turn_end_snapshot().await.unwrap();
+        assert_eq!(turn.delta.last_truncation_retry, None);
+        assert_eq!(turn.delta.last_truncation_retry_tokens_wasted, None);
 
         handle.shutdown();
         actor_handle.await.unwrap();

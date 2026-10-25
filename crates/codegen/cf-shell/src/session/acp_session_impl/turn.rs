@@ -1988,6 +1988,15 @@ impl SessionActor {
             }
             let completion_tokens = usage.map(|u| u.completion_tokens);
             let reasoning_tokens = usage.map(|u| u.reasoning_tokens);
+            // Truncation-retry observability carried by the sampler's
+            // `InferenceLatencyStats` (set only when a truncated attempt was
+            // re-sampled with a boosted `max_tokens` budget). Recorded before
+            // the turn-end snapshot so the delta can project it; a turn that
+            // never truncated stays `None`.
+            self.signals_handle().record_truncation_retry(
+                latency.truncation_retry,
+                latency.truncation_retry_tokens_wasted,
+            );
             let ttft_ms = latency.time_to_first_token_ms;
             let tokens_per_sec = match completion_tokens {
                 Some(ct) if ct > 0 => {
