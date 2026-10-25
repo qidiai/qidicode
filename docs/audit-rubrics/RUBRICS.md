@@ -21,7 +21,7 @@
 
 ---
 
-## 活跃条目（19）
+## 活跃条目（20）
 
 ### R-020 【默认值】matplotlib 中文字体小字号静默丢失；ASCII 正常渲染极具隐蔽性
 - **触发**：用 matplotlib（或任何经 FreeType 的渲染栈）生成含中文的图表/图片，尤其是标书图表
@@ -118,6 +118,11 @@
 - **触发**：求解器/框架/采样约定换版后复用既有 release_gates；叙事报告引用任何统计证据
 - **规则**：①框架换版时，**判据线、闸门定义、采样约定三者必须一并重推导**——"末 500 步 Δp 变化<2%"是稳态口径（500 迭代步=长平均窗），字面移植到瞬态（自适应 dt≈3e-6）后退化为 1.5 ms/3 样本窗，名义"通过"实无证明力；②叙事文档引用统计证据（收敛/稳定/通过）必须**携带样本数与窗口宽度限定词**——证据文件诚实而上游转述失真是高频事故（本轮两处同型）；③单点报数在未证收敛前必须带宽化（给出 min/max/mean/std 而非点值）
 - **证据**：2026-10-06 患者C 对抗审计 C1（三棒制裁决）：闸门④"0.37%"窗口实为 3 样本/1.5ms，Δp 全程带宽 8.22% 从未时间收敛——控方（DeepSeek-V4.1-Flash）发现窗口解剖、辩方（GLM-5.3-FLASH）完成正名"有界宽带间歇脉动"、裁决席（GLM-5.3-222）第三遍独立复算锁案；与"9 个数量级"跨框架假象（R-016 原例）同族同根
+
+### R-021 【取证方法】"零命中"结论必须两种正交搜法交叉支撑——字面量搜不到经常量/helper 的读取
+- **触发**：落笔任何"某字符串/环境变量/端点/字段**已无读取点、无调用方、不再被识别、唯一来源**"式的**负向事实陈述**之前（尤以 README、注释、迁移说明为甚）
+- **规则**：①负向结论必须由**至少两种正交搜法**共同支撑——字面量、常量名/标识符、helper 函数名、（若跨 serde/JSON）wire 字段名；只搜字面量对 `std::env::var(CONST)` 这类**经间接层的读取结构性必然漏检**；②"我没搜到"≠"不存在"，须给出**正证**（读取点行号或确证的定义缺失）；③反向同样致命：**把仍生效的东西写成已废弃**会诱导用户删除有效配置，比残留更坏——文档里"不再支持"每一条都要有行号背书；④命名直觉不可靠，新旧名可能**方向相反**（本例现役主名是 `XAI_API_KEY`，`QIDI_API_KEY` 才是 legacy 回退）；⑤此类改动应进审计队列（R-012），主会话自证不足以结案
+- **证据**：2026-10-25 commit `dee6511a`→`9975a4f8`。主会话用正则 `var\("XAI_API_KEY"\)` 得零命中，据此把 README:67 写成"`GROK_HOME`、`GROK_API_KEY`、`XAI_API_KEY` 不再被识别（代码中已无读取点）"。codebuddy/step-5 补审判 **MAJOR** 并给正证：`cf-shell/src/agent/auth_method.rs:51` `pub const XAI_API_KEY_ENV_VAR: &str = "XAI_API_KEY"`、`:57` `LEGACY_XAI_API_KEY_ENV_VAR = "QIDI_API_KEY"`（方向相反）、`:64` `std::env::var(XAI_API_KEY_ENV_VAR).or_else(|_| std::env::var(LEGACY_XAI_API_KEY_ENV_VAR))`；散布面 auth_method.rs 34 / trace_classifier 19 / models.rs 16 / config.rs 12 / sampling/error.rs 11 等处，另 cf-pager headless/models/acp/voice·auth/event_loop/leader_cluster 与 cf-voice 均在读。同批 `GROK_HOME`/`GROK_API_KEY` 经正交复核确为零命中，原表述保留（说明"零命中"本身可以成立，错在未交叉验证）。关联 R-002、R-006、R-012
 
 ---
 
