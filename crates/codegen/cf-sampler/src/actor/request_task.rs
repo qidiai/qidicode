@@ -16,8 +16,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use cf_sampling_types::{
-    ConversationRequest, ConversationResponse, EmptyResponseContext, SamplingError,
-    error::Result as SamplingResult,
+    ContentPart, ConversationItem, ConversationRequest, ConversationResponse, EmptyResponseContext,
+    SamplingError, ToolSpec, error::Result as SamplingResult,
 };
 
 use crate::client::{ApiBackend, SamplingClient};
@@ -25,8 +25,8 @@ use crate::config::{RetryPolicy, SamplerConfig};
 use crate::events::{SamplingErrorInfo, SamplingErrorKind, SamplingEvent};
 use crate::metrics::InferenceLatencyStats;
 use crate::retry::{
-    self as retry_mod, RetryDecision, classify_error, clone_error, is_failover_error,
-    resolve_failover_max_retries, resolve_max_retries,
+    self as retry_mod, RetryDecision, clone_error, is_failover_error, resolve_failover_max_retries,
+    resolve_max_retries,
 };
 use crate::stream::{stream_chat_completions, stream_messages, stream_responses};
 use crate::types::RequestId;
@@ -43,6 +43,27 @@ const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300;
 /// `SamplingErrorInfo` round trip.
 pub(crate) type CompletionResult =
     Result<(ConversationResponse, InferenceLatencyStats), SamplingError>;
+
+/// Usage observed on a truncated attempt, threaded from the L2 stream to the
+/// retry loop so the budget-boost stop-loss can decide without re-parsing the
+/// response. `None` fields mean "not available on this wire" and are estimated
+/// from the request / sent budget instead.
+#[derive(Debug, Clone, Copy, Default)]
+struct TruncationContext {
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+}
+
+/// One-shot `max_tokens` budget-boost bookkeeping.
+#[derive(Debug, Default)]
+struct BudgetBoostState {
+    /// A boost was already issued for this request — never issue a second.
+    used: bool,
+    /// Number of boosted attempts (0 or 1; folded into `metrics.attempts`).
+    attempts: u32,
+    /// Output tokens discarded by the truncated attempt (observability).
+    wasted_tokens: u64,
+}
 
 /// Outcome of a single attempt within the retry loop.
 enum AttemptOutcome {
@@ -63,7 +84,14 @@ enum AttemptOutcome {
     /// captured (e.g. the failure was synthesised inside the L2
     /// transform), `error` was reconstructed from the
     /// [`SamplingErrorInfo`].
-    Failed { error: SamplingError },
+    Failed {
+        error: SamplingError,
+        /// Usage from the truncated attempt, when the L2 stream could
+        /// observe it (Chat Completions / Responses). Messages surfaces
+        /// truncation as a synthesised `Failed` event with no response, so
+        /// its context is `None` and the stop-loss estimates conservatively.
+        truncation: Option<TruncationContext>,
+    },
     /// `cancel_token` fired mid-attempt. The retry loop bails out
     /// without further attempts.
     Cancelled,
@@ -126,6 +154,9 @@ pub(crate) async fn run_request_task(
 
     let mut request = request;
     let mut retry_count: u32 = 0;
+    // Truncation recovery is a one-shot budget boost, separate from the
+    // transport retry budget and from doom-loop resamples.
+    let mut budget_boost = BudgetBoostState::default();
     // Model recorded on `sampling_span`; refreshed after a failover switch
     // so the span stays honest about which model later attempts hit.
     let mut span_model = config.model.clone();
@@ -166,7 +197,16 @@ pub(crate) async fn run_request_task(
                 response,
                 mut metrics,
             } => {
-                metrics.attempts = retry_count + doom_retry_count + 1;
+                metrics.attempts = retry_count + doom_retry_count + budget_boost.attempts + 1;
+                if budget_boost.used {
+                    // Observability for the truncation retry: the successful
+                    // turn cost one discarded generation. Emitted onto the
+                    // `completed` TurnMetrics here; the cf-shell/cf-pager
+                    // projection that surfaces it to the user is wired
+                    // separately (see the truncation-retry display follow-up).
+                    metrics.truncation_retry = Some(true);
+                    metrics.truncation_retry_tokens_wasted = Some(budget_boost.wasted_tokens);
+                }
                 if let Some(policy) = doom_policy {
                     let confident = policy.confident_triggers(&response.doom_loop_signals);
                     if !confident.is_empty() {
@@ -225,6 +265,8 @@ pub(crate) async fn run_request_task(
                     &mut config,
                     &mut fallback_queue,
                     &mut tried_models,
+                    &mut budget_boost,
+                    None,
                     &mut completion_tx,
                 )
                 .await
@@ -232,7 +274,7 @@ pub(crate) async fn run_request_task(
                     return request_id;
                 }
             }
-            AttemptOutcome::Failed { error } => {
+            AttemptOutcome::Failed { error, truncation } => {
                 // Doom-loop resamples run on their own budget and never
                 // consult the transport classifier, so no classifier change
                 // can silently debit the transport budget for a doom failure.
@@ -270,6 +312,8 @@ pub(crate) async fn run_request_task(
                     &mut config,
                     &mut fallback_queue,
                     &mut tried_models,
+                    &mut budget_boost,
+                    truncation.as_ref(),
                     &mut completion_tx,
                 )
                 .await
@@ -295,6 +339,8 @@ pub(crate) async fn run_request_task(
                     &mut config,
                     &mut fallback_queue,
                     &mut tried_models,
+                    &mut budget_boost,
+                    None,
                     &mut completion_tx,
                 )
                 .await
@@ -325,6 +371,8 @@ async fn apply_retry_decision(
     config: &mut SamplerConfig,
     fallback_queue: &mut VecDeque<SamplerConfig>,
     tried_models: &mut Vec<String>,
+    budget_boost: &mut BudgetBoostState,
+    truncation: Option<&TruncationContext>,
     completion_tx: &mut Option<oneshot::Sender<CompletionResult>>,
 ) -> bool {
     // With a fallback still queued, cap retries on failover-eligible
@@ -342,7 +390,13 @@ async fn apply_retry_decision(
     } else {
         retry_policy.rate_limit_retry_threshold
     };
-    let decision = classify_error(err, *retry_count, max_retries, rate_limit_threshold);
+    let decision = retry_mod::classify_error_with_budget(
+        err,
+        *retry_count,
+        max_retries,
+        rate_limit_threshold,
+        !budget_boost.used,
+    );
 
     // Connection-reset / broken-pipe on body upload often means nginx
     // rejected an oversized payload before responding 413. Strip
@@ -404,6 +458,51 @@ async fn apply_retry_decision(
                     );
                 }
             }
+            true
+        }
+        RetryDecision::BudgetBoost => {
+            let (prompt_tokens, completion_tokens) = truncation_usage(request, truncation);
+            let sent_max_tokens = client.effective_max_output_tokens(request);
+            let Some(plan) = retry_mod::plan_budget_boost(
+                sent_max_tokens,
+                prompt_tokens,
+                completion_tokens,
+                config.context_window,
+            ) else {
+                tracing::warn!(
+                    target: crate::sampling_log::TARGET,
+                    sent_max_tokens = sent_max_tokens.unwrap_or(0),
+                    prompt_tokens,
+                    first_round_completion_tokens = completion_tokens.unwrap_or(0),
+                    context_window = config.context_window,
+                    outcome = "skipped",
+                    "max_tokens truncation: budget boost cannot help; surfacing the error"
+                );
+                emit_failed(event_tx, request_id, err);
+                send_completion(completion_tx, Err(clone_error(err)));
+                return false;
+            };
+
+            let new_max_tokens = u32::try_from(plan.new_max_tokens).unwrap_or(u32::MAX);
+            request.max_output_tokens = Some(new_max_tokens);
+            budget_boost.used = true;
+            budget_boost.attempts += 1;
+            budget_boost.wasted_tokens = budget_boost
+                .wasted_tokens
+                .saturating_add(plan.first_round_completion_tokens);
+            tracing::warn!(
+                target: crate::sampling_log::TARGET,
+                sent_max_tokens = plan.baseline_tokens,
+                new_max_tokens,
+                prompt_tokens,
+                first_round_completion_tokens = plan.first_round_completion_tokens,
+                context_window = config.context_window,
+                outcome = "budget_boost",
+                "max_tokens truncation: re-sending once with a doubled output budget"
+            );
+            // One-shot budget: report it as attempt 1 of 1 so consumers
+            // never read it as transport-retry progress.
+            emit_retrying(event_tx, request_id, 1, 1, err);
             true
         }
         RetryDecision::EmitToSession(emitted_err) => {
@@ -648,12 +747,29 @@ async fn drive_l2(
                                     triggers,
                                     aborted_at_chunk: None,
                                 },
+                                truncation: None,
                             };
                         }
                     }
                     if response.stop_reason == Some(cf_sampling_types::StopReason::Length) {
+                        // Thread usage to the retry loop: the budget-boost
+                        // stop-loss needs prompt + first-round completion to
+                        // tell "just short" apart from "context window hit".
+                        let truncation = TruncationContext {
+                            prompt_tokens: response
+                                .usage
+                                .as_ref()
+                                .map(|usage| u64::from(usage.prompt_tokens))
+                                .filter(|tokens| *tokens > 0),
+                            completion_tokens: response
+                                .usage
+                                .as_ref()
+                                .map(|usage| u64::from(usage.completion_tokens))
+                                .or_else(|| Some(estimate_generated_tokens(&response))),
+                        };
                         return AttemptOutcome::Failed {
                             error: SamplingError::MaxTokensTruncation,
+                            truncation: Some(truncation),
                         };
                     }
                     // A content-filtered turn (Anthropic refusal, OpenAI
@@ -673,7 +789,10 @@ async fn drive_l2(
                         .ok()
                         .and_then(|mut g| g.take());
                     let error = raw.unwrap_or_else(|| synthesize_from_info(&info));
-                    return AttemptOutcome::Failed { error };
+                    return AttemptOutcome::Failed {
+                        error,
+                        truncation: None,
+                    };
                 }
                 Some(other) => {
                     let _ = event_tx.send(retag(other, &request_id));
@@ -687,6 +806,7 @@ async fn drive_l2(
                         error: SamplingError::EventStreamError(
                             "stream dropped without terminal event".to_string(),
                         ),
+                        truncation: None,
                     };
                 }
             }
@@ -797,6 +917,101 @@ fn build_empty_context(
         model,
         first_choice_seen,
     }
+}
+
+/// Prompt / first-round-output token counts for the budget-boost stop-loss.
+///
+/// Prefers the usage the backend reported. When the wire surfaced truncation
+/// as a synthesised failure (Messages), the prompt is estimated from the
+/// serialized request and the completion count is left `None`; the planner
+/// then uses the sent budget as the conservative fallback (a max_tokens
+/// truncation consumes the whole cap it was given).
+fn truncation_usage(
+    request: &ConversationRequest,
+    truncation: Option<&TruncationContext>,
+) -> (u64, Option<u64>) {
+    let prompt_tokens = truncation
+        .and_then(|ctx| ctx.prompt_tokens)
+        .unwrap_or_else(|| estimate_prompt_tokens(request));
+    let completion_tokens = truncation.and_then(|ctx| ctx.completion_tokens);
+    (prompt_tokens, completion_tokens)
+}
+
+/// Character-aware estimate of the prompt-side tokens for a request. Only
+/// runs on the truncation path (never on the hot path).
+///
+/// Mirrors `cf-chat-state`'s per-item estimator (text via
+/// `estimate_tokens_aware`, images at the fixed per-image cost, reasoning
+/// blobs at bytes/4) and adds the tool definitions, which are part of every
+/// wire payload. Being slightly high is the safe direction here: it makes
+/// the budget-boost stop-loss more willing to skip a doomed retry.
+fn estimate_prompt_tokens(request: &ConversationRequest) -> u64 {
+    let items: u64 = request.items.iter().map(estimate_item_tokens).sum();
+    let tools: u64 = request.tools.iter().map(estimate_tool_tokens).sum();
+    items.saturating_add(tools)
+}
+
+fn estimate_item_tokens(item: &ConversationItem) -> u64 {
+    match item {
+        ConversationItem::System(system) => {
+            cf_token_estimation::estimate_tokens_aware(&system.content)
+        }
+        ConversationItem::User(user) => {
+            let mut tokens = 0;
+            let mut images = 0;
+            for part in &user.content {
+                match part {
+                    ContentPart::Text { text } => {
+                        tokens += cf_token_estimation::estimate_tokens_aware(text);
+                    }
+                    ContentPart::Image { .. } => images += 1,
+                }
+            }
+            tokens + cf_token_estimation::estimate_image_tokens(images)
+        }
+        ConversationItem::Assistant(assistant) => {
+            let content = cf_token_estimation::estimate_tokens_aware(&assistant.content);
+            let tool_args: u64 = assistant
+                .tool_calls
+                .iter()
+                .map(|call| cf_token_estimation::estimate_tokens_aware(call.arguments.as_ref()))
+                .sum();
+            content.saturating_add(tool_args)
+        }
+        ConversationItem::ToolResult(result) => {
+            cf_token_estimation::estimate_tokens_aware(&result.content)
+                + cf_token_estimation::estimate_image_tokens(result.images.len() as u64)
+        }
+        ConversationItem::BackendToolCall(call) => {
+            cf_token_estimation::estimate_tokens_aware(&call.text_summary())
+        }
+        ConversationItem::Reasoning(reasoning) => {
+            let text = cf_sampling_types::reasoning_item_text(reasoning);
+            let encrypted_bytes = reasoning.encrypted_content.as_deref().map_or(0, str::len) as u64;
+            cf_token_estimation::estimate_tokens_aware(&text)
+                + encrypted_bytes / cf_token_estimation::BYTES_PER_TOKEN
+        }
+    }
+}
+
+fn estimate_tool_tokens(tool: &ToolSpec) -> u64 {
+    let description = tool.description.as_deref().unwrap_or("");
+    cf_token_estimation::estimate_tokens_aware(&tool.name)
+        + cf_token_estimation::estimate_tokens_aware(description)
+        + cf_token_estimation::estimate_tokens_aware(&tool.parameters.to_string())
+}
+
+/// Estimate generated output tokens from the response when usage is absent.
+fn estimate_generated_tokens(response: &ConversationResponse) -> u64 {
+    response.assistant().map_or(0, |assistant| {
+        let content = cf_token_estimation::estimate_tokens_aware(assistant.content.as_ref());
+        let tool_args: u64 = assistant
+            .tool_calls
+            .iter()
+            .map(|call| cf_token_estimation::estimate_tokens_aware(call.arguments.as_ref()))
+            .sum();
+        content.saturating_add(tool_args)
+    })
 }
 
 fn emit_failed(

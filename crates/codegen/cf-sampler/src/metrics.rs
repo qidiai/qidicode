@@ -49,6 +49,17 @@ pub struct InferenceLatencyStats {
     pub itl_mean_ms: Option<u64>,
     /// Total request attempts (`1` = no retries); set by the retry loop on success.
     pub attempts: u32,
+    /// Set only when the turn needed the one-shot `max_tokens` budget boost
+    /// (`true` on a successful boosted retry). Rides `Completed` to the shell
+    /// as the sampler-side observability for truncation retries; absent on
+    /// turns that never truncated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncation_retry: Option<bool>,
+    /// Output tokens produced by the truncated first attempt and discarded
+    /// when the boosted retry re-generated the response. Only present when
+    /// [`truncation_retry`](Self::truncation_retry) is `Some(true)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncation_retry_tokens_wasted: Option<u64>,
 }
 
 impl InferenceLatencyStats {
@@ -115,6 +126,8 @@ impl InferenceLatencyStats {
             itl_max_ms: itl_max,
             itl_mean_ms: itl_mean,
             attempts: 0,
+            truncation_retry: None,
+            truncation_retry_tokens_wasted: None,
         }
     }
 }

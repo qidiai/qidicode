@@ -454,6 +454,11 @@ pub fn stream_messages<'a>(
         }
 
         if final_stop_reason == Some(StopReason::Length) {
+            // Keep the terminal shape a `Failed` event (buffered collectors
+            // such as compaction rely on it). The actor's retry loop may
+            // re-send once with a doubled output budget before surfacing this
+            // exact error; the budget boost is not a failover and stays inside
+            // the sampler.
             yield SamplingEvent::Failed {
                 request_id: request_id.clone(),
                 error: SamplingErrorInfo::from(&SamplingError::MaxTokensTruncation),

@@ -44,6 +44,39 @@ const DEFAULT_CLIENT_IDENTIFIER: &str = "grok-shell";
 const AGENT_PRODUCT: &str = "grok-shell";
 const ANTHROPIC_DEFAULT_MAX_TOKENS: u32 = 128_000;
 
+/// Resolve the output-token budget a request will actually put on the wire
+/// for a given backend.
+///
+/// This is the single source of truth used by both the `apply_*_defaults`
+/// methods (which fill the wire request) and
+/// [`SamplingClient::effective_max_output_tokens`] (which the truncation
+/// retry uses to double the value it just sent). Keeping them on one
+/// function is what makes "the value we double == the value we sent" hold.
+///
+/// - Chat Completions / Responses: explicit request value, else the client
+///   default, else `None` — the field is omitted and the provider default
+///   applies (unknown to us).
+/// - Messages: `max_tokens` is required (`u32`, `0` = unset), so the
+///   request value, else the client default, else
+///   [`ANTHROPIC_DEFAULT_MAX_TOKENS`].
+pub(crate) fn resolve_effective_max_output_tokens(
+    backend: ApiBackend,
+    request_value: Option<u32>,
+    client_default: Option<u32>,
+) -> Option<u64> {
+    match backend {
+        ApiBackend::Messages => Some(u64::from(
+            request_value
+                .filter(|tokens| *tokens > 0)
+                .or(client_default)
+                .unwrap_or(ANTHROPIC_DEFAULT_MAX_TOKENS),
+        )),
+        ApiBackend::ChatCompletions | ApiBackend::Responses => {
+            request_value.or(client_default).map(u64::from)
+        }
+    }
+}
+
 /// Per-request `x-grok-*` headers. Optional fields are skipped when empty/`None`.
 struct GrokRequestHeaders<'a> {
     conv_id: &'a str,
@@ -560,6 +593,22 @@ impl SamplingClient {
         self.defaults.api_backend.clone()
     }
 
+    /// The `max_tokens` / `max_output_tokens` value this client will put on
+    /// the wire for `request` on its current backend.
+    ///
+    /// Mirrors the `apply_*_defaults` precedence exactly (they share
+    /// [`resolve_effective_max_output_tokens`]), so callers can double the
+    /// value that was actually sent instead of re-deriving it. `None` means
+    /// the wire omits the field (provider default unknown) and only occurs
+    /// on Chat Completions / Responses.
+    pub fn effective_max_output_tokens(&self, request: &ConversationRequest) -> Option<u64> {
+        resolve_effective_max_output_tokens(
+            self.api_backend(),
+            request.max_output_tokens,
+            self.defaults.max_completion_tokens,
+        )
+    }
+
     /// Access the proactive rate limiter.
     pub fn rate_limiter(&self) -> &crate::rate_limiter::ApiRateLimiter {
         &self.rate_limiter
@@ -812,7 +861,12 @@ impl SamplingClient {
         }
 
         if request.max_tokens.is_none() {
-            request.max_tokens = self.defaults.max_completion_tokens;
+            request.max_tokens = resolve_effective_max_output_tokens(
+                ApiBackend::ChatCompletions,
+                request.max_tokens,
+                self.defaults.max_completion_tokens,
+            )
+            .map(|tokens| u32::try_from(tokens).unwrap_or(u32::MAX));
         }
 
         if request.temperature.is_none() {
@@ -1136,7 +1190,12 @@ impl SamplingClient {
 
         // Apply max_output_tokens default if not specified
         if request.inner.max_output_tokens.is_none() {
-            request.inner.max_output_tokens = self.defaults.max_completion_tokens;
+            request.inner.max_output_tokens = resolve_effective_max_output_tokens(
+                ApiBackend::Responses,
+                request.inner.max_output_tokens,
+                self.defaults.max_completion_tokens,
+            )
+            .map(|tokens| u32::try_from(tokens).unwrap_or(u32::MAX));
         }
 
         // Set store to false if not specified (default is true, but that breaks ZDR compliance)
@@ -1514,10 +1573,13 @@ impl SamplingClient {
         }
 
         if request.inner.max_tokens == 0 {
-            request.inner.max_tokens = self
-                .defaults
-                .max_completion_tokens
-                .unwrap_or(ANTHROPIC_DEFAULT_MAX_TOKENS);
+            request.inner.max_tokens = resolve_effective_max_output_tokens(
+                ApiBackend::Messages,
+                None,
+                self.defaults.max_completion_tokens,
+            )
+            .and_then(|tokens| u32::try_from(tokens).ok())
+            .unwrap_or(ANTHROPIC_DEFAULT_MAX_TOKENS);
         }
 
         // Apply temperature default if not specified
@@ -2119,6 +2181,112 @@ mod tests {
             header_injector: None,
             fallback_configs: Vec::new(),
         }
+    }
+
+    fn config_for(backend: ApiBackend, default_max: Option<u32>) -> SamplerConfig {
+        let mut config = minimal_config();
+        config.api_backend = backend;
+        config.max_completion_tokens = default_max;
+        config
+    }
+
+    fn request_with_max(max_output_tokens: Option<u32>) -> ConversationRequest {
+        ConversationRequest {
+            max_output_tokens,
+            ..ConversationRequest::default()
+        }
+    }
+
+    // ── The "value actually sent", per wire (budget-boost precondition) ──
+
+    #[test]
+    fn effective_max_output_tokens_chat_uses_request_then_default() {
+        let client = SamplingClient::new(config_for(ApiBackend::ChatCompletions, Some(4096)))
+            .expect("client builds");
+        assert_eq!(
+            client.effective_max_output_tokens(&request_with_max(Some(2048))),
+            Some(2048),
+            "explicit request value is what apply_defaults leaves on the wire"
+        );
+        assert_eq!(
+            client.effective_max_output_tokens(&request_with_max(None)),
+            Some(4096),
+            "None falls back to the client default, like apply_defaults"
+        );
+
+        let no_default =
+            SamplingClient::new(config_for(ApiBackend::ChatCompletions, None)).expect("builds");
+        assert_eq!(
+            no_default.effective_max_output_tokens(&request_with_max(None)),
+            None,
+            "both unset means the wire omits the field (provider default unknown)"
+        );
+    }
+
+    #[test]
+    fn effective_max_output_tokens_responses_uses_request_then_default() {
+        let client = SamplingClient::new(config_for(ApiBackend::Responses, Some(8192)))
+            .expect("client builds");
+        assert_eq!(
+            client.effective_max_output_tokens(&request_with_max(Some(3000))),
+            Some(3000)
+        );
+        assert_eq!(
+            client.effective_max_output_tokens(&request_with_max(None)),
+            Some(8192)
+        );
+    }
+
+    #[test]
+    fn effective_max_output_tokens_messages_falls_back_to_anthropic_constant() {
+        let client =
+            SamplingClient::new(config_for(ApiBackend::Messages, None)).expect("client builds");
+        assert_eq!(
+            client.effective_max_output_tokens(&request_with_max(Some(4096))),
+            Some(4096)
+        );
+        // 0 is the wire's "unset" (build_messages_request) and is replaced by
+        // apply_message_defaults; the resolved value must match that fill.
+        assert_eq!(
+            client.effective_max_output_tokens(&request_with_max(Some(0))),
+            Some(u64::from(ANTHROPIC_DEFAULT_MAX_TOKENS))
+        );
+        assert_eq!(
+            client.effective_max_output_tokens(&request_with_max(None)),
+            Some(u64::from(ANTHROPIC_DEFAULT_MAX_TOKENS))
+        );
+    }
+
+    /// The chat wire request must carry the same value the retry path reads.
+    #[test]
+    fn apply_defaults_persists_the_effective_chat_budget() {
+        let client = SamplingClient::new(config_for(ApiBackend::ChatCompletions, Some(4096)))
+            .expect("client builds");
+        let request = ChatCompletionRequest {
+            model: Some("test-model".into()),
+            messages: vec![ChatRequestMessage::user("hello")],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            user: None,
+            tools: None,
+            tool_choice: None,
+            search_parameters: None,
+            response_format: None,
+            reasoning_effort: None,
+            x_grok_conv_id: None,
+            x_grok_req_id: None,
+            x_grok_session_id: None,
+            x_grok_turn_idx: None,
+            x_grok_agent_id: None,
+            x_grok_deployment_id: None,
+            x_grok_user_id: None,
+            trace: None,
+        };
+        let applied = client.apply_defaults(request).expect("defaults apply");
+        assert_eq!(applied.max_tokens, Some(4096));
     }
 
     /// Verify the serialized shape of StreamingChatRequest matches the

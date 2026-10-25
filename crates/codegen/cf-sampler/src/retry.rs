@@ -28,7 +28,12 @@
 //! - `Auth` / `InvalidConfiguration` (credential/config issues)
 //! - `IdleTimeout` (model stuck, retry would stall again)
 //! - `Serialization` (response parsing failure)
-//! - `MaxTokensTruncation` (by design)
+//!
+//! **One-shot budget boost, never failover** (`MaxTokensTruncation`):
+//! - Not retried through the transport budget and never failover-eligible.
+//! - The actor may re-send the request exactly once with the actually-sent
+//!   `max_tokens` doubled (see [`plan_budget_boost`]) before surfacing the
+//!   error unchanged. A second truncation is terminal.
 //!
 //! **Server hint** (`x-should-retry` header from CCP):
 //! - `false` → Fatal immediately, regardless of status code
@@ -96,6 +101,87 @@ pub fn resolve_failover_max_retries() -> u32 {
     resolve_failover_max_retries_with_env(env_override.as_deref())
 }
 
+/// Tokens kept free below the context window when capping a boosted output
+/// budget. The cap is `context_window - prompt_tokens - this margin`, never
+/// the raw window: templates, chat framing and tokenizer drift all consume
+/// headroom the estimate does not see.
+pub const BUDGET_BOOST_SAFETY_MARGIN_TOKENS: u64 = 1024;
+
+/// Result of [`plan_budget_boost`]: the budget to send on the single
+/// truncation retry plus the inputs used to derive it (telemetry).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BudgetBoostPlan {
+    /// Output budget to send on the retry (`≤ context_window - prompt - margin`).
+    pub new_max_tokens: u64,
+    /// The budget the truncated attempt actually put on the wire.
+    pub baseline_tokens: u64,
+    /// Output tokens the truncated attempt produced (or the fallback). This is
+    /// the discarded work the retry makes the caller pay for again.
+    pub first_round_completion_tokens: u64,
+}
+
+/// Plan a one-shot output-budget boost after a `stop_reason == Length` attempt.
+///
+/// Returns `None` (do not retry) when:
+/// - the context window is unknown (`0` — `SamplerConfig::default`),
+/// - `prompt + first-round completion` already reached the window (the
+///   truncation was a context-window hit, so a larger output budget cannot
+///   help — this is the dual-semantics stop-loss),
+/// - there is no baseline to double (neither a sent value nor observed output),
+/// - the capped boost would not exceed the baseline (no headroom below
+///   `context_window - prompt - [`BUDGET_BOOST_SAFETY_MARGIN_TOKENS`]`).
+///
+/// `sent_max_tokens` must be the value actually put on the wire for this
+/// attempt (see `SamplingClient::effective_max_output_tokens`). When the wire
+/// omitted the field (provider default unknown), the observed output is used
+/// as the baseline — a truncation at the provider default produces exactly
+/// that many tokens.
+pub fn plan_budget_boost(
+    sent_max_tokens: Option<u64>,
+    prompt_tokens: u64,
+    completion_tokens: Option<u64>,
+    context_window: u64,
+) -> Option<BudgetBoostPlan> {
+    if context_window == 0 {
+        return None;
+    }
+
+    // Without usage, fall back to the sent budget: a max_tokens truncation
+    // stops at (or just below) the cap it was given. Context-window hits are
+    // conservatively treated as having consumed the full sent budget.
+    let first_round_completion_tokens =
+        completion_tokens.unwrap_or_else(|| sent_max_tokens.unwrap_or(0));
+
+    if prompt_tokens.saturating_add(first_round_completion_tokens) >= context_window {
+        return None;
+    }
+
+    let baseline_tokens = sent_max_tokens
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or(first_round_completion_tokens);
+    if baseline_tokens == 0 {
+        return None;
+    }
+
+    let ceiling = context_window
+        .saturating_sub(prompt_tokens)
+        .saturating_sub(BUDGET_BOOST_SAFETY_MARGIN_TOKENS);
+    if ceiling <= baseline_tokens {
+        return None;
+    }
+
+    let new_max_tokens = baseline_tokens.saturating_mul(2).min(ceiling);
+    if new_max_tokens <= baseline_tokens {
+        return None;
+    }
+
+    Some(BudgetBoostPlan {
+        new_max_tokens,
+        baseline_tokens,
+        first_round_completion_tokens,
+    })
+}
+
 /// Backoff for doom-loop resamples: near-immediate with a small jitter.
 /// Loops are stochastic at sampling temperature, so a fresh sample is the
 /// remedy — waiting buys nothing beyond de-syncing concurrent resamples.
@@ -155,6 +241,13 @@ pub enum RetryDecision {
     /// error, first retry only).
     RetryWithClientRebuild { backoff: Duration },
 
+    /// Re-send once with a larger output budget after a `max_tokens`
+    /// truncation. Distinct from [`Retry`](Self::Retry): this is not a
+    /// transport retry, does not consume the retry budget, and is never
+    /// failover-eligible. The caller decides the new budget (it owns the
+    /// request + context window) and must ensure at most one boost.
+    BudgetBoost,
+
     /// Emit the error to the session and let it decide what to do
     /// (auth refresh, encrypted-content mismatch).
     EmitToSession(SamplingError),
@@ -170,12 +263,32 @@ pub enum RetryDecision {
 /// failure). `max_retries` is the total budget. `rate_limit_threshold`
 /// caps consecutive 429 retries (see [`RATE_LIMIT_RETRY_THRESHOLD`]).
 ///
+/// This is the default entry point: `MaxTokensTruncation` is Fatal. The
+/// actor uses [`classify_error_with_budget`] so the single truncation
+/// retry can be offered as [`RetryDecision::BudgetBoost`].
+///
 /// The function is pure: it does not sleep, log, or perform I/O.
 pub fn classify_error(
     err: &SamplingError,
     retry_count: u32,
     max_retries: u32,
     rate_limit_threshold: u32,
+) -> RetryDecision {
+    classify_error_with_budget(err, retry_count, max_retries, rate_limit_threshold, false)
+}
+
+/// [`classify_error`] with the one-shot truncation budget boost enabled.
+///
+/// `budget_boost_available` only affects [`SamplingError::MaxTokensTruncation`]:
+/// when true it yields [`RetryDecision::BudgetBoost`], otherwise the variant
+/// stays Fatal exactly as before. It is never failover-eligible — the two
+/// recovery mechanisms are independent.
+pub fn classify_error_with_budget(
+    err: &SamplingError,
+    retry_count: u32,
+    max_retries: u32,
+    rate_limit_threshold: u32,
+    budget_boost_available: bool,
 ) -> RetryDecision {
     // Auth and encrypted-content errors are session-owned. The sampler
     // surfaces the raw error and lets the session refresh credentials
@@ -214,6 +327,18 @@ pub fn classify_error(
     // request doesn't apply to the stripped request.
     if let Some(false) = err.should_retry_header() {
         return RetryDecision::Fatal(clone_error(err));
+    }
+
+    // Truncation: never a transport retry and never failover-eligible. The
+    // actor may offer exactly one budget boost (re-send with a doubled
+    // max_tokens); after that — or when the plan says doubling cannot help —
+    // the error surfaces unchanged.
+    if matches!(err, SamplingError::MaxTokensTruncation) {
+        return if budget_boost_available {
+            RetryDecision::BudgetBoost
+        } else {
+            RetryDecision::Fatal(clone_error(err))
+        };
     }
 
     // Context-window / size overflow is deterministic — re-sending the same (or
@@ -287,8 +412,9 @@ pub fn classify_error(
 /// 429 rate limits), `Auth` / `InvalidConfiguration` (credential or
 /// config problems follow the model to its fallback anyway),
 /// `Serialization` (deterministic parse failure), `EmptyResponse`,
-/// `MaxTokensTruncation`, and `DoomLoopDetected` (content-shaped, not
-/// endpoint-health-shaped).
+/// `MaxTokensTruncation` (content/budget-shaped, not endpoint-health-shaped;
+/// it gets the independent one-shot budget boost, never a failover), and
+/// `DoomLoopDetected` (content-shaped, not endpoint-health-shaped).
 ///
 /// Pure: no I/O, no logging.
 pub fn is_failover_error(err: &SamplingError) -> bool {
@@ -486,7 +612,13 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
         SamplingError::EmptyResponse { context } => SamplingError::EmptyResponse {
             context: context.clone(),
         },
-        SamplingError::MaxTokensTruncation => SamplingError::MaxTokensTruncation,
+        SamplingError::MaxTokensTruncation => {
+            // Pass through unchanged: the budget-boost classifier keys off
+            // this variant, so laundering it into a retryable transport
+            // error would burn the transport budget instead of offering at
+            // most one boost.
+            SamplingError::MaxTokensTruncation
+        }
         SamplingError::DoomLoopDetected {
             triggers,
             aborted_at_chunk,
@@ -641,6 +773,78 @@ mod tests {
             triggers: vec!["loop".into()],
             aborted_at_chunk: None,
         }));
+    }
+
+    // ── Truncation budget boost ──────────────────────────────────────────
+
+    #[test]
+    fn truncation_is_budget_boost_not_failover() {
+        let err = SamplingError::MaxTokensTruncation;
+        // Regression: the existing contract (not failover-eligible) holds.
+        assert!(!is_failover_error(&err));
+
+        assert!(matches!(
+            classify_error_with_budget(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD, true),
+            RetryDecision::BudgetBoost
+        ));
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::Fatal(SamplingError::MaxTokensTruncation)
+        ));
+        // With the boost already spent, the second truncation is terminal —
+        // and it must stay Fatal for any retry count.
+        assert!(matches!(
+            classify_error_with_budget(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD, false),
+            RetryDecision::Fatal(SamplingError::MaxTokensTruncation)
+        ));
+    }
+
+    #[test]
+    fn budget_boost_doubles_the_sent_value() {
+        let plan =
+            plan_budget_boost(Some(1024), 10_000, Some(1024), 128_000).expect("room to double");
+        assert_eq!(plan.baseline_tokens, 1024);
+        assert_eq!(plan.new_max_tokens, 2048);
+        assert_eq!(plan.first_round_completion_tokens, 1024);
+    }
+
+    #[test]
+    fn budget_boost_skips_when_prompt_plus_completion_reaches_window() {
+        // 900 prompt + 200 generated = 1_100 ≥ 1_000: context-window hit,
+        // doubling the output budget cannot help.
+        assert!(plan_budget_boost(Some(1024), 900, Some(200), 1_000).is_none());
+        // Equality is the boundary: exactly full → still skip.
+        assert!(plan_budget_boost(Some(1024), 800, Some(200), 1_000).is_none());
+    }
+
+    #[test]
+    fn budget_boost_is_capped_below_context_window() {
+        // 2×60_000 would be 120_000, but the ceiling is
+        // 100_000 - 10_000 - 1_024 = 88_976.
+        let plan = plan_budget_boost(Some(60_000), 10_000, Some(60_000), 100_000)
+            .expect("headroom exists");
+        assert_eq!(plan.new_max_tokens, 88_976);
+        assert_eq!(plan.baseline_tokens, 60_000);
+    }
+
+    #[test]
+    fn budget_boost_skips_without_headroom_or_known_window() {
+        // Ceiling (88_976) is below the sent value: no point re-sending.
+        assert!(plan_budget_boost(Some(90_000), 10_000, Some(90_000), 100_000).is_none());
+        // Unknown window (`SamplerConfig::default`) → never guess.
+        assert!(plan_budget_boost(Some(1024), 10, Some(1024), 0).is_none());
+        // No sent value and no observed output → nothing to double.
+        assert!(plan_budget_boost(None, 10, None, 128_000).is_none());
+    }
+
+    #[test]
+    fn budget_boost_uses_observed_output_when_wire_budget_is_omitted() {
+        // Provider default unknown (field omitted): the observed output is
+        // the best available baseline.
+        let plan = plan_budget_boost(None, 1_000, Some(4_000), 128_000)
+            .expect("observed output gives a baseline");
+        assert_eq!(plan.baseline_tokens, 4_000);
+        assert_eq!(plan.new_max_tokens, 8_000);
     }
 
     #[test]

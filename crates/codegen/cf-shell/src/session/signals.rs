@@ -2218,6 +2218,8 @@ mod tests {
             itl_max_ms: Some(30),
             itl_mean_ms: Some(30),
             attempts: 0,
+            truncation_retry: None,
+            truncation_retry_tokens_wasted: None,
         });
 
         let snap = handle.snapshot().await.unwrap();
@@ -2316,6 +2318,8 @@ mod tests {
             itl_max_ms: Some(100),
             itl_mean_ms: Some(50),
             attempts: 0,
+            truncation_retry: None,
+            truncation_retry_tokens_wasted: None,
         });
 
         // Response 2: intervals [100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200] (11 intervals)
@@ -2329,6 +2333,8 @@ mod tests {
             itl_max_ms: Some(200),
             itl_mean_ms: Some(60),
             attempts: 0,
+            truncation_retry: None,
+            truncation_retry_tokens_wasted: None,
         });
 
         // Response 3: intervals [5, 10, 15, 20, 25] (5 intervals)
@@ -2342,6 +2348,8 @@ mod tests {
             itl_max_ms: Some(80),
             itl_mean_ms: Some(30),
             attempts: 0,
+            truncation_retry: None,
+            truncation_retry_tokens_wasted: None,
         });
 
         let snap = handle.snapshot().await.unwrap();
@@ -2635,6 +2643,8 @@ mod tests {
             itl_max_ms: Some(50),
             itl_mean_ms: Some(30),
             attempts: 0,
+            truncation_retry: None,
+            truncation_retry_tokens_wasted: None,
         });
 
         handle1.increment_turn(); // turn 2

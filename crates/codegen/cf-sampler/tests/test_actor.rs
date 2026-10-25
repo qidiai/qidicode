@@ -711,6 +711,203 @@ async fn messages_unparseable_event_is_fatal_without_retry() {
 }
 
 // ---------------------------------------------------------------------------
+// max_tokens truncation → one-shot budget boost
+// ---------------------------------------------------------------------------
+
+/// One Chat Completions SSE turn that ends with `finish_reason: "length"` and
+/// reports `usage`, so the actor can see prompt + first-round completion.
+fn truncation_chunk_events(prompt_tokens: u32, completion_tokens: u32) -> Vec<Event> {
+    vec![
+        Event::default().data(
+            json!({
+                "id": "chatcmpl-trunc",
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": "test-model",
+                "choices": [{
+                    "index": 0,
+                    "delta": { "role": "assistant", "content": "partial output" },
+                    "finish_reason": "length"
+                }]
+            })
+            .to_string(),
+        ),
+        Event::default().data(
+            json!({
+                "id": "chatcmpl-trunc",
+                "object": "chat.completion.chunk",
+                "created": 0,
+                "model": "test-model",
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens
+                }
+            })
+            .to_string(),
+        ),
+        Event::default().data("[DONE]"),
+    ]
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn truncation_retries_once_with_doubled_budget_then_succeeds() {
+    use std::sync::Mutex;
+
+    let hits = Arc::new(AtomicU32::new(0));
+    let seen_max_tokens: Arc<Mutex<Vec<Option<u64>>>> = Arc::new(Mutex::new(Vec::new()));
+    let hits_handler = Arc::clone(&hits);
+    let seen_handler = Arc::clone(&seen_max_tokens);
+
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move |axum::Json(body): axum::Json<serde_json::Value>| {
+            let hits = Arc::clone(&hits_handler);
+            let seen = Arc::clone(&seen_handler);
+            async move {
+                let n = hits.fetch_add(1, Ordering::SeqCst);
+                seen.lock().unwrap().push(body["max_tokens"].as_u64());
+                let events = if n == 0 {
+                    truncation_chunk_events(10, 1024)
+                } else {
+                    sse::chat_completion_events("complete answer", "test-model")
+                };
+                Sse::new(stream::iter(
+                    events.into_iter().map(Ok::<_, std::convert::Infallible>),
+                ))
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    // Default budget 1024, ample context window.
+    let cfg = test_config(server.base_url(), "test-model");
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    handle.submit(RequestId::from("req-trunc-boost"), user_request("hi"));
+    let events = drain_until_terminal(&mut event_rx, Duration::from_secs(15)).await;
+    server.shutdown();
+
+    assert_eq!(hits.load(Ordering::SeqCst), 2, "exactly one boosted retry");
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            SamplingEvent::Retrying {
+                kind: SamplingErrorKind::MaxTokensTruncation,
+                ..
+            }
+        )),
+        "the boost must be observable as a Retrying(MaxTokensTruncation)"
+    );
+
+    {
+        let seen = seen_max_tokens.lock().unwrap();
+        assert_eq!(seen.first().copied().flatten(), Some(1024));
+        assert_eq!(
+            seen.get(1).copied().flatten(),
+            Some(2048),
+            "retry must send 2× the value the first attempt actually sent"
+        );
+    }
+
+    match events.last().unwrap() {
+        SamplingEvent::Completed {
+            response, metrics, ..
+        } => {
+            assert_eq!(
+                response.assistant().map(|a| a.content.as_ref()),
+                Some("complete answer")
+            );
+            assert_eq!(metrics.truncation_retry, Some(true));
+            assert_eq!(metrics.truncation_retry_tokens_wasted, Some(1024));
+        }
+        other => panic!("expected Completed after the boosted retry, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn second_truncation_is_terminal_with_exactly_two_calls() {
+    let hits = Arc::new(AtomicU32::new(0));
+    let hits_handler = Arc::clone(&hits);
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let hits = Arc::clone(&hits_handler);
+            async move {
+                hits.fetch_add(1, Ordering::SeqCst);
+                let events = truncation_chunk_events(10, 1024);
+                Sse::new(stream::iter(
+                    events.into_iter().map(Ok::<_, std::convert::Infallible>),
+                ))
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let cfg = test_config(server.base_url(), "test-model");
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    handle.submit(RequestId::from("req-trunc-twice"), user_request("hi"));
+    let events = drain_until_terminal(&mut event_rx, Duration::from_secs(15)).await;
+    server.shutdown();
+
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        2,
+        "one original attempt + one budget boost; never a second boost"
+    );
+    match events.last().unwrap() {
+        SamplingEvent::Failed { error, .. } => {
+            assert_eq!(error.kind, SamplingErrorKind::MaxTokensTruncation);
+        }
+        other => panic!("expected Failed(MaxTokensTruncation), got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn context_window_hit_skips_the_budget_boost() {
+    let hits = Arc::new(AtomicU32::new(0));
+    let hits_handler = Arc::clone(&hits);
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let hits = Arc::clone(&hits_handler);
+            async move {
+                hits.fetch_add(1, Ordering::SeqCst);
+                // prompt + completion (900 + 200) already exceeds the
+                // 1_000-token window configured below.
+                let events = truncation_chunk_events(900, 200);
+                Sse::new(stream::iter(
+                    events.into_iter().map(Ok::<_, std::convert::Infallible>),
+                ))
+            }
+        }),
+    );
+    let server = MockServer::spawn(app).await;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let mut cfg = test_config(server.base_url(), "test-model");
+    cfg.context_window = 1_000;
+    let handle = SamplerActor::spawn(cfg, RetryPolicy::default(), event_tx);
+
+    handle.submit(RequestId::from("req-trunc-window"), user_request("hi"));
+    let events = drain_until_terminal(&mut event_rx, Duration::from_secs(15)).await;
+    server.shutdown();
+
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "a context-window truncation must not be retried"
+    );
+    match events.last().unwrap() {
+        SamplingEvent::Failed { error, .. } => {
+            assert_eq!(error.kind, SamplingErrorKind::MaxTokensTruncation);
+        }
+        other => panic!("expected Failed(MaxTokensTruncation), got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // UpdateConfig invalidates cache + applies to subsequent requests
 // ---------------------------------------------------------------------------
 

@@ -2588,6 +2588,7 @@ dependencies = [
  "cf-auth",
  "cf-sampling-types",
  "cf-test-support",
+ "cf-token-estimation",
  "cf-version",
  "chrono",
  "eventsource-stream",
