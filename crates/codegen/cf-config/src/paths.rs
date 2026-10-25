@@ -12,9 +12,9 @@ const CLAUDE_MANAGED_SETTINGS_PATH: &str =
 const CLAUDE_MANAGED_SETTINGS_PATH: &str = "/etc/claude-code/managed-settings.json";
 
 /// The default user QIDI Code directory (`~/.qidi`, canonicalized) used when
-/// neither `QIDI_HOME` nor `QIDI_HOME` (legacy) is set. Exposed so callers
-/// (e.g. display helpers) can detect whether [`grok_home()`] is the default
-/// without duplicating the computation.
+/// `QIDI_HOME` is not set. Exposed so callers (e.g. display helpers) can
+/// detect whether [`grok_home()`] is the default without duplicating the
+/// computation.
 ///
 /// Uses [`dunce::canonicalize`] instead of [`std::fs::canonicalize`]: on
 /// Windows, std returns a verbatim path (`\\?\C:\Users\...`) which external
@@ -63,22 +63,19 @@ fn ensure_home_permissions(_dir: &std::path::Path) {
     // (see rustdoc on the Unix variant). File-level ACLs still apply.
 }
 
-/// Per-user config directory: `$QIDI_HOME` (preferred) or `$QIDI_HOME`
-/// (legacy compat) or `~/.qidi`. Created if needed.
+/// Per-user config directory: `$QIDI_HOME` when set, otherwise `~/.qidi`.
+/// Created if needed.
 ///
 /// The function name `grok_home` is retained for API compatibility; the
 /// directory it points to is the QIDI Code config home.
 pub fn grok_home() -> PathBuf {
     QIDI_HOME
         .get_or_init(|| {
-            // Prefer QIDI_HOME, fall back to QIDI_HOME for legacy users.
-            let grok_home = if let Ok(v) = std::env::var("QIDI_HOME") {
-                PathBuf::from(v)
-            } else if let Ok(v) = std::env::var("QIDI_HOME") {
-                PathBuf::from(v)
-            } else {
-                default_grok_home()
-            };
+            // `QIDI_HOME` is the only environment override. The legacy
+            // `GROK_HOME` variable is deliberately *not* read — there is no
+            // backward-compat promise for grok CLI variables (see README
+            // "配置"). Don't reintroduce it without a migration decision.
+            let grok_home = resolve_grok_home(std::env::var("QIDI_HOME").ok());
             let _ = std::fs::create_dir_all(&grok_home);
             // The config home holds credentials (auth.json) and diagnostics;
             // tighten it to owner-only so other local users can't traverse it.
@@ -88,17 +85,29 @@ pub fn grok_home() -> PathBuf {
         .clone()
 }
 
+/// Testable core of [`grok_home`]'s environment resolution: the value of
+/// `QIDI_HOME` when present, otherwise [`default_grok_home`].
+///
+/// Takes the variable's value as a parameter instead of reading it, so tests
+/// can cover both branches without mutating process-global state (the real
+/// [`grok_home`] memoizes into a `OnceLock`, which makes env-mutating tests
+/// order dependent). Does not touch the filesystem.
+fn resolve_grok_home(qidi_home: Option<String>) -> PathBuf {
+    match qidi_home {
+        Some(v) => PathBuf::from(v),
+        None => default_grok_home(),
+    }
+}
+
 /// The user-global QIDI Code home, but only when one genuinely resolves:
-/// `Some` when `$QIDI_HOME`/`$QIDI_HOME` is set or a home directory is found,
+/// `Some` when `$QIDI_HOME` is set or a home directory is found,
 /// `None` otherwise. Unlike [`grok_home()`], this never falls back to a
 /// cwd-relative `.qidi`, so callers that *scan* user-global resources (hooks,
 /// marketplace sources, ...) don't mistake a project's `.qidi` tree for the
 /// user-global one when no home resolves.
 pub fn user_grok_home() -> Option<PathBuf> {
     #[allow(deprecated)]
-    let resolvable = std::env::var_os("QIDI_HOME").is_some()
-        || std::env::var_os("QIDI_HOME").is_some()
-        || std::env::home_dir().is_some();
+    let resolvable = std::env::var_os("QIDI_HOME").is_some() || std::env::home_dir().is_some();
     resolvable.then(grok_home)
 }
 
@@ -119,18 +128,31 @@ pub fn grok_application() -> PathBuf {
 }
 
 /// System-wide config directory: `/etc/qidi/` on Unix, `None` on Windows.
-/// Falls back to `/etc/grok` if it exists (legacy compat).
+/// Falls back to `/etc/grok` if it exists (legacy compat); `None` when neither
+/// directory exists, so callers never build a path under a directory that is
+/// not there.
 pub fn system_config_dir() -> Option<PathBuf> {
     if cfg!(unix) {
-        let qidi = PathBuf::from("/etc/qidi");
-        if qidi.exists() {
-            Some(qidi)
-        } else {
-            Some(PathBuf::from("/etc/grok"))
-        }
+        system_config_dir_from(
+            std::path::Path::new("/etc/qidi"),
+            std::path::Path::new("/etc/grok"),
+        )
     } else {
         None
     }
+}
+
+/// Testable core of [`system_config_dir`]: prefer `qidi` when it exists, else
+/// `legacy` when it exists, else `None`. Existing directories are returned
+/// verbatim (no canonicalization) — the callers only join file names onto them.
+fn system_config_dir_from(
+    qidi: &std::path::Path,
+    legacy: &std::path::Path,
+) -> Option<PathBuf> {
+    if qidi.exists() {
+        return Some(qidi.to_path_buf());
+    }
+    legacy.exists().then_some(legacy.to_path_buf())
 }
 
 /// System path for the managed-settings.json used for settings compat, if it exists.
@@ -375,6 +397,25 @@ mod tests {
         assert!(home.ends_with(".qidi"));
     }
 
+    /// `grok_home()` honours exactly one environment override: `QIDI_HOME`.
+    /// When it is unset the answer is the default `~/.qidi`. The legacy
+    /// `GROK_HOME` variable is *not* consulted (no reader exists in the
+    /// codebase), so there is no "legacy wins/loses" case to pin here.
+    ///
+    /// Asserted through [`resolve_grok_home`] instead of mutating `std::env`:
+    /// `grok_home()` memoizes into a process-wide `OnceLock`, so a test that
+    /// sets/unsets the real variable would be order-dependent against every
+    /// other test in this crate that resolves the config home.
+    #[test]
+    fn resolve_grok_home_uses_qidi_home_and_defaults_to_dot_qidi() {
+        let custom = std::env::temp_dir().join("qidi-home-override-probe");
+        assert_eq!(resolve_grok_home(Some(custom.display().to_string())), custom);
+
+        let default = resolve_grok_home(None);
+        assert_eq!(default, default_grok_home());
+        assert!(default.ends_with(".qidi"));
+    }
+
     #[test]
     fn slugify_basic() {
         assert_eq!(slugify("Hello World!", 40), "hello-world");
@@ -388,5 +429,51 @@ mod tests {
     #[test]
     fn slugify_truncates() {
         assert_eq!(slugify(&"a".repeat(100), 10).len(), 10);
+    }
+
+    /// `system_config_dir` must not hand out a path under a directory that does
+    /// not exist: with neither `/etc/qidi` nor the legacy `/etc/grok` present the
+    /// answer is `None` — that is what the doc comment's "falls back if it
+    /// exists" promised, but the implementation used to return `Some(/etc/grok)`
+    /// unconditionally.
+    #[test]
+    fn system_config_dir_is_none_when_neither_dir_exists() {
+        let tmp = TempDir::new().unwrap();
+        let qidi = tmp.path().join("etc-qidi");
+        let legacy = tmp.path().join("etc-grok");
+        assert_eq!(system_config_dir_from(&qidi, &legacy), None);
+    }
+
+    #[test]
+    fn system_config_dir_prefers_qidi_over_legacy() {
+        let tmp = TempDir::new().unwrap();
+        let qidi = tmp.path().join("etc-qidi");
+        let legacy = tmp.path().join("etc-grok");
+        std::fs::create_dir_all(&qidi).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+        assert_eq!(system_config_dir_from(&qidi, &legacy), Some(qidi));
+    }
+
+    #[test]
+    fn system_config_dir_falls_back_to_existing_legacy_dir() {
+        let tmp = TempDir::new().unwrap();
+        let qidi = tmp.path().join("etc-qidi");
+        let legacy = tmp.path().join("etc-grok");
+        std::fs::create_dir_all(&legacy).unwrap();
+        assert_eq!(system_config_dir_from(&qidi, &legacy), Some(legacy));
+    }
+
+    /// Whatever the host's `/etc` looks like, the real entry point must never
+    /// return a directory that does not exist.
+    #[cfg(unix)]
+    #[test]
+    fn system_config_dir_never_returns_a_missing_dir() {
+        if let Some(dir) = system_config_dir() {
+            assert!(
+                dir.exists(),
+                "system_config_dir returned {}, which does not exist",
+                dir.display()
+            );
+        }
     }
 }

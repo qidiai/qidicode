@@ -64,7 +64,7 @@ QIDI Code 的配置目录默认为 `~/.qidi/`，支持以下环境变量：
 | `QIDI_TEST_VERSION` | 测试用版本覆盖 | - |
 | `QIDI_VERSION` | 编译时版本覆盖 | Cargo 包版本 |
 
-> **向后兼容**：`GROK_HOME`、`XAI_API_KEY`、`GROK_API_KEY` 环境变量仍被支持，用于从旧版 grok CLI 迁移。
+> **关于旧版变量**：旧版 grok CLI 的 `GROK_HOME`、`GROK_API_KEY`、`XAI_API_KEY` **不再被识别**（代码中已无读取点）。迁移时请改设上表的 `QIDI_*` 变量；API Key 的来源由模型条目的 `[model.<id>].env_key` 决定（见下文「自定义模型端点」一节）。
 
 配置文件结构：
 ```
@@ -87,10 +87,6 @@ export OPENAI_API_KEY="sk-..."
 
 # Anthropic
 export ANTHROPIC_API_KEY="sk-ant-..."
-
-# xAI Grok（向后兼容）
-export XAI_API_KEY="xai-..."
-export GROK_API_KEY="xai-..."  # 旧版别名
 ```
 
 ### 自定义模型端点（base_url 覆盖）

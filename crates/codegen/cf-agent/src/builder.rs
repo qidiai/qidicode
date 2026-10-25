@@ -2237,7 +2237,7 @@ mod tests {
         .from_definition(definition)
         .with_web_search_config(WebSearchConfig::Enabled {
             api_key: "test-key".into(),
-            base_url: "https://api.x.ai/v1".into(),
+            base_url: "https://api.example.test/v1".into(),
             model: "test-web-search-model".into(),
             extra_headers: Default::default(),
             alpha_test_key: None,
@@ -2363,7 +2363,7 @@ mod tests {
         let web_search_config = if web_search_enabled {
             WebSearchConfig::Enabled {
                 api_key: "test-key".into(),
-                base_url: "https://api.x.ai/v1".into(),
+                base_url: "https://api.example.test/v1".into(),
                 model: "test-web-search-model".into(),
                 extra_headers: Default::default(),
                 alpha_test_key: None,
