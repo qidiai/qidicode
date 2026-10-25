@@ -79,7 +79,7 @@ instructions = "You are a thorough researcher. Always cite specific file paths."
 description = "Deep investigator."
 ```
 
-Grok Build discovers file-based personas from these locations, in priority order:
+QIDI Code discovers file-based personas from these locations, in priority order:
 
 - `.qidi/personas/*.toml` (project)
 - `~/.qidi/personas/*.toml` (user)
@@ -89,7 +89,7 @@ Each file defines one persona, and the file name (without the extension) becomes
 
 Manage personas in the Personas tab of the agents modal (`/personas`). Bundled personas are read-only; personas you define are editable.
 
-> **Note:** Grok Build applies personas through subagent resolution and roles, not through a `spawn_subagent` parameter. The main agent does not pass a persona name when it spawns a child.
+> **Note:** QIDI Code applies personas through subagent resolution and roles, not through a `spawn_subagent` parameter. The main agent does not pass a persona name when it spawns a child.
 
 ### Persona Fields
 
@@ -125,7 +125,7 @@ Each field has a `name`, an `io_type` (defaults to `file`), a `required` flag, a
 
 ### Persona Resolution
 
-When a persona applies, Grok Build resolves the effective model and reasoning effort in this order, highest priority first:
+When a persona applies, QIDI Code resolves the effective model and reasoning effort in this order, highest priority first:
 
 1. Explicit spawn-time override
 2. Role default
@@ -193,7 +193,7 @@ For tasks that modify files, run a subagent in an isolated git worktree with `is
 - Its changes stay isolated from the parent until you merge them.
 - The subagent's result includes the worktree path.
 
-Grok Build manages worktrees through the `x.ai/git/worktree/*` extension methods, including an apply operation that merges changes back into the main working directory.
+QIDI Code manages worktrees through the `x.ai/git/worktree/*` extension methods, including an apply operation that merges changes back into the main working directory.
 
 ---
 
@@ -234,13 +234,13 @@ instructions = "Be concise. No filler words."
 # instructions_file = ".qidi/personas/concise.md"  # or load from a file
 ```
 
-Grok Build also discovers roles from `.qidi/roles/*.toml` and personas from `.qidi/personas/*.toml`. Inline `config.toml` definitions take precedence over files.
+QIDI Code also discovers roles from `.qidi/roles/*.toml` and personas from `.qidi/personas/*.toml`. Inline `config.toml` definitions take precedence over files.
 
 ---
 
 ## The Tasks Pane (TUI)
 
-Grok Build shows running and finished work in side panes on the agent screen:
+QIDI Code shows running and finished work in side panes on the agent screen:
 
 - Press `Ctrl+B` to toggle the tasks pane, which lists active and completed subagents and background commands with their status.
 - Press `Ctrl+T` to toggle the separate todo pane.

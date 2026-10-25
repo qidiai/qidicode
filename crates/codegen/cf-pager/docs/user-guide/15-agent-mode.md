@@ -1,6 +1,6 @@
 # Agent Mode (ACP) and IDE Integration
 
-Agent mode runs Grok as an ACP (Agent Client Protocol) server for integration with IDEs, editors, and custom tooling. Unlike single-prompt mode (`grok -p`, which prints one response and exits), agent mode keeps a persistent process running and communicates through structured JSON-RPC messages.
+Agent mode runs QIDI Code as an ACP (Agent Client Protocol) server for integration with IDEs, editors, and custom tooling. Unlike single-prompt mode (`qidi -p`, which prints one response and exits), agent mode keeps a persistent process running and communicates through structured JSON-RPC messages.
 
 ---
 
@@ -21,7 +21,7 @@ The [Agent Client Protocol (ACP)](https://agentclientprotocol.com) is a standard
 stdio is the primary integration mode. The agent exchanges JSON-RPC messages over stdin and stdout:
 
 ```bash
-grok agent stdio
+qidi agent stdio
 ```
 
 Clients that use this mode include:
@@ -32,7 +32,7 @@ Clients that use this mode include:
 
 ### Options
 
-These options belong to the `grok agent` command and apply to every mode. Pass them before the mode name, for example `grok agent --model grok-build stdio`. The `stdio` subcommand itself takes no options.
+These options belong to the `qidi agent` command and apply to every mode. Pass them before the mode name, for example `qidi agent --model grok-build stdio`. The `stdio` subcommand itself takes no options.
 
 | Flag                       | Description                                                       |
 | -------------------------- | ---------------------------------------------------------------- |
@@ -48,7 +48,7 @@ These options belong to the `grok agent` command and apply to every mode. Pass t
 Run the agent as a WebSocket server for remote clients:
 
 ```bash
-grok agent serve --bind 127.0.0.1:2419 --secret <token>
+qidi agent serve --bind 127.0.0.1:2419 --secret <token>
 ```
 
 Clients connect over WebSocket and authenticate with the secret token. If you omit `--secret`, the agent generates a token and prints it at startup; you can also supply one through the `GROK_AGENT_SECRET` environment variable. The agent persists across reconnections, so a client can disconnect and later resume in-flight work.
@@ -60,7 +60,7 @@ Clients connect over WebSocket and authenticate with the secret token. If you om
 To reach the agent over the internet instead of the local network, run a WebSocket relay server and have the agent connect to it:
 
 ```bash
-grok agent headless --qidi-ws-url wss://your-relay.example.com/ws
+qidi agent headless --qidi-ws-url wss://your-relay.example.com/ws
 ```
 
 The agent connects out to your relay, and your web clients connect to the same relay. This is useful for building web UIs where browsers cannot spawn local processes.
@@ -86,7 +86,7 @@ Communication follows the JSON-RPC 2.0 format. A typical session lifecycle:
 +-------------------+----------------------+
                     | JSON-RPC over stdio
 +-------------------v----------------------+
-|           grok agent stdio               |
+|           qidi agent stdio               |
 |                                          |
 |  +---------+  +---------+  +---------+   |
 |  | Session |  |  Tools  |  |   MCP   |   |
@@ -115,7 +115,7 @@ Each update names its type, so a client can render distinct panels for reasoning
 
 ## Extension methods
 
-Beyond the base ACP protocol, Grok defines extension methods under the `x.ai/` prefix for SpaceXAI-specific functionality. These cover:
+Beyond the base ACP protocol, QIDI Code defines extension methods under the `x.ai/` prefix for product-specific functionality. These cover:
 
 | Category                   | Prefix               | Examples                                         |
 | -------------------------- | -------------------- | ------------------------------------------------ |
@@ -129,7 +129,7 @@ Beyond the base ACP protocol, Grok defines extension methods under the `x.ai/` p
 | **Authentication**         | `x.ai/auth/*`        | `get_url`, `submit_code`                         |
 | **Feedback & Telemetry**   | `x.ai/*`             | `feedback`, `telemetry/*`                        |
 
-The tables here show representative methods in each category. The `x.ai/*` set is SpaceXAI-specific and may expand across releases, so treat it as non-exhaustive and discover the available methods from the agent's `initialize` response.
+The tables here show representative methods in each category. The `x.ai/*` set is product-specific and may expand across releases, so treat it as non-exhaustive and discover the available methods from the agent's `initialize` response.
 
 ### Notifications (agent to client)
 
@@ -191,7 +191,7 @@ Official SDK libraries are available for multiple languages:
 import { spawn, ChildProcess } from "child_process";
 import * as readline from "readline";
 
-class GrokACPChat {
+class QidiACPChat {
   private proc!: ChildProcess;
   private sessionId!: string;
   private rl!: readline.Interface;
@@ -199,7 +199,7 @@ class GrokACPChat {
   constructor(private cwd = ".") {}
 
   async init() {
-    this.proc = spawn("grok", ["agent", "stdio"]);
+    this.proc = spawn("qidi", ["agent", "stdio"]);
     this.rl = readline.createInterface({ input: this.proc.stdout! });
 
     // Initialize
@@ -257,7 +257,7 @@ class GrokACPChat {
 }
 
 // Usage
-const client = await new GrokACPChat(".").init();
+const client = await new QidiACPChat(".").init();
 
 for await (const update of client.streamPrompt("List the files in this project")) {
   switch (update.sessionUpdate) {

@@ -1,6 +1,6 @@
 # Configuration
 
-Grok reads configuration from local config files, environment variables, and
+QIDI Code reads configuration from local config files, environment variables, and
 CLI flags. This document covers the common options.
 
 ---
@@ -22,7 +22,7 @@ Configuration is resolved in this order (highest priority first):
 
 Location: `~/.qidi/config.toml`
 
-If the file does not exist, Grok uses built-in defaults. Specify only the values you want to override.
+If the file does not exist, QIDI Code uses built-in defaults. Specify only the values you want to override.
 
 ### General Settings
 
@@ -97,7 +97,7 @@ simple_mode = false
 ```
 
 You can also toggle this setting from the settings pane (`/settings` →
-**Disable vim input mode**); Grok writes your choice to `[ui] simple_mode` in
+**Disable vim input mode**); QIDI Code writes your choice to `[ui] simple_mode` in
 `config.toml`.
 
 `simple_mode` and `vim_mode` are independent: `simple_mode` changes the prompt
@@ -154,7 +154,7 @@ active in the **scrollback** pane. It does not affect the input prompt.
 | `true` | All vim-style scrollback bindings are active, exactly as listed in [Keyboard Shortcuts](03-keyboard-shortcuts.md). |
 
 Toggle `vim_mode` at runtime with `/vim-mode`, or from the settings pane
-(`/settings` → **Vim scrollback navigation**). Grok writes the change to
+(`/settings` → **Vim scrollback navigation**). QIDI Code writes the change to
 `[ui] vim_mode` in `~/.qidi/config.toml` immediately and applies it to every
 future pager session — including new agents and subagents started in the same
 process. There is no separate per-session override; whatever is in
@@ -166,7 +166,7 @@ navigation, while `simple_mode` controls editing in the prompt.
 #### Screen Mode
 
 The `screen_mode` setting under `[ui]` is the **sticky render-mode
-preference**: whichever mode you last chose explicitly is what a plain `grok`
+preference**: whichever mode you last chose explicitly is what a plain `qidi`
 opens with next time.
 
 | Value | Behavior |
@@ -175,9 +175,9 @@ opens with next time.
 | `"minimal"` | Open in minimal (scrollback-native) mode. |
 | `"fullscreen"` | Open in the standard TUI. Fullscreen-vs-inline still follows the alt-screen policy (`--no-alt-screen`, `[terminal] alt_screen`, terminal auto-detection), so environments like Zellij or tmux control mode keep their automatic inline fallback. |
 
-You normally never edit this key by hand — Grok writes it whenever you pass an
+You normally never edit this key by hand — QIDI Code writes it whenever you pass an
 explicit `--minimal` / `--fullscreen` flag or run `/minimal` / `/fullscreen`.
-A plain `grok` launch only reads it. A CLI flag always wins over the config
+A plain `qidi` launch only reads it. A CLI flag always wins over the config
 value for that invocation (and updates it), and `screen_mode` takes precedence
 over the legacy `[terminal] minimal` key in `pager.toml`. Delete the key to
 restore the legacy behavior.
@@ -394,7 +394,7 @@ Each cell can be toggled via environment variable or `config.toml`. See the
 environment-variables reference for the env var names. Resolution order:
 env var > config.toml > default (on).
 
-`grok inspect` reports cells that still need session-start resolution as
+`qidi inspect` reports cells that still need session-start resolution as
 `?` until a value is available; cells with an explicit env or TOML value
 use that value. Affected discovery entries report
 `compatibilityStatus: "unresolved"` in JSON and `[compat unresolved]` in
@@ -410,7 +410,7 @@ disabled = ["user/a1b2c3d4/noisy-plugin"]
 
 ### Hints
 
-The `[hints]` table holds small persisted UI preferences — mostly "stop asking me" opt-outs. Grok writes these for you when you pick a "don't ask again" / "reset in config.toml" option in the TUI, but you can edit or remove them by hand. Deleting a key restores the default behavior.
+The `[hints]` table holds small persisted UI preferences — mostly "stop asking me" opt-outs. QIDI Code writes these for you when you pick a "don't ask again" / "reset in config.toml" option in the TUI, but you can edit or remove them by hand. Deleting a key restores the default behavior.
 
 `[hints]` is read from the **effective config merge** (same precedence as other settings): system managed → user `managed_config.toml` → user `config.toml` → user `requirements.toml` → system `requirements.toml`. Higher-priority layers override lower ones. The TUI only **writes** opt-outs to user `~/.qidi/config.toml`.
 
@@ -424,7 +424,7 @@ fork_worktree_mode = "ask"             # /fork worktree prompt: "ask" | "always"
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `project_picker_disabled` | bool | `false` | When `true`, skips the picker that asks you to choose a project directory on the first prompt when Grok is launched from a non-project directory (home, Desktop, Downloads, `/tmp`). Set automatically when you choose **"Don't ask me again"** in that picker. Teams can pin this in `managed_config.toml` or `requirements.toml` via `[hints] project_picker_disabled = true`. |
+| `project_picker_disabled` | bool | `false` | When `true`, skips the picker that asks you to choose a project directory on the first prompt when QIDI Code is launched from a non-project directory (home, Desktop, Downloads, `/tmp`). Set automatically when you choose **"Don't ask me again"** in that picker. Teams can pin this in `managed_config.toml` or `requirements.toml` via `[hints] project_picker_disabled = true`. |
 | `memory_modal_fullscreen` | bool | `false` | Remembers whether the memory modal was last opened fullscreen. |
 | `new_session_worktree_mode` | string | `"never"` | Worktree prompt for `/new`: `ask` shows the popup, `always` creates a worktree, `never` skips it. |
 | `fork_worktree_mode` | string | `"ask"` | Worktree prompt for `/fork`: `ask`, `always`, or `never`. |
@@ -477,7 +477,7 @@ items = ["action-required", "spinner", "activity", "session-name", "grok"]
 | Grok Desktop | None (native) | N/A | N/A |
 | Unknown | BEL | No | No |
 
-When `method = "auto"`, Grok detects the terminal brand and selects the best
+When `method = "auto"`, QIDI Code detects the terminal brand and selects the best
 protocol automatically. Set `method` explicitly to override auto-detection.
 
 #### Notification Hooks
@@ -488,14 +488,14 @@ Run custom commands when events occur. Hooks receive environment variables
 ```toml
 # macOS native notification
 [[ui.notifications.hooks]]
-command = "terminal-notifier -title 'Grok' -message '$GROK_MESSAGE'"
+command = "terminal-notifier -title 'QIDI Code' -message '$GROK_MESSAGE'"
 events = ["turn_complete", "approval_required"]
 only_unfocused = true
 timeout_secs = 10
 
 # Push to ntfy server
 [[ui.notifications.hooks]]
-command = "curl -s -d '$GROK_MESSAGE' ntfy.sh/my-grok-alerts"
+command = "curl -s -d '$GROK_MESSAGE' ntfy.sh/my-qidi-alerts"
 events = ["turn_complete"]
 only_unfocused = true
 timeout_secs = 10
@@ -530,7 +530,7 @@ Then restart tmux. If passthrough is not available (tmux < 3.3), set
 
 **Focus tracking not working:**
 Some terminals do not report focus events. If `condition = "unfocused"` never
-fires, try `condition = "always"` as a fallback. Grok supports focus tracking
+fires, try `condition = "always"` as a fallback. QIDI Code supports focus tracking
 in every detected terminal except Apple Terminal and unrecognized terminals.
 
 **Sleep prevention not taking effect:**
@@ -556,7 +556,7 @@ mixpanel_enabled = false                                  # disable Mixpanel pro
 trace_upload = false                                      # disable session/trace uploads (inherits the telemetry toggle when unset)
 ```
 
-Set these only to point telemetry at your own infrastructure or to turn parts of it off. The built-in endpoint and credentials are managed by Grok; leave them unset to use the defaults.
+Set these only to point telemetry at your own infrastructure or to turn parts of it off. The built-in endpoint and credentials are managed by QIDI Code; leave them unset to use the defaults.
 
 The same `[telemetry]` table also configures the **external OpenTelemetry stream** — an independent opt-in (it does not require the telemetry toggle above) that ships a curated, content-free usage schema to your *own* OTLP collector. Collector auth is supplied via `OTEL_EXPORTER_OTLP_HEADERS` and is never stored on disk. See [Monitoring & Usage](24-monitoring-usage.md) for the full schema, env vars, and privacy model.
 
@@ -585,12 +585,12 @@ auth_provider_label = "Acme Corp"
 auth_token_ttl = 3600
 
 [models]
-default = "company-grok"
+default = "company-qidi"
 
-[model.company-grok]
+[model.company-qidi]
 model = "grok-build"
-base_url = "https://grok-proxy.acme.com/"
-name = "Grok Build Latest (Proxy)"
+base_url = "https://qidi-proxy.acme.com/"
+name = "QIDI Code Latest (Proxy)"
 context_window = 128000
 
 [features]
