@@ -15,6 +15,7 @@ use std::io::Write;
 #[cfg(unix)]
 use std::time::Duration;
 #[cfg(unix)]
+use std::time::Duration;
 
 /// Bounds the reply buffer against terminals that stream without a terminator.
 #[cfg(unix)]

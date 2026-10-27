@@ -1169,6 +1169,8 @@ mod platform {
 // ---------------------------------------------------------------------------
 #[cfg(not(target_os = "macos"))]
 mod platform {
+    #[cfg(target_os = "linux")]
+    use std::process::{Command, Stdio};
     use super::ImageData;
     // The Linux Wayland/X11 CLI fallbacks (wl-copy/xclip/xsel probes and
     // payload pipes below) spawn subprocesses; import here, gated to linux,

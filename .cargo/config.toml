@@ -97,3 +97,8 @@ AARCH64_APPLE_DARWIN_JEMALLOC_SYS_WITH_LG_PAGE = "14"
 AARCH64_UNKNOWN_LINUX_GNU_JEMALLOC_SYS_WITH_LG_PAGE = "16"
 AARCH64_UNKNOWN_LINUX_MUSL_JEMALLOC_SYS_WITH_LG_PAGE = "16"
 AARCH64_UNKNOWN_LINUX_MUSL_JEMALLOC_SYS_WITH_BACKGROUND_THREADS = "0"
+# musl 交叉编译：sqlite-vec 0.1.7-alpha.2 的 C 源码使用了 glibc 专有的 BSD 整型别名
+# （u_int8_t 等），musl 头文件不提供。这里用 cc-rs 的 CFLAGS 前缀变量把它们映射到
+# 标准定宽整型，保证 aarch64-unknown-linux-musl 构建可复现（已验证：静态 ARM64 二进制可用）。
+CFLAGS_aarch64-unknown-linux-musl = "-Du_int8_t=uint8_t -Du_int16_t=uint16_t -Du_int32_t=uint32_t -Du_int64_t=uint64_t"
+CFLAGS_aarch64_unknown_linux_musl = "-Du_int8_t=uint8_t -Du_int16_t=uint16_t -Du_int32_t=uint32_t -Du_int64_t=uint64_t"
