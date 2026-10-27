@@ -13,7 +13,8 @@
     url: "qidiMobile.url",
     secret: "qidiMobile.secret",
     cwd: "qidiMobile.cwd",
-    sessionId: "qidiMobile.sessionId"
+    sessionId: "qidiMobile.sessionId",
+    history: "qidiMobile.history"
   };
   var RECONNECT_DELAYS = [1, 2, 4, 8, 16]; // 秒（P9 退避）
   var MAX_RECONNECT = 5;
@@ -248,7 +249,7 @@
       .then(function (result) {
         clearInitTimer();
         loadSessionSupported = !!(result && result.agentCapabilities && result.agentCapabilities.loadSession);
-        var storedId = load(LS.sessionId);
+        var storedId = ((localStorage.getItem("qidiMobile.resume") === "1") || /[?&]resume=1/.test(location.search)) ? load(LS.sessionId) : null;
         if (storedId && loadSessionSupported) {
           // P2 会话恢复：三字段全部必填；响应不含 sessionId，沿用请求时的 id。
           // replay 历史通知会先于 load 响应到达，sessionId 已就绪 → 直接渲染。
@@ -303,6 +304,36 @@
       if (isReconnect) addSystem("已重新连接（服务端已无可恢复的历史，已新建会话）");
     }
     // 非 fresh（session/load 恢复）时：replay 历史已流式渲染进消息区，不得清空
+    rememberSession(sessionId, fresh);
+  }
+
+  // ===== 历史会话（本地记录，最多 20 条） =====
+  function readHistory() {
+    var list = [];
+    try { list = JSON.parse(localStorage.getItem(LS.history) || "[]"); } catch (e) { list = []; }
+    return Array.isArray(list) ? list : [];
+  }
+  function writeHistory(list) { store(LS.history, JSON.stringify(list.slice(0, 20))); }
+  function rememberSession(id, isNew) {
+    if (!id) return;
+    var list = readHistory();
+    var cur = null;
+    list = list.filter(function (x) { if (x && String(x.id) === String(id)) { cur = x; return false; } return true; });
+    list.unshift({
+      id: String(id),
+      t: (cur && !isNew) ? (cur.t || Date.now()) : Date.now(),
+      cwd: conn ? conn.cwd : "",
+      title: (cur && cur.title) || ""
+    });
+    writeHistory(list);
+  }
+  function setSessionTitle(id, title) {
+    if (!id || !title) return;
+    var list = readHistory(), hit = false;
+    list.forEach(function (x) {
+      if (x && String(x.id) === String(id) && !x.title) { x.title = String(title).slice(0, 30); hit = true; }
+    });
+    if (hit) writeHistory(list);
   }
 
   function onHandshakeFail(err, isReconnect) {
@@ -547,6 +578,7 @@
 
     // 不做本地回显：用户气泡一律以服务端 user_message_chunk 回声为准（避免重复）
     sentPromptText = text;         // 暂存发送文本，供 endTurn 兜底渲染
+    setSessionTitle(sessionId, text.trim()); // 首条消息作为历史会话标题
     sawUserMessageChunk = false;
     ta.value = "";
     autoGrow();
@@ -621,6 +653,10 @@
 
     var rawBox = el("div", "tool-raws");
     card.appendChild(rawBox);
+
+    // 默认折叠：只显示一行标题，点标题展开/收起
+    card.classList.add("min");
+    on(head, "click", function () { card.classList.toggle("min"); });
 
     var obj = {
       id: update.toolCallId, el: card, dot: dot, titleEl: titleEl, kindEl: kindEl,
@@ -810,6 +846,55 @@
     }
   }
 
+  // ===== 历史会话面板 =====
+  function openHistory() {
+    $("menu").classList.add("hidden");
+    var list = readHistory();
+    var box = $("hist-list");
+    box.innerHTML = "";
+    if (!list.length) {
+      var empty = el("div", "hist-meta", "暂无历史会话（新会话首次发消息后会自动记录）");
+      box.appendChild(empty);
+    } else {
+      list.forEach(function (h) {
+        var b = el("button", "hist-item");
+        b.type = "button";
+        var titleEl = el("div", "hist-title", h.title || ("会话 " + String(h.id).slice(0, 8)));
+        var meta = el("div", "hist-meta",
+          String(h.id).slice(0, 8) + " · " + new Date(h.t || Date.now()).toLocaleString());
+        b.appendChild(titleEl); b.appendChild(meta);
+        on(b, "click", function () { resumeSession(h.id); });
+        box.appendChild(b);
+      });
+    }
+    $("hist-sheet").classList.remove("hidden");
+  }
+
+  function resumeSession(id) {
+    $("hist-sheet").classList.add("hidden");
+    if (!connected || !conn) { toast("请先连接"); return; }
+    if (turnState === "running") { toast("当前回合进行中，请稍后再试"); return; }
+    if (!sessionId) { toast("会话尚未就绪"); return; }
+    if (String(id) === String(sessionId)) { toast("已经是当前会话"); return; }
+    var oldId = sessionId;
+    resetTurnRefs();
+    setTurnState("idle");
+    request("session/close", { sessionId: oldId }).catch(function () { /* 忽略 */ });
+    clearMessages();
+    setHeaderTitle("");
+    request("session/load", { sessionId: id, cwd: conn.cwd, mcpServers: [] })
+      .then(function () {
+        sessionId = id;
+        store(LS.sessionId, id);
+        updateHeader();
+        rememberSession(id, false);
+        toast("已恢复历史会话");
+      })
+      .catch(function (err) {
+        toast("恢复失败：" + errorText(err && err.error ? err.error : err));
+      });
+  }
+
   function onDisconnect() {
     $("menu").classList.add("hidden");
     if (turnState === "running") { toast("当前回合进行中，请先取消或等待完成"); return; }
@@ -941,7 +1026,10 @@
       $("menu").classList.toggle("hidden");
     });
     on($("menu-new"), "click", onNewSession);
+    on($("menu-history"), "click", openHistory);
     on($("menu-disconnect"), "click", onDisconnect);
+    on($("hist-close"), "click", function () { $("hist-sheet").classList.add("hidden"); });
+    on($("hist-backdrop"), "click", function () { $("hist-sheet").classList.add("hidden"); });
     on(document, "click", function () { $("menu").classList.add("hidden"); });
 
     on($("btn-retry"), "click", function () { reconnectCount = 0; hideBanner(); clearPermQueue(); startSocket(true); });

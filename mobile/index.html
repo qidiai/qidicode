@@ -8,7 +8,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>qidicode 手机遥控</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20261026c">
 </head>
 <body>
 
@@ -59,6 +59,7 @@
     <button id="btn-menu" class="icon-btn" type="button" aria-label="菜单">⋮</button>
     <div id="menu" class="menu hidden">
       <button id="menu-new" class="menu-item" type="button">新会话</button>
+      <button id="menu-history" class="menu-item" type="button">历史会话</button>
       <button id="menu-disconnect" class="menu-item" type="button">断开连接</button>
     </div>
   </header>
@@ -90,6 +91,20 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<!-- ===================== 历史会话 bottom sheet ===================== -->
+<div id="hist-sheet" class="sheet hidden">
+  <div id="hist-backdrop" class="sheet-backdrop"></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true" aria-label="历史会话">
+    <div class="sheet-head">
+      <span class="sheet-title">历史会话</span>
+      <button id="hist-close" class="icon-btn" type="button" aria-label="关闭">✕</button>
+    </div>
+    <div class="sheet-body">
+      <div id="hist-list" class="hist-list"></div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=20261026c"></script>
 </body>
 </html>

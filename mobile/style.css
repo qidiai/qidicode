@@ -446,6 +446,10 @@ input, textarea { font-family: inherit; }
 .tool-card.status-in_progress { border-left-color: var(--warn); }
 .tool-card.status-completed { border-left-color: var(--ok); }
 .tool-card.status-failed { border-left-color: var(--danger); }
+/* 工具卡片默认折叠：只保留标题行 */
+.tool-card.min > .tool-content,
+.tool-card.min > .tool-raws { display: none; }
+.tool-card .tool-head { cursor: pointer; }
 .tool-head { display: flex; align-items: center; gap: 9px; }
 .tool-dot {
   width: 9px;
@@ -690,3 +694,10 @@ input, textarea { font-family: inherit; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* history sheet (added 2026-10-26) */
+.hist-list { display: flex; flex-direction: column; gap: 8px; }
+.hist-item { text-align: left; width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; color: var(--text); cursor: pointer; }
+.hist-item:active { transform: scale(0.99); }
+.hist-title { font-weight: 600; margin-bottom: 3px; word-break: break-all; }
+.hist-meta { font-size: 12px; color: var(--text-faint); }
