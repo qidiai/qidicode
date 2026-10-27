@@ -31,6 +31,12 @@
 //! On Linux and Windows, `arboard` is used directly (it does not link AppKit on
 //! those platforms).
 //!
+//! On Android (bionic) there is no system clipboard API to bind to: `arboard`
+//! has no android backend and Termux access would require the separate
+//! Termux:API app, so `arboard` is kept out of the android dependency graph and
+//! every native clipboard operation fails with an explicit error instead (see
+//! the `platform` module gated on `target_os = "android"`).
+//!
 //! ## OSC 52 (remote clipboard)
 //!
 //! When running over SSH or inside tmux/screen on a remote host, the native
@@ -1167,7 +1173,7 @@ mod platform {
 // ---------------------------------------------------------------------------
 // Linux / Windows: arboard with CLI-tool fallback on Linux
 // ---------------------------------------------------------------------------
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(target_os = "android")))]
 mod platform {
     use super::ImageData;
     // The Linux Wayland/X11 CLI fallbacks (wl-copy/xclip/xsel probes and
@@ -2649,6 +2655,87 @@ mod platform {
         fn probe_and_lease_share_connect_deadline() {
             assert_eq!(DISPLAY_CONN_WAIT, std::time::Duration::from_secs(2));
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Android (bionic): no system clipboard API — every native path is a stub
+// ---------------------------------------------------------------------------
+//
+// Android has no in-process system clipboard to bind to: `arboard` ships only
+// linux/macos/windows backends, the AppKit path is macOS-only, and Termux
+// access would have to shell out to the separate Termux:API app (out of
+// scope). `arboard` is therefore kept out of the android dependency graph (see
+// Cargo.toml) and this module supplies the same surface with explicit
+// failures.
+//
+// Reads fail the way the non-macOS backend does when no clipboard backend is
+// available (`arboard unavailable` → `no clipboard backend available`); the
+// probe helpers answer "not supported", exactly as on Windows; writes report
+// the all-false `NativeWriteOutcome` that [`super::set_text`] turns into
+// `Err("no clipboard backend available")`.
+#[cfg(target_os = "android")]
+mod platform {
+    use super::ImageData;
+
+    /// Error message shared by every failing clipboard operation on Android.
+    const UNAVAILABLE: &str =
+        "clipboard is unavailable on Android (no system clipboard API; Termux:API not wired)";
+
+    /// No subprocess-free pasteboard probe exists off-macOS.
+    pub(super) fn clipboard_image_snapshot() -> (Option<u64>, bool) {
+        (None, false)
+    }
+
+    /// No native pasteboard changeCount off-macOS.
+    pub(super) fn clipboard_change_count() -> Option<u64> {
+        None
+    }
+
+    /// No AppKit to pre-warm off-macOS.
+    pub(super) fn clipboard_prewarm() {}
+
+    /// Never a Wayland session here (same answer as Windows/X11).
+    pub(super) fn wayland_data_control_supported() -> bool {
+        false
+    }
+
+    /// No clipboard backend exists on Android, so reading always fails.
+    pub fn get_text() -> anyhow::Result<Option<String>> {
+        anyhow::bail!(UNAVAILABLE)
+    }
+
+    /// Writes cannot land: report the all-false outcome callers already treat
+    /// as "no backend available".
+    pub fn set_text_with_outcome(text: &str) -> super::NativeWriteOutcome {
+        let _ = text;
+        tracing::debug!("clipboard write skipped: {UNAVAILABLE}");
+        super::NativeWriteOutcome::default()
+    }
+
+    /// No clipboard backend exists on Android, so reading always fails.
+    pub fn get_image() -> anyhow::Result<Option<ImageData>> {
+        anyhow::bail!(UNAVAILABLE)
+    }
+
+    /// No image clipboard on Android — the same explicit failure the Windows
+    /// arm returns (arboard never had a `set_image_file`, and the CLI leg is
+    /// Linux-only).
+    pub fn set_image_file(path: &std::path::Path) -> anyhow::Result<()> {
+        let _ = path;
+        anyhow::bail!(UNAVAILABLE)
+    }
+
+    /// File-URL paste is a clipboard read, so it fails the same way (the
+    /// non-macOS backend also propagates its arboard error from here).
+    pub fn get_file_urls() -> anyhow::Result<Option<String>> {
+        anyhow::bail!(UNAVAILABLE)
+    }
+
+    /// Both legs of the non-macOS composition read the clipboard, so this
+    /// fails on the first one.
+    pub fn get_attachments() -> anyhow::Result<super::ClipboardAttachments> {
+        anyhow::bail!(UNAVAILABLE)
     }
 }
 

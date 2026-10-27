@@ -7,7 +7,16 @@ edition = "2021"
 [dependencies]
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+# `default-features = false` is required: reqwest's default feature set includes
+# `default-tls` (native-tls → openssl-sys), which drags a C OpenSSL dependency into
+# every target that builds this workspace member (and, via feature unification, into
+# the shared reqwest 0.12 used by cf-sampler/cf-http). rustls is requested explicitly.
+# `charset` and `http2` are re-stated explicitly: they were part of the default set this
+# crate previously relied on and must not be silently dropped by the TLS fix.
+# `system-proxy` is deliberately NOT restored: the workspace-wide reqwest
+# (root Cargo.toml) is also `default-features = false` without it, so pulling it in here
+# would make this crate diverge from the rest of the workspace for no functional need.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "charset", "http2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }

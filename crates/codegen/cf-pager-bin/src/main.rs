@@ -5,10 +5,10 @@
     unreachable_code,
     dead_code
 )]
-#[cfg(all(feature = "jemalloc", unix))]
+#[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-#[cfg(all(feature = "jemalloc", feature = "release-dist", unix))]
+#[cfg(all(feature = "jemalloc", feature = "release-dist", unix, not(target_os = "android")))]
 mod jemalloc_malloc_conf {
     /// jemalloc looks up `extern const char *malloc_conf` — a thin pointer,
     /// not a Rust `&[u8]` fat pointer.
@@ -1355,7 +1355,7 @@ fn run_and_shutdown<F: std::future::Future>(
 /// transient — so a long-session resume doesn't leave hundreds of MB of dead
 /// pages counted against the process for its lifetime (macOS keeps
 /// `MADV_FREE`d pages in RSS until systemwide pressure).
-#[cfg(all(feature = "jemalloc", unix))]
+#[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
 fn purge_jemalloc_retained_pages() {
     static NAME: &[u8] = b"arena.4096.purge\0";
     let ret = unsafe {
@@ -1382,7 +1382,7 @@ fn purge_jemalloc_retained_pages() {
 /// Returns `None` if any mallctl fails (trace records the absence). Rides
 /// the `tikv-jemalloc-ctl` raw helpers (introduced by the heap-profile
 /// hooks below) instead of hand-rolled mallctl.
-#[cfg(all(feature = "jemalloc", unix))]
+#[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
 fn jemalloc_allocator_stats() -> Option<cf_pager::memory_trace::AllocatorStats> {
     /// SAFETY: callers pass fixed NUL-terminated `stats.*` size_t ctl names.
     unsafe fn gauge(name: &[u8]) -> Option<u64> {
@@ -1409,7 +1409,7 @@ fn jemalloc_allocator_stats() -> Option<cf_pager::memory_trace::AllocatorStats> 
 /// included) — the artifact the GCS memory-trace upload ships for offline
 /// analysis. Raw `tikv_jemalloc_sys` because jemalloc-ctl has no
 /// callback-form stats_print.
-#[cfg(all(feature = "jemalloc", unix))]
+#[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
 fn jemalloc_stats_dump() -> String {
     unsafe extern "C" fn append(opaque: *mut std::ffi::c_void, msg: *const std::ffi::c_char) {
         unsafe {
@@ -1427,7 +1427,7 @@ fn jemalloc_stats_dump() -> String {
     }
     out
 }
-#[cfg(all(feature = "jemalloc", unix))]
+#[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
 fn jemalloc_heap_stats() -> Option<cf_shell::heap_profile::JemallocStats> {
     unsafe {
         tikv_jemalloc_ctl::raw::write(b"epoch\0", 1u64).ok()?;
@@ -1439,19 +1439,19 @@ fn jemalloc_heap_stats() -> Option<cf_shell::heap_profile::JemallocStats> {
         })
     }
 }
-#[cfg(all(feature = "jemalloc", unix))]
+#[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
 fn jemalloc_set_prof_active(active: bool) -> bool {
     unsafe { tikv_jemalloc_ctl::raw::write(b"prof.active\0", active).is_ok() }
 }
-#[cfg(all(test, feature = "jemalloc", unix))]
+#[cfg(all(test, feature = "jemalloc", unix, not(target_os = "android")))]
 fn jemalloc_read_prof_active() -> Option<bool> {
     unsafe { tikv_jemalloc_ctl::raw::read::<bool>(b"prof.active\0").ok() }
 }
-#[cfg(all(feature = "jemalloc", unix))]
+#[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
 fn jemalloc_prof_available() -> bool {
     unsafe { tikv_jemalloc_ctl::raw::read::<bool>(b"opt.prof\0").unwrap_or(false) }
 }
-#[cfg(all(feature = "jemalloc", unix))]
+#[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
 fn jemalloc_dump_to_path(path: &std::path::Path) -> Result<(), String> {
     use std::os::unix::ffi::OsStrExt;
     if !jemalloc_prof_available() {
@@ -1460,7 +1460,7 @@ fn jemalloc_dump_to_path(path: &std::path::Path) -> Result<(), String> {
     let c = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
     unsafe { tikv_jemalloc_ctl::raw::write(b"prof.dump\0", c.as_ptr()) }.map_err(|e| e.to_string())
 }
-#[cfg(all(feature = "jemalloc", unix))]
+#[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
 fn install_heap_profile_hooks() {
     cf_shell::heap_profile::install(cf_shell::heap_profile::HeapProfileHooks {
         stats: jemalloc_heap_stats,
@@ -1539,14 +1539,14 @@ fn main() {
 
 fn real_main() -> i32 {
     cf_pager_minimal::install();
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     cf_pager::memory_release::install_release_hook(purge_jemalloc_retained_pages);
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     {
         cf_pager::memory_trace::install_allocator_stats_provider(jemalloc_allocator_stats);
         cf_pager::memory_trace::install_allocator_dump_provider(jemalloc_stats_dump);
     }
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     install_heap_profile_hooks();
     if let Some(code) = cf_pager::app::mermaid_worker::maybe_run_render_subprocess() {
         std::process::exit(code);
@@ -2216,9 +2216,9 @@ async fn signal_leaders_to_relaunch(installed_version: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     struct TempHeapDump(std::path::PathBuf);
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     impl TempHeapDump {
         fn new(label: &str) -> Self {
             let path = std::env::temp_dir().join(format!(
@@ -2239,13 +2239,13 @@ mod tests {
             assert!(meta.len() > 0, "empty dump file");
         }
     }
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     impl Drop for TempHeapDump {
         fn drop(&mut self) {
             let _ = std::fs::remove_file(&self.0);
         }
     }
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     fn require_opt_prof() -> bool {
         if jemalloc_prof_available() {
             return true;
@@ -2257,16 +2257,16 @@ mod tests {
         );
         false
     }
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     fn assert_prof_active(expected: bool) {
         assert_eq!(jemalloc_read_prof_active(), Some(expected));
     }
     /// Restores process-global `prof.active` on drop (panic-safe for serial tests).
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     struct ProfActiveGuard {
         previous: bool,
     }
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     impl ProfActiveGuard {
         fn set(active: bool) -> Self {
             let previous = jemalloc_read_prof_active().unwrap_or(false);
@@ -2277,13 +2277,13 @@ mod tests {
             Self { previous }
         }
     }
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     impl Drop for ProfActiveGuard {
         fn drop(&mut self) {
             let _ = jemalloc_set_prof_active(self.previous);
         }
     }
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     fn assert_stats_sane(stats: cf_shell::heap_profile::JemallocStats) {
         assert!(stats.allocated > 0, "allocated={}", stats.allocated);
         assert!(stats.resident > 0, "resident={}", stats.resident);
@@ -2294,13 +2294,13 @@ mod tests {
             stats.allocated
         );
     }
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     #[test]
     #[serial_test::serial(jemalloc_heap_profile)]
     fn jemalloc_stats_readable_after_epoch() {
         assert_stats_sane(jemalloc_heap_stats().expect("stats readable"));
     }
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     #[test]
     #[serial_test::serial(jemalloc_heap_profile)]
     fn jemalloc_prof_active_round_trip_and_dump() {
@@ -2317,7 +2317,7 @@ mod tests {
         jemalloc_dump_to_path(dump.path()).expect("prof.dump");
         dump.assert_nonempty_dump();
     }
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     #[test]
     #[serial_test::serial(jemalloc_heap_profile)]
     fn jemalloc_dump_rejects_interior_nul_path() {
@@ -2334,7 +2334,7 @@ mod tests {
             "unexpected error: {err}"
         );
     }
-    #[cfg(all(feature = "jemalloc", unix))]
+    #[cfg(all(feature = "jemalloc", unix, not(target_os = "android")))]
     #[test]
     #[serial_test::serial(jemalloc_heap_profile)]
     fn install_heap_profile_hooks_wires_shell_apis() {

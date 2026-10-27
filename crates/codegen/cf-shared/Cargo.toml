@@ -40,13 +40,17 @@ libc = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.3"
 
-# arboard for clipboard on non-macOS platforms. On macOS we use pbcopy/pbpaste
+# arboard for clipboard on non-macOS, non-Android platforms. On macOS we use pbcopy/pbpaste
 # subprocesses to avoid linking AppKit, which causes ~2 GB IOAccelerator GPU
 # memory overhead in headless processes (see clipboard.rs).
+# Android (bionic) is excluded: arboard has no android backend (its `platform`
+# module is linux/macos/windows only), so keeping it in the android graph would
+# fail the build. clipboard.rs's `target_os = "android"` branch supplies an
+# erroring stub instead.
 # `wayland-data-control` makes arboard set the Wayland selection through the
 # compositor-side data-control protocol (no surface, no focus) instead of the
 # focus-mediated XWayland bridge; no-op off Linux (target-gated inside arboard).
-[target.'cfg(not(target_os = "macos"))'.dependencies]
+[target.'cfg(not(any(target_os = "macos", target_os = "android")))'.dependencies]
 arboard = { workspace = true, features = ["wayland-data-control"] }
 
 # Already in-graph via arboard's wayland-data-control; direct dep for the

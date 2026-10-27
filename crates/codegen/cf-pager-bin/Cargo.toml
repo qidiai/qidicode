@@ -66,8 +66,18 @@ cf-system-power = { path = "../cf-system-power" }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+
+# jemalloc is the default allocator on Unix **except Android**, where the platform
+# allocator (scudo) is the system default and tikv-jemalloc-sys cannot be
+# cross-built here (its autotools `configure` needs a shell toolchain the Windows
+# cross-build host does not have). Keeping these out of the android dependency
+# graph means `cargo build --target aarch64-linux-android` links no C jemalloc;
+# the `jemalloc` feature stays declared (see [features]) but resolves to no
+# dependency on android, and main.rs gates every use with
+# `cfg(all(feature = "jemalloc", unix, not(target_os = "android")))`.
+[target.'cfg(all(unix, not(target_os = "android")))'.dependencies]
 # Default allocator on Unix; gated by the `jemalloc` feature (see main.rs
-# `#[global_allocator]`, cfg(all(feature = "jemalloc", unix))).
+# `#[global_allocator]`, cfg(all(feature = "jemalloc", unix, not(target_os = "android")))).
 # `stats` is binary-scoped only (not workspace-wide) so this CLI jemalloc
 # link gets --enable-stats for stats.allocated / stats.resident mallctl.
 tikv-jemallocator = { workspace = true, optional = true, features = ["stats"] }

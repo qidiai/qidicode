@@ -9,6 +9,10 @@
 //! `Unspecified` (e.g., over SSH where no desktop session is available).
 //! The OSC 11 fallback is **startup-only** — see [`detect_with_osc11_fallback`].
 //!
+//! On Android there is no `dark-light` backend at all, so the desktop step is
+//! skipped entirely and the OSC 11 query is the only source of a real answer
+//! (see the `target_os = "android"` arm of `detect_without_mock`).
+//!
 //! Falls back to `None` on total detection failure.
 
 use super::ThemeKind;
@@ -65,6 +69,7 @@ pub fn detect_with_osc11_fallback() -> Option<SystemAppearance> {
 }
 
 /// Inner detection via desktop APIs only (no mock, no OSC 11).
+#[cfg(not(target_os = "android"))]
 fn detect_without_mock() -> Option<SystemAppearance> {
     match dark_light::detect() {
         Ok(dark_light::Mode::Dark) => Some(SystemAppearance::Dark),
@@ -72,6 +77,19 @@ fn detect_without_mock() -> Option<SystemAppearance> {
         // Mode::Unspecified or Err — no system preference detected
         _ => None,
     }
+}
+
+/// Inner detection via desktop APIs only (no mock, no OSC 11).
+///
+/// Always `None` on Android: dark_light has no bionic backend; its
+/// unlisted-target fallback returns a hardcoded `Mode::Light`, which would
+/// permanently mask the OSC 11 query that Termux actually supports.
+/// Reporting "no desktop preference" instead lets [`detect_with_osc11_fallback`]
+/// fall through to that query (and every non-OSC-11 caller fall back to the
+/// configured default rather than a fabricated light theme).
+#[cfg(target_os = "android")]
+fn detect_without_mock() -> Option<SystemAppearance> {
+    None
 }
 
 /// Return the mock value if one has been set (test builds only).

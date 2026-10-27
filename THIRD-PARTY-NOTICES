@@ -16533,6 +16533,60 @@ Copyright notice:
 License text: see Part II — Apache-2.0
 
 --------------------------------------------------------------------------------
+mid 4.0.0
+--------------------------------------------------------------------------------
+Source:  https://github.com/doroved/mid (crate: https://crates.io/crates/mid/4.0.0)
+License: Apache-2.0  (upstream declares: MIT OR Apache-2.0)
+
+Copyright notice:
+  Copyright holders / authors (from package metadata):
+    - doroved (https://github.com/doroved/mid)
+
+License text: see Part II — Apache-2.0
+
+Additional requirements / notices:
+  VENDORED WITH LOCAL MODIFICATIONS:
+  Vendored at third_party/mid/ (picked up via [patch.crates-io] in the workspace root
+  Cargo.toml). Local modifications: the Linux platform cfgs are widened to also cover
+  `target_os = "android"` (src/lib.rs use-gate and the five cfgs in src/linux.rs); the
+  code itself is unchanged. Behaviour on every other platform is identical to the
+  published 4.0.0 crate.
+  Android note: the Linux implementation shells out to read the machine id
+  (hostnamectl / /var/lib/dbus/machine-id / /etc/machine-id), none of which exists on
+  Android, so `mid::get()`/`mid::data()` return an error at runtime there. That is
+  accepted: the caller is telemetry. No Android machine-id is faked.
+  Upstream is dual licensed MIT OR Apache-2.0; both license texts are retained verbatim
+  in the vendored tree as LICENSE-MIT and LICENSE-APACHE. For this distribution,
+  obligations are satisfied under: Apache-2.0.
+  Apache-2.0 change notice (§4(b)): the files under third_party/mid/ have been modified as
+  described above. Modified files remain under the Apache License 2.0.
+
+--------------------------------------------------------------------------------
+nono 0.53.0
+--------------------------------------------------------------------------------
+Source:  https://github.com/always-further/nono (crate: https://crates.io/crates/nono/0.53.0)
+License: Apache-2.0
+
+Copyright notice:
+  Copyright holders / authors (from package metadata):
+    - Luke Hinds (https://github.com/always-further/nono)
+
+License text: see Part II — Apache-2.0
+
+Additional requirements / notices:
+  VENDORED WITH LOCAL MODIFICATIONS:
+  Vendored at third_party/nono/ (picked up via [patch.crates-io] in the workspace root
+  Cargo.toml). The published crate ships no LICENSE file; the license is the one declared
+  in its package metadata (Apache-2.0), whose text is in Part II.
+  Local modifications: one cfg in src/capability.rs (the filesystem-capability dedup key)
+  widened from `target_os = "linux"` to `any(target_os = "linux", target_os = "android")`.
+  Nothing else changed; behaviour on other platforms is identical to the published 0.53.0
+  crate. Android has no Landlock/Seatbelt backend, so it takes nono's existing
+  unsupported-platform path (Sandbox::apply → UnsupportedPlatform).
+  Apache-2.0 change notice (§4(b)): the files under third_party/nono/ have been modified as
+  described above. Modified files remain under the Apache License 2.0.
+
+--------------------------------------------------------------------------------
 waitpid-any 0.3.0
 --------------------------------------------------------------------------------
 Source:  https://github.com/oxalica/waitpid-any (crate: https://crates.io/crates/waitpid-any/0.3.0)
