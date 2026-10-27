@@ -333,7 +333,10 @@ cf-interjection-core = { path = "crates/common/cf-interjection-core" }
 cf-computer-hub-mcp-adapter = { path = "crates/common/cf-computer-hub-mcp-adapter" }
 cf-tracing-macros = { path = "crates/codegen/cf-tracing-macros" }
 [patch.crates-io]
-# No patches needed - all aliases handled via workspace.dependencies
+# waitpid-any is vendored to add an android (bionic) implementation branch; behaviour on all
+# other platforms is byte-for-byte identical to upstream 0.3.0.
+waitpid-any = { path = "third_party/waitpid-any" }
+# No other patches needed - all aliases handled via workspace.dependencies
 
 
 [profile.release]

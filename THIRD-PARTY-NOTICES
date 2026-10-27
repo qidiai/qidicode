@@ -16532,6 +16532,32 @@ Copyright notice:
 
 License text: see Part II — Apache-2.0
 
+--------------------------------------------------------------------------------
+waitpid-any 0.3.0
+--------------------------------------------------------------------------------
+Source:  https://github.com/oxalica/waitpid-any (crate: https://crates.io/crates/waitpid-any/0.3.0)
+License: Apache-2.0  (upstream declares: MIT OR Apache-2.0)
+
+Copyright notice:
+  Copyright holders / authors:
+    - oxalica and waitpid-any contributors (https://github.com/oxalica/waitpid-any)
+
+License text: see Part II — Apache-2.0
+
+Additional requirements / notices:
+  VENDORED WITH LOCAL MODIFICATIONS:
+  Vendored at third_party/waitpid-any/ (picked up via [patch.crates-io] in the workspace
+  root Cargo.toml). Local modifications: added an Android (bionic) implementation branch
+  (src/android.rs plus its cfg/path selection in src/lib.rs); all existing sources for
+  other platforms (src/linux.rs, src/bsd.rs, src/windows.rs) are byte-for-byte identical
+  to the published 0.3.0 crate. Whole-crate relicensing/modification notice: this package
+  was modified as described above.
+  Upstream is dual licensed MIT OR Apache-2.0; both license texts are retained verbatim
+  in the vendored tree as LICENSE-MIT and LICENSE-APACHE. For this distribution,
+  obligations are satisfied under: Apache-2.0.
+  Apache-2.0 change notice (§4(b)): the files under third_party/waitpid-any/ have been
+  modified as described above. Modified files remain under the Apache License 2.0.
+
 
 ================================================================================
 PART I (continued) — BUNDLED UI / SYNTAX THEMES
