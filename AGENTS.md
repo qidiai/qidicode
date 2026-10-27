@@ -35,6 +35,8 @@
 不确定放哪 → **先问用户，不要猜根目录**。
 
 > **2026-10-17 纪律修订（用户确认）**：`qidiwork-docs/` 已从白名单和本仓库**永久移除**（历史已重写清除）——本仓库是对外公开的代码库，**只放代码与 §2 定义的工程技术文档**；办公/研究/个人文档一律不进本仓库，落位见 §3。
+>
+> **2026-10-27 勘误（实测推翻上句的"已清除"）**：`qidiwork-docs/审计评审/` 下 4 篇 2026-10-17 内部审计文档（Phase C R7/R8 落点复核、Phase C 终态审计、推进方案 v2 评审、v2.1 双模合成）自 `a8cf763e` 等提交起**一直被 git 跟踪**，可匿名读全文，分布在 GitHub `main` + GitHub/Gitee 的 `feat/evo-1-5-evolution-management`（Gitee `main` 无）。根因两条：① 忽略行**对已跟踪文件无效**（加 `.gitignore` ≠ 移出索引，必须 `git rm --cached`）；② pre-commit 密钥钩子对中文路径静默漏扫（`fatal: Invalid path '/346'`，修复见 `44a8f69e`）。当日止血：内容逐字核对（SHA256 一致）后落位私有库 `qidiwork-docs@30e911b`，分支 `91b2e2f6`（`--cached` 移除，磁盘副本保留）、GitHub `main` `2c8f25e7`。**历史旧 blob 仍在**（按 commit SHA 仍可取回），彻底清除待重写历史+双仓强推的专门排期。
 
 ---
 
@@ -66,11 +68,11 @@
 | 会话结论 / 交接纪要 | `会话纪要/` | `YYYY-MM-DD-主题.md` |
 
 **铁律（2026-10-17 用户确认，源于公开仓库误暴露事故）**：
-- **办公/研究/个人文档绝不进入本公开仓库**（曾因误判远程可见性，157 个文档文件在 GitHub/Gitee 双公开仓库暴露 3 周，已重写历史清除）
+- **办公/研究/个人文档绝不进入本公开仓库**（曾因误判远程可见性，157 个文档文件在 GitHub/Gitee 双公开仓库暴露 3 周，已重写历史清除。2026-10-27 追加：同族泄露再次发生且**从未被清除**——4 篇 10-17 审计文档自始被跟踪到当日才止血，详见 §1 勘误；教训是"删过一轮"不等于"当前干净"，须按 tip 实测）
 - 文档的 git 工作流在私有库进行：`cd G:\qidiwork-docs-local` 后常规 add/commit/push（remote 为私有库 origin）
 - 文档**不参与**本仓库的双推纪律（§10）——两边是完全不同的仓库
 - 本地副本未 clone 到位时，先在 `G:\qidiwork-docs-local` 执行 `git clone https://github.com/qidiai/qidiwork-docs.git`
-- `.gitignore` 已永久屏蔽 `qidiwork-docs/` 与 `MEMORY_SCOPE.md`，误建该目录也不会被提交
+- `.gitignore` 已永久屏蔽 `qidiwork-docs/` 与 `MEMORY_SCOPE.md`，误建该目录也不会被提交。**但屏蔽只管未跟踪文件**——已在索引里的条目加忽略行毫无效果，历史遗留的已跟踪文档必须 `git rm --cached` 才真正出库（2026-10-27 实测漏网即此因）。自检口令：`git ls-files qidiwork-docs/ MEMORY_SCOPE.md` **应为 0 行**（勿只信 `.gitignore`，也勿只信"以前删过"）
 
 ---
 
