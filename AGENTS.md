@@ -303,7 +303,7 @@
 | 可见性闸门（2026-10-17 事故后新增） | 每次会话首次推送前、以及任何远程配置变更后，跑一次 `curl.exe -s https://api.github.com/repos/qidiai/qidicode` 与 gitee 对应 API，确认可见性与预期一致（公开是预期状态；**若返回 private 或仓库消失，停止推送并报告**）。文档类内容一律推私有库，推完 `gh repo view qidiai/qidiwork-docs --json visibility` 验证 PRIVATE |
 | 提交权 | 编码手/子代理禁止 commit；指挥官质检通过后统一提交 |
 | 提交信息 | `<类型>: <摘要>` + 正文列要点（orchestra 战报格式，见 git log） |
-| 密钥扫描 | ✅ **pre-commit 钩子已生效**（2026-09-30 实测：`git config core.hooksPath` 指向 `pre-commit-secret-check` 技能的 `scripts/hooks` 目录，提交时自动扫描，实测输出 `[Pre-commit] No secrets detected`）。⚠️ 注意 hooksPath 生效后 `.git/hooks/` 整体失效（含原 post-commit Qoder tracker）。敏感提交前仍建议手动复跑 `secret-scan` 技能兜底 |
+| 密钥扫描 | ✅ **pre-commit 钩子已生效**（2026-09-30 实测：`git config core.hooksPath` 指向 `pre-commit-secret-check` 技能的 `scripts/hooks` 目录，提交时自动扫描，实测输出 `[Pre-commit] No secrets detected`）。⚠️ 注意 hooksPath 生效后 `.git/hooks/` 整体失效（含原 post-commit Qoder tracker）。敏感提交前仍建议手动复跑 `secret-scan` 技能兜底。**2026-10-27 修复：旧版对非 ASCII（中文）路径静默漏扫**——`git diff --cached --name-only` 输出八进制转义引号路径，回传后 git 报 `fatal: Invalid path '/346'`、diff 为空即 `continue`，钩子却仍报"干净"。新实现：`-z` 取原始字节自解码 UTF-8 + 路径直传 git（`git diff` **不支持** `--pathspec-from-file`，实测 exit 129，勿搬 add/commit/rm 的写法）+ **fail-closed**（git 失败或 diff 无该文件 `diff --git` 头 → 记"未扫描"并退出 1）。6 例回归 + 端到端真实提交实测通过；改前脚本备份 `%USERPROFILE%\.qidi\skills-backup\pre-commit.ps1.bak-20261027-100644`。另：hooks 目录内还有 4 个 Git LFS 钩子（`git lfs install` 写进全局 hooksPath 的副作用），git-lfs 3.7.1 在位，pre-push 正常，勿误删 |
 
 ## 11. 环境硬约束（本机实测，新会话必读）
 
