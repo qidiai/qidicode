@@ -1169,6 +1169,8 @@ mod platform {
 // ---------------------------------------------------------------------------
 #[cfg(not(target_os = "macos"))]
 mod platform {
+    #[cfg(target_os = "linux")]
+    use std::process::{Command, Stdio};
     use super::ImageData;
     
 
