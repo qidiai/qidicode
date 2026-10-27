@@ -1,0 +1,92 @@
+name: Build ARM64 (Termux)
+
+# 手动触发，或推送 v* 标签时自动构建并发布 Release 资产。
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "（可选）创建 Release 的标签，如 v0.1.220-arm64；留空只上传 Artifact"
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  arm64-musl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+
+      - name: Install zig + cargo-zigbuild
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq protobuf-compiler
+          curl -sL -o zig.tar.xz https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
+          tar xf zig.tar.xz
+          sudo ln -sf "$PWD/zig-linux-x86_64-0.13.0/zig" /usr/local/bin/zig
+          zig version
+          cargo install cargo-zigbuild --locked
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-zigbuild-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build qidi (aarch64-unknown-linux-musl)
+        env:
+          CARGO_BUILD_JOBS: "4"
+        run: |
+          cargo zigbuild --release --target aarch64-unknown-linux-musl \
+            -p cf-pager-bin --bin qidi --locked
+
+      - name: Verify binary
+        run: |
+          file target/aarch64-unknown-linux-musl/release/qidi
+          sudo apt-get install -y -qq qemu-user-static
+          qemu-aarch64-static target/aarch64-unknown-linux-musl/release/qidi --version
+
+      - name: Package
+        run: |
+          cp target/aarch64-unknown-linux-musl/release/qidi qidi-aarch64
+          chmod +x qidi-aarch64
+          sha256sum qidi-aarch64 > qidi-aarch64.sha256
+          ls -lh qidi-aarch64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qidi-aarch64
+          path: |
+            qidi-aarch64
+            qidi-aarch64.sha256
+          retention-days: 30
+
+      - name: Publish Release asset
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.release_tag }}
+        run: |
+          gh release create "$TAG" qidi-aarch64 qidi-aarch64.sha256 \
+            --title "qidi $TAG (aarch64 musl)" \
+            --notes "Termux / aarch64 Linux 静态构建。安装：curl -fL -o \$PREFIX/bin/qidi <asset-url> && chmod +x \$PREFIX/bin/qidi"
