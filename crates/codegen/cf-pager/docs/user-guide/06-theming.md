@@ -145,8 +145,8 @@ Use compact mode on small screens to maximize content area.
 
 Grok bundles three `.tmTheme` files for code-block syntax highlighting and selects one based on the active theme:
 
-- `grok-night.tmTheme` -- GrokNight, RosePineMoon, and OscuraMidnight
-- `grok-day.tmTheme` -- GrokDay
+- `qidi-night.tmTheme` -- GrokNight, RosePineMoon, and OscuraMidnight
+- `qidi-day.tmTheme` -- GrokDay
 - `tokyo-night.tmTheme` -- TokyoNight
 
 Grok selects the matching file automatically when you switch themes. The `.tmTheme` files are built into the binary, so you cannot replace them with your own.

@@ -49,7 +49,7 @@ async fn fetch_user_info(
             "X-XAI-Token-Auth",
             auth_manager.grok_com_config().token_header.as_str(),
         )
-        .header("x-grok-client-version", cf_version::VERSION)
+        .header("x-qidi-client-version", cf_version::VERSION)
         .header(
             crate::http::CLIENT_MODE_HEADER,
             crate::http::process_client_mode(),

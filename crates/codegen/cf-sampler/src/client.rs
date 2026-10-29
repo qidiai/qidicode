@@ -37,7 +37,7 @@ use crate::config::{AuthScheme, OriginClientInfo, SamplerConfig};
 // Re-export ApiBackend from the shared types crate for downstream callers.
 pub use cf_sampling_types::ApiBackend;
 
-/// Process-level fallback for the `x-grok-client-identifier` header.
+/// Process-level fallback for the `x-qidi-client-identifier` header.
 const DEFAULT_CLIENT_IDENTIFIER: &str = "grok-shell";
 
 /// Product identifier baked into User-Agent strings.
@@ -457,12 +457,12 @@ impl SamplingClient {
             headers.insert(header_name, header_value);
         }
 
-        // Add x-grok-client-version header for version gating at the proxy.
+        // Add x-qidi-client-version header for version gating at the proxy.
         if let Some(client_version) = config.client_version.as_ref()
             && let Ok(header_value) = HeaderValue::from_str(client_version)
         {
             headers.insert(
-                HeaderName::from_static("x-grok-client-version"),
+                HeaderName::from_static("x-qidi-client-version"),
                 header_value,
             );
         }
@@ -489,7 +489,7 @@ impl SamplingClient {
                 .unwrap_or_else(|| DEFAULT_CLIENT_IDENTIFIER.to_string());
             if let Ok(header_value) = HeaderValue::from_str(&client_id) {
                 headers.insert(
-                    HeaderName::from_static("x-grok-client-identifier"),
+                    HeaderName::from_static("x-qidi-client-identifier"),
                     header_value,
                 );
             }

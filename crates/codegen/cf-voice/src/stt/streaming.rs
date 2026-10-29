@@ -55,7 +55,7 @@ impl StreamingSttSession {
         // still fully authorized without them).
         insert_optional_header(
             &mut request,
-            "x-grok-client-identifier",
+            "x-qidi-client-identifier",
             &config.client_identifier,
         );
         insert_optional_header(&mut request, "User-Agent", &config.user_agent);
@@ -304,10 +304,10 @@ mod tests {
     #[test]
     fn optional_header_inserted_when_present_skipped_when_empty() {
         let mut req = "wss://api.x.ai/v1/stt".into_client_request().unwrap();
-        insert_optional_header(&mut req, "x-grok-client-identifier", "grok-shell");
+        insert_optional_header(&mut req, "x-qidi-client-identifier", "grok-shell");
         insert_optional_header(&mut req, "User-Agent", "");
         assert_eq!(
-            req.headers().get("x-grok-client-identifier").unwrap(),
+            req.headers().get("x-qidi-client-identifier").unwrap(),
             "grok-shell"
         );
         assert!(

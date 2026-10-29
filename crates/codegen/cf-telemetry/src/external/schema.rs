@@ -532,6 +532,7 @@ pub(crate) const KNOWN_CLIENT_IDENTIFIERS: &[&str] = &[
     "grok-pager",
     "grok-tui",
     "grok-shell",
+    "qidi-shell",
     "grok-web",
     "grok-desktop",
     "grok-code-extension",

@@ -63,7 +63,7 @@ fn ensure_home_permissions(_dir: &std::path::Path) {
     // (see rustdoc on the Unix variant). File-level ACLs still apply.
 }
 
-/// Per-user config directory: `$QIDI_HOME` (preferred) or `$QIDI_HOME`
+/// Per-user config directory: `$QIDI_HOME` (preferred) or `$GROK_HOME`
 /// (legacy compat) or `~/.qidi`. Created if needed.
 ///
 /// The function name `grok_home` is retained for API compatibility; the
@@ -71,10 +71,10 @@ fn ensure_home_permissions(_dir: &std::path::Path) {
 pub fn grok_home() -> PathBuf {
     QIDI_HOME
         .get_or_init(|| {
-            // Prefer QIDI_HOME, fall back to QIDI_HOME for legacy users.
+            // Prefer QIDI_HOME, fall back to GROK_HOME for legacy users.
             let grok_home = if let Ok(v) = std::env::var("QIDI_HOME") {
                 PathBuf::from(v)
-            } else if let Ok(v) = std::env::var("QIDI_HOME") {
+            } else if let Ok(v) = std::env::var("GROK_HOME") {
                 PathBuf::from(v)
             } else {
                 default_grok_home()
@@ -89,7 +89,7 @@ pub fn grok_home() -> PathBuf {
 }
 
 /// The user-global QIDI Code home, but only when one genuinely resolves:
-/// `Some` when `$QIDI_HOME`/`$QIDI_HOME` is set or a home directory is found,
+/// `Some` when `$QIDI_HOME`/`$GROK_HOME` is set or a home directory is found,
 /// `None` otherwise. Unlike [`grok_home()`], this never falls back to a
 /// cwd-relative `.qidi`, so callers that *scan* user-global resources (hooks,
 /// marketplace sources, ...) don't mistake a project's `.qidi` tree for the

@@ -19,10 +19,26 @@ QIDI Code 是一个基于 Rust 构建的终端 AI 编码工具，支持多模型
 
 ## 📦 安装
 
+### 一键安装脚本
+
+macOS / Linux：
+
+```bash
+curl -fsSL https://qidiwork.qidiai.ltd/cli/install.sh | bash
+```
+
+Windows（PowerShell）：
+
+```powershell
+irm https://qidiwork.qidiai.ltd/cli/install.ps1 | iex
+```
+
+发布通道版本号（纯文本）：<https://qidiwork.qidiai.ltd/cli/stable>；GUI 与内核最新版本清单：<https://qidiwork.qidiai.ltd/releases/latest.json>。
+
 ### 从源码构建
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/qidiai/qidicode.git
 cd qidicode
 
 # Windows 需要设置 protoc 路径

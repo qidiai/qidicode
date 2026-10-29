@@ -71,7 +71,7 @@ pub struct OtelExporterConfig {
 ///
 /// - `client_name`: binary name (e.g. `"grok-tui"`, `"grok-pager"`) -- stored as
 ///   `client.name` resource attribute for dashboards to distinguish client types.
-/// - `client_version`: `CARGO_PKG_VERSION` -- sent in the `x-grok-client-version` header.
+/// - `client_version`: `CARGO_PKG_VERSION` -- sent in the `x-qidi-client-version` header.
 /// - `service_version`: `VERSION_WITH_COMMIT` -- stored as `service.version` resource attribute.
 /// - `config`: runtime configuration; see [`OtelLayerConfig`].
 pub fn build_otel_layer<S>(
@@ -473,7 +473,7 @@ fn build_server_provider(client: OtelClientInfo, config: OtelLayerConfig) -> Sdk
         let traces_url = config.exporter.traces_url;
         let mut static_headers = std::collections::HashMap::new();
         static_headers.insert(
-            "x-grok-client-version".to_string(),
+            "x-qidi-client-version".to_string(),
             client_version.to_string(),
         );
         let timeout = config

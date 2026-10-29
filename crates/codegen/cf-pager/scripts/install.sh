@@ -1,22 +1,14 @@
 #!/bin/bash
 #
-# Grok CLI installer — https://x.ai/cli/install.sh
+# QIDI Code installer — https://qidiwork.qidiai.ltd/cli/install.sh
 #
-# Auth: GROK_DEPLOYMENT_KEY (takes precedence) or ~/.grok/auth.json from `grok login`.
+# Auth: QIDI_DEPLOYMENT_KEY (takes precedence) or ~/.qidi/auth.json from `qidi login`.
 # Env: QIDI_CHANNEL (stable|alpha|enterprise, default: stable), QIDI_BIN_DIR, QIDI_PROXY_URL
 #
-# Env naming domains (authoritative contract: scripts/README.md):
-#   Installer scripts read the QIDI_* domain only (QIDI_CHANNEL,
-#   QIDI_BIN_DIR, QIDI_PROXY_URL). The running CLI reads the GROK_*
-#   domain (GROK_DEPLOYMENT_KEY, GROK_VERSION, ...). The only
-#   crossings are retained contract points: GROK_DEPLOYMENT_KEY
-#   (enterprise installer auth) and GROK_VERSION (ps1 version
-#   input). ~/.grok stays the runtime home regardless of QIDI_BIN_DIR.
-#
 # Usage:
-#   curl -fsSL https://x.ai/cli/install.sh | bash            # latest stable
-#   curl -fsSL https://x.ai/cli/install.sh | bash -s 0.1.42  # specific version
-#   GROK_DEPLOYMENT_KEY=<key> bash <(curl -fsSL https://x.ai/cli/install.sh)
+#   curl -fsSL https://qidiwork.qidiai.ltd/cli/install.sh | bash            # latest stable
+#   curl -fsSL https://qidiwork.qidiai.ltd/cli/install.sh | bash -s 0.1.42  # specific version
+#   QIDI_DEPLOYMENT_KEY=<key> bash <(curl -fsSL https://qidiwork.qidiai.ltd/cli/install.sh)
 #
 # Windows: run under Git for Windows / MSYS2 Bash (same curl | bash flow); WSL
 # uses the Linux binary.
@@ -115,33 +107,33 @@ json_get() {
         | sed -e 's/\\"/"/g' -e 's/\\n/\'$'\n''/g' -e 's/\\t/\'$'\t''/g' -e 's/\\\\/\\/g'
 }
 
-# Read a token from ~/.grok/auth.json for the given scope key.
+# Read a token from ~/.qidi/auth.json for the given scope key.
 # Format: {"scope_url": {"key": "token"}, ...}
-read_grok_token() {
-    local auth_file="$HOME/.grok/auth.json"
+read_qidi_token() {
+    local auth_file="$HOME/.qidi/auth.json"
     local scope="$1"
     [ -f "$auth_file" ] || return 1
     # Flatten to one line then extract: find the scope, then the "key" value after it
     tr -d '\n' < "$auth_file" | sed -n 's|.*"'"$scope"'"[[:space:]]*:[[:space:]]*{[^}]*"key"[[:space:]]*:[[:space:]]*"\([^"]*\)".*|\1|p' | head -1
 }
 
-# Resolve auth: GROK_DEPLOYMENT_KEY > OIDC token > legacy token
-OIDC_SCOPE="https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828"
+# Resolve auth: QIDI_DEPLOYMENT_KEY > OIDC token > legacy token
+OIDC_SCOPE="https://api.qidiai.ltd::qidi-code"
 LEGACY_SCOPE="https://accounts.x.ai/sign-in"
 AUTH_SOURCE=""
 
-if [ -n "$GROK_DEPLOYMENT_KEY" ]; then
+if [ -n "$QIDI_DEPLOYMENT_KEY" ]; then
     AUTH_SOURCE="deployment key"
     echo "Auth: using deployment key." >&2
 else
-    OIDC_TOKEN=$(read_grok_token "$OIDC_SCOPE" 2>/dev/null) || true
-    LEGACY_TOKEN=$(read_grok_token "$LEGACY_SCOPE" 2>/dev/null) || true
+    OIDC_TOKEN=$(read_qidi_token "$OIDC_SCOPE" 2>/dev/null) || true
+    LEGACY_TOKEN=$(read_qidi_token "$LEGACY_SCOPE" 2>/dev/null) || true
     if [ -n "$OIDC_TOKEN" ]; then
         AUTH_SOURCE="auth.json (oidc)"
-        echo "Auth: using OIDC token from ~/.grok/auth.json." >&2
+        echo "Auth: using OIDC token from ~/.qidi/auth.json." >&2
     elif [ -n "$LEGACY_TOKEN" ]; then
         AUTH_SOURCE="auth.json (legacy)"
-        echo "Auth: using legacy token from ~/.grok/auth.json." >&2
+        echo "Auth: using legacy token from ~/.qidi/auth.json." >&2
     fi
 fi
 
@@ -159,16 +151,16 @@ case "$(uname -m)" in
     *)                    echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 
-BASE_URL_PRIMARY="https://x.ai/cli"
-BASE_URL_FALLBACK="https://storage.googleapis.com/grok-build-public-artifacts/cli"
-DOWNLOAD_DIR="$HOME/.grok/downloads"
-BIN_DIR="${QIDI_BIN_DIR:-$HOME/.grok/bin}"
+BASE_URL_PRIMARY="https://qidiwork.qidiai.ltd/cli"
+BASE_URL_FALLBACK="https://qidiwork.qidiai.ltd/cli"
+DOWNLOAD_DIR="$HOME/.qidi/downloads"
+BIN_DIR="${QIDI_BIN_DIR:-$HOME/.qidi/bin}"
 mkdir -p "$DOWNLOAD_DIR" "$BIN_DIR"
 
 platform="${os}-${arch}"
 CHANNEL="${QIDI_CHANNEL:-stable}"
 
-# Pick a working BASE_URL: try Cloudflare-fronted x.ai first, fall back to
+# Pick a working BASE_URL: probe the primary channel, fall back to the mirror.
 # direct GCS if it's unreachable. The probe doubles as the channel-pointer
 # fetch when no explicit TARGET was passed, so the happy path costs zero
 # extra HTTP requests.
@@ -198,9 +190,9 @@ if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._]+)?$ ]]; then
 fi
 
 if [ -n "$AUTH_SOURCE" ]; then
-    echo "Installing Grok $version ($platform, $AUTH_SOURCE)..." >&2
+    echo "Installing QIDI $version ($platform, $AUTH_SOURCE)..." >&2
 else
-    echo "Installing Grok $version ($platform)..." >&2
+    echo "Installing QIDI $version ($platform)..." >&2
 fi
 
 binary_path="$DOWNLOAD_DIR/grok-$platform"
@@ -213,13 +205,13 @@ fi
 binary_tmp="${binary_path}.tmp.$$"
 rm -f "$binary_tmp" 2>/dev/null || true
 
-echo "  Downloading grok ${version}..." >&2
+echo "  Downloading QIDI ${version}..." >&2
 if [ "$os" = "windows" ]; then
     if ! download_file_parallel "${artifact_base}.exe" "$binary_tmp"; then
         if ! download_file_parallel "$artifact_base" "$binary_tmp"; then
             rm -f "$binary_tmp"
             if is_not_found "${artifact_base}.exe"; then
-                echo "Error: Grok is not yet available for your system ($platform)." >&2
+                echo "Error: QIDI is not yet available for your system ($platform)." >&2
             else
                 echo "Error: binary download failed (${artifact_base}.exe and ${artifact_base})" >&2
             fi
@@ -229,7 +221,7 @@ if [ "$os" = "windows" ]; then
 elif ! download_file_parallel "$artifact_base" "$binary_tmp"; then
     rm -f "$binary_tmp"
     if is_not_found "$artifact_base"; then
-        echo "Error: Grok is not yet available for your system ($platform)." >&2
+        echo "Error: QIDI is not yet available for your system ($platform)." >&2
     else
         echo "Error: binary download failed from ${artifact_base}" >&2
     fi
@@ -252,39 +244,39 @@ if [ "$os" = "windows" ]; then
             fi
         fi
     done
-    echo "  Binary installed to $BIN_DIR/grok.exe and $BIN_DIR/agent.exe." >&2
+    echo "  Binary installed to $BIN_DIR/qidi.exe and $BIN_DIR/agent.exe." >&2
 else
     chmod +x "$binary_tmp"
     if ! "$binary_tmp" --version </dev/null >/dev/null 2>&1; then
-        echo "Error: downloaded grok failed to run; keeping the existing install." >&2
+        echo "Error: downloaded binary failed to run; keeping the existing install." >&2
         rm -f "$binary_tmp"
         exit 1
     fi
     mv -f "$binary_tmp" "$binary_path"
     # Use relative symlinks when BIN_DIR and DOWNLOAD_DIR share a parent
-    # (default layout: ~/.grok/bin and ~/.grok/downloads are siblings).
+    # (default layout: ~/.qidi/bin and ~/.qidi/downloads are siblings).
     # Relative symlinks survive Docker bind-mounts with a different $HOME.
     if [ "$(dirname "$BIN_DIR")" = "$(dirname "$DOWNLOAD_DIR")" ]; then
         link_target="../$(basename "$DOWNLOAD_DIR")/$(basename "$binary_path")"
     else
         link_target="$binary_path"
     fi
-    ln -sf "$link_target" "$BIN_DIR/grok"
+    ln -sf "$link_target" "$BIN_DIR/qidi"
     ln -sf "$link_target" "$BIN_DIR/agent"
-    echo "  Binary linked to $BIN_DIR/grok and $BIN_DIR/agent." >&2
+    echo "  Binary linked to $BIN_DIR/qidi and $BIN_DIR/agent." >&2
 fi
 
 # Generate shell completions (best-effort)
-mkdir -p "$HOME/.grok/completions/bash" "$HOME/.grok/completions/zsh"
-"$BIN_DIR/grok" completions bash > "$HOME/.grok/completions/bash/grok.bash" 2>/dev/null || true
-"$BIN_DIR/grok" completions zsh  > "$HOME/.grok/completions/zsh/_grok"     2>/dev/null || true
+mkdir -p "$HOME/.qidi/completions/bash" "$HOME/.qidi/completions/zsh"
+"$BIN_DIR/qidi" completions bash > "$HOME/.qidi/completions/bash/qidi.bash" 2>/dev/null || true
+"$BIN_DIR/qidi" completions zsh  > "$HOME/.qidi/completions/zsh/_qidi"     2>/dev/null || true
 # Fish: write to the auto-loaded completions dir so it works immediately
 if mkdir -p "$HOME/.config/fish/completions" 2>/dev/null; then
-    "$BIN_DIR/grok" completions fish > "$HOME/.config/fish/completions/grok.fish" 2>/dev/null || true
+    "$BIN_DIR/qidi" completions fish > "$HOME/.config/fish/completions/qidi.fish" 2>/dev/null || true
 fi
 
 # Persist installer source and channel to config
-CONFIG_FILE="$HOME/.grok/config.toml"
+CONFIG_FILE="$HOME/.qidi/config.toml"
 CLI_BLOCK="installer = \"internal\""
 if [ "$CHANNEL" != "stable" ]; then
     CLI_BLOCK="${CLI_BLOCK}\nchannel = \"${CHANNEL}\""
@@ -304,14 +296,14 @@ else
 fi
 
 # Fetch managed_config.toml + requirements.toml from server (deployment key only).
-if [ -n "$GROK_DEPLOYMENT_KEY" ]; then
-    PROXY_URL="${QIDI_PROXY_URL:-https://cli-chat-proxy.grok.com/v1}"
+if [ -n "$QIDI_DEPLOYMENT_KEY" ]; then
+    PROXY_URL="${QIDI_PROXY_URL:-https://api.qidiai.ltd/v1}"
     echo "  Fetching deployment config..." >&2
     DEPLOY_RESPONSE=""
     AUTH_HEADER_FILE=$(mktemp 2>/dev/null) || AUTH_HEADER_FILE=""
     if [ -n "$AUTH_HEADER_FILE" ]; then
         chmod 600 "$AUTH_HEADER_FILE" 2>/dev/null || true
-        printf 'Authorization: Bearer %s\n' "$GROK_DEPLOYMENT_KEY" > "$AUTH_HEADER_FILE"
+        printf 'Authorization: Bearer %s\n' "$QIDI_DEPLOYMENT_KEY" > "$AUTH_HEADER_FILE"
         DEPLOY_RESPONSE=$(curl -sS -f \
             -H "@${AUTH_HEADER_FILE}" \
             "${PROXY_URL}/deployment/config" 2>/dev/null) || DEPLOY_RESPONSE=""
@@ -325,49 +317,49 @@ if [ -n "$GROK_DEPLOYMENT_KEY" ]; then
         MANAGED_CONFIG=$(json_get "$DEPLOY_RESPONSE" "managed_config")
         REQUIREMENTS=$(json_get "$DEPLOY_RESPONSE" "requirements")
         if [ -n "$MANAGED_CONFIG" ] && [ "$MANAGED_CONFIG" != "null" ]; then
-            printf '%s\n' "$MANAGED_CONFIG" > "$HOME/.grok/managed_config.toml"
+            printf '%s\n' "$MANAGED_CONFIG" > "$HOME/.qidi/managed_config.toml"
             echo "  Managed config applied." >&2
         else
-            rm -f "$HOME/.grok/managed_config.toml"
+            rm -f "$HOME/.qidi/managed_config.toml"
         fi
         if [ -n "$REQUIREMENTS" ] && [ "$REQUIREMENTS" != "null" ]; then
-            printf '%s\n' "$REQUIREMENTS" > "$HOME/.grok/requirements.toml"
+            printf '%s\n' "$REQUIREMENTS" > "$HOME/.qidi/requirements.toml"
             echo "  Requirements applied." >&2
         else
-            rm -f "$HOME/.grok/requirements.toml"
+            rm -f "$HOME/.qidi/requirements.toml"
         fi
     fi
 fi
 
 if [ "$os" = "windows" ]; then
-    echo "Grok $version installed to $BIN_DIR/grok.exe" >&2
+    echo "QIDI $version installed to $BIN_DIR/qidi.exe" >&2
 else
-    echo "Grok $version installed to $BIN_DIR/grok" >&2
+    echo "QIDI $version installed to $BIN_DIR/qidi" >&2
 fi
 
-# --- Ensure grok is on PATH ---
+# --- Ensure qidi is on PATH ---
 
 path_has_dir() {
     case ":$PATH:" in *":$1:"*) return 0 ;; *) return 1 ;; esac
 }
 
-# Try to symlink into a directory already on PATH so grok works immediately
+# Try to symlink into a directory already on PATH so qidi works immediately
 # without restarting the shell. Candidate dirs in preference order.
 SYMLINK_CREATED=""
 if [ "$os" != "windows" ] && ! path_has_dir "$BIN_DIR"; then
     for candidate in "$HOME/.local/bin" "/usr/local/bin"; do
         if path_has_dir "$candidate" && [ -d "$candidate" ] && [ -w "$candidate" ]; then
-            ln -sf "$BIN_DIR/grok" "$candidate/grok"
+            ln -sf "$BIN_DIR/qidi" "$candidate/grok"
             ln -sf "$BIN_DIR/agent" "$candidate/agent"
             SYMLINK_CREATED="$candidate"
-            echo "  Symlinked $candidate/grok -> $BIN_DIR/grok" >&2
+            echo "  Symlinked $candidate/grok -> $BIN_DIR/qidi" >&2
             echo "  Symlinked $candidate/agent -> $BIN_DIR/agent" >&2
             break
         fi
     done
 fi
 
-# Also update shell config so ~/.grok/bin is on PATH for future sessions
+# Also update shell config so ~/.qidi/bin is on PATH for future sessions
 user_shell="$(basename "${SHELL:-}")"
 config_file=""
 
@@ -402,18 +394,18 @@ if [ -n "$config_file" ]; then
     # Build the new installer block
     if [ "$user_shell" = "fish" ]; then
         new_block='# >>> grok installer >>>
-fish_add_path $HOME/.grok/bin
+fish_add_path $HOME/.qidi/bin
 # <<< grok installer <<<'
     elif [ "$user_shell" = "zsh" ]; then
         new_block='# >>> grok installer >>>
-export PATH="$HOME/.grok/bin:$PATH"
-fpath=(~/.grok/completions/zsh $fpath)
+export PATH="$HOME/.qidi/bin:$PATH"
+fpath=(~/.qidi/completions/zsh $fpath)
 autoload -Uz compinit && compinit -C
 # <<< grok installer <<<'
     else
         new_block='# >>> grok installer >>>
-export PATH="$HOME/.grok/bin:$PATH"
-[[ -r "$HOME/.grok/completions/bash/grok.bash" ]] && source "$HOME/.grok/completions/bash/grok.bash"
+export PATH="$HOME/.qidi/bin:$PATH"
+[[ -r "$HOME/.qidi/completions/bash/qidi.bash" ]] && source "$HOME/.qidi/completions/bash/grok.bash"
 # <<< grok installer <<<'
     fi
 
@@ -447,9 +439,9 @@ elif [ -n "$config_file" ]; then
     echo "Restart your terminal, then run 'grok' or 'agent' to get started!" >&2
 else
     echo "Add $BIN_DIR to your PATH, then run 'grok' or 'agent' to get started:" >&2
-    echo '  export PATH="$HOME/.grok/bin:$PATH"' >&2
+    echo '  export PATH="$HOME/.qidi/bin:$PATH"' >&2
 fi
 
 if [ "$os" = "windows" ]; then
-    echo "To use grok from cmd.exe or PowerShell, add %USERPROFILE%\\.grok\\bin to your PATH." >&2
+    echo "To use qidi from cmd.exe or PowerShell, add %USERPROFILE%\\.grok\\bin to your PATH." >&2
 fi

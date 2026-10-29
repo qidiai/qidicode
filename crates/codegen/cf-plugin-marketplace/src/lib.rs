@@ -22,7 +22,8 @@ pub use error::MarketplaceError;
 pub use scanner::scan_marketplace;
 pub use types::*;
 
-/// Display name of the official xAI marketplace source.
+/// Display name of the official xAI marketplace source. This is a third-party
+/// registry (`OFFICIAL_SOURCE_GIT_URL`), so the label must name its real owner.
 pub const OFFICIAL_SOURCE_NAME: &str = "xAI Official";
 
 /// Git URL of the official xAI marketplace source. Auto-registered on first run.

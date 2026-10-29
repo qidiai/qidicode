@@ -101,8 +101,8 @@ impl AuthCredentialProvider for ShellAuthCredentialProvider {
 /// - `"grok-extension"` — VS Code / browser extension
 ///
 /// The factory forwards both:
-/// - `x-grok-client-version`   (e.g. "0.1.210-alpha.5 (279ffacddb)")
-/// - `x-grok-client-identifier`
+/// - `x-qidi-client-version`   (e.g. "0.1.210-alpha.5 (279ffacddb)")
+/// - `x-qidi-client-identifier`
 ///
 /// to the underlying `xai-file-utils::StorageClient` via
 /// `.with_client_identity(...)`. This is what powers the improved error

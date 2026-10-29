@@ -13,11 +13,11 @@ pub struct QidiBuildEndpoints {
     pub ws_origin: &'static str,
 }
 const PRODUCTION_ENDPOINTS: QidiBuildEndpoints = QidiBuildEndpoints {
-    cli_chat_proxy_base_url: "https://cli-chat-proxy.grok.com/v1",
-    asset_server_url: "https://assets.grok.com",
-    relay_ws_url: "wss://code.grok.com/ws/code-agent",
-    gateway_ws_url: "wss://grok.com/ws/gw/",
-    ws_origin: "https://grok.com",
+    cli_chat_proxy_base_url: "https://api.qidiai.ltd/v1",
+    asset_server_url: "https://qidiwork.qidiai.ltd/assets",
+    relay_ws_url: "wss://qidiwork.qidiai.ltd/ws/code-agent",
+    gateway_ws_url: "wss://qidiwork.qidiai.ltd/ws/gw/",
+    ws_origin: "https://qidiwork.qidiai.ltd",
 };
 pub const PROD_CLI_CHAT_PROXY_BASE_URL: &str = PRODUCTION_ENDPOINTS.cli_chat_proxy_base_url;
 pub const PROD_ASSET_SERVER_URL: &str = PRODUCTION_ENDPOINTS.asset_server_url;

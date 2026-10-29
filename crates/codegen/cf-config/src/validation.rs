@@ -38,7 +38,7 @@ pub enum RequirementsSource {
 
 impl RequirementsSource {
     /// Display/provenance label — a file path string, or the synthetic MDM source
-    /// id (`ai.x.grok:…`). For diagnostics and matching only; the MDM layer has no
+    /// id (`ai.qidi.code:…`). For diagnostics and matching only; the MDM layer has no
     /// file, so this is a label (`Cow<str>`), never a `Path` to open.
     pub fn label(&self) -> std::borrow::Cow<'_, str> {
         match self {

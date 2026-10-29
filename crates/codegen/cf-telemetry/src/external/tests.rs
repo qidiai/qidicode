@@ -236,6 +236,7 @@ fn client_identifier_allowlist_is_pinned() {
         "grok-pager",
         "grok-tui",
         "grok-shell",
+        "qidi-shell",
         "grok-web",
         "grok-desktop",
         "grok-code-extension",

@@ -11,7 +11,7 @@ use cf_acp_lib::AcpAgentGatewaySender as GatewaySender;
 use cf_file_utils::events::{Event, EventWriter, PermissionDecision};
 use cf_tools::implementations::qidi_build::web_fetch::domain_from_url;
 
-const REJECT_ONCE_LABEL: &str = "No, and tell Grok what to do differently";
+const REJECT_ONCE_LABEL: &str = "No, and tell QIDI what to do differently";
 
 /// Stable option id for the edit prompt's "Yes, allow all edits during this
 /// session" choice. Distinct from the generic `"always-allow"` id (used by
