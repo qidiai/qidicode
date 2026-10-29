@@ -319,7 +319,7 @@ async fn run_relay_loop(
                     target : crate ::instrumentation::TARGET, event =
                     "relay_disconnected", ws_url = % config.ws_url,
                 );
-                tprintln!("Disconnected from Grok WebSocket server");
+                tprintln!("Disconnected from QIDI WebSocket server");
                 info!("WebSocket disconnected, will reconnect");
             }
             Err(e) => {
@@ -383,7 +383,7 @@ fn build_relay_request(config: &RelayConfig) -> anyhow::Result<axum::http::Reque
         axum::http::header::HeaderValue::from_str(&config.auth.user_id)?,
     );
     req.headers_mut().insert(
-        "x-grok-client-version",
+        "x-qidi-client-version",
         axum::http::header::HeaderValue::from_static(cf_version::VERSION),
     );
     req.headers_mut().insert(

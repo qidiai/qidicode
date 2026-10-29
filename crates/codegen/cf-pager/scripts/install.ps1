@@ -1,22 +1,14 @@
 #
-# Grok CLI installer for PowerShell — https://x.ai/cli/install.ps1
+# QIDI Code installer for PowerShell — https://qidiwork.qidiai.ltd/cli/install.ps1
 #
-# Auth: GROK_DEPLOYMENT_KEY env var (takes precedence) or ~/.grok/auth.json from `grok login`.
+# Auth: QIDI_DEPLOYMENT_KEY env var (takes precedence) or ~/.qidi/auth.json from `qidi login`.
 # Env: QIDI_CHANNEL (stable|alpha|enterprise, default: stable), QIDI_BIN_DIR, QIDI_PROXY_URL
 #
-# Env naming domains (authoritative contract: scripts/README.md):
-#   Installer scripts read the QIDI_* domain only (QIDI_CHANNEL,
-#   QIDI_BIN_DIR, QIDI_PROXY_URL). The running CLI reads the GROK_*
-#   domain (GROK_DEPLOYMENT_KEY, GROK_VERSION, ...). The only
-#   crossings are retained contract points: GROK_DEPLOYMENT_KEY
-#   (enterprise installer auth) and GROK_VERSION (ps1 version
-#   input). ~/.grok stays the runtime home regardless of QIDI_BIN_DIR.
-#
 # Usage:
-#   irm https://x.ai/cli/install.ps1 | iex                                       # latest stable
-#   & ([scriptblock]::Create((irm https://x.ai/cli/install.ps1))) -Version 0.1.42 # specific version
-#   $env:GROK_VERSION="0.1.42"; irm https://x.ai/cli/install.ps1 | iex           # specific version (alt)
-#   $env:GROK_DEPLOYMENT_KEY="<key>"; irm https://x.ai/cli/install.ps1 | iex
+#   irm https://qidiwork.qidiai.ltd/cli/install.ps1 | iex                                       # latest stable
+#   & ([scriptblock]::Create((irm https://qidiwork.qidiai.ltd/cli/install.ps1))) -Version 0.1.42 # specific version
+#   $env:QIDI_INSTALL_VERSION="0.1.42"; irm https://qidiwork.qidiai.ltd/cli/install.ps1 | iex           # specific version (alt)
+#   $env:QIDI_DEPLOYMENT_KEY="<key>"; irm https://qidiwork.qidiai.ltd/cli/install.ps1 | iex
 #
 
 param(
@@ -33,17 +25,17 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 # Accept version from environment variable (useful with irm | iex).
-if (-not $Version -and $env:GROK_VERSION) {
-    $Version = $env:GROK_VERSION
+if (-not $Version -and $env:QIDI_INSTALL_VERSION) {
+    $Version = $env:QIDI_INSTALL_VERSION
 }
 
 # This script is Windows-only. PS 5.1 has no Platform property and only runs on Windows.
 if ($PSVersionTable.Platform -and $PSVersionTable.Platform -ne 'Win32NT') {
-    Write-Error "This installer is for Windows. On macOS/Linux, use: curl -fsSL https://x.ai/cli/install.sh | bash"
+    Write-Error "This installer is for Windows. On macOS/Linux, use: curl -fsSL https://qidiwork.qidiai.ltd/cli/install.sh | bash"
     exit 1
 }
 
-$GrokDir = Join-Path $env:USERPROFILE '.grok'
+$QidiDir = Join-Path $env:USERPROFILE '.qidi'
 
 # --- Helpers ---
 
@@ -98,8 +90,8 @@ function Download-File([string]$Url, [string]$OutFile) {
     }
 }
 
-function Read-GrokToken([string]$Scope) {
-    $authFile = Join-Path $GrokDir 'auth.json'
+function Read-QidiToken([string]$Scope) {
+    $authFile = Join-Path $QidiDir 'auth.json'
     if (-not (Test-Path $authFile)) { return $null }
     try {
         $auth = Get-Content -Raw $authFile | ConvertFrom-Json
@@ -118,22 +110,22 @@ if ($Version -and $Version -notmatch '^\d+\.\d+\.\d+(-\S+)?$') {
 
 # --- Resolve auth ---
 
-$OidcScope = 'https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828'
+$OidcScope = 'https://api.qidiai.ltd::qidi-code'
 $LegacyScope = 'https://accounts.x.ai/sign-in'
 $AuthSource = ''
 
-if ($env:GROK_DEPLOYMENT_KEY) {
+if ($env:QIDI_DEPLOYMENT_KEY) {
     $AuthSource = 'deployment key'
     Write-Host 'Auth: using deployment key.' -ForegroundColor DarkGray
 } else {
-    $oidcToken = Read-GrokToken $OidcScope
-    $legacyToken = Read-GrokToken $LegacyScope
+    $oidcToken = Read-QidiToken $OidcScope
+    $legacyToken = Read-QidiToken $LegacyScope
     if ($oidcToken) {
         $AuthSource = 'auth.json (oidc)'
-        Write-Host 'Auth: using OIDC token from ~/.grok/auth.json.' -ForegroundColor DarkGray
+        Write-Host 'Auth: using OIDC token from ~/.qidi/auth.json.' -ForegroundColor DarkGray
     } elseif ($legacyToken) {
         $AuthSource = 'auth.json (legacy)'
-        Write-Host 'Auth: using legacy token from ~/.grok/auth.json.' -ForegroundColor DarkGray
+        Write-Host 'Auth: using legacy token from ~/.qidi/auth.json.' -ForegroundColor DarkGray
     }
 }
 
@@ -155,10 +147,10 @@ $platform = "windows-$arch"
 
 # --- Resolve version and channel ---
 
-$BaseUrlPrimary = 'https://x.ai/cli'
-$BaseUrlFallback = 'https://storage.googleapis.com/grok-build-public-artifacts/cli'
-$DownloadDir = Join-Path $GrokDir 'downloads'
-$BinDir = if ($env:QIDI_BIN_DIR) { $env:QIDI_BIN_DIR } else { Join-Path $GrokDir 'bin' }
+$BaseUrlPrimary = 'https://qidiwork.qidiai.ltd/cli'
+$BaseUrlFallback = 'https://qidiwork.qidiai.ltd/cli'
+$DownloadDir = Join-Path $QidiDir 'downloads'
+$BinDir = if ($env:QIDI_BIN_DIR) { $env:QIDI_BIN_DIR } else { Join-Path $QidiDir 'bin' }
 
 New-Item -ItemType Directory -Path $DownloadDir -Force | Out-Null
 New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
@@ -173,7 +165,7 @@ $probeResult = Download-String "$BaseUrlPrimary/$Channel"
 if ($probeResult) {
     $BaseUrl = $BaseUrlPrimary
 } else {
-    Write-Host "Note: $BaseUrlPrimary unreachable, falling back to direct GCS." -ForegroundColor Yellow
+    Write-Host "Note: $BaseUrlPrimary unreachable, falling back to the mirror." -ForegroundColor Yellow
     $BaseUrl = $BaseUrlFallback
     $probeResult = Download-String "$BaseUrl/$Channel"
 }
@@ -188,9 +180,9 @@ if ($Version) {
 }
 
 if ($AuthSource) {
-    Write-Host "Installing Grok $resolvedVersion ($platform, $AuthSource)..." -ForegroundColor Cyan
+    Write-Host "Installing QIDI $resolvedVersion ($platform, $AuthSource)..." -ForegroundColor Cyan
 } else {
-    Write-Host "Installing Grok $resolvedVersion ($platform)..." -ForegroundColor Cyan
+    Write-Host "Installing QIDI $resolvedVersion ($platform)..." -ForegroundColor Cyan
 }
 
 # --- Download binary ---
@@ -241,7 +233,7 @@ Write-Host "  Installed to $BinDir\grok.exe and $BinDir\agent.exe." -ForegroundC
 
 # --- Generate completions (best-effort) ---
 
-$completionsDir = Join-Path (Join-Path $GrokDir 'completions') 'powershell'
+$completionsDir = Join-Path (Join-Path $QidiDir 'completions') 'powershell'
 try {
     New-Item -ItemType Directory -Path $completionsDir -Force | Out-Null
     & (Join-Path $BinDir 'grok.exe') completions powershell 2>$null |
@@ -250,7 +242,7 @@ try {
 
 # --- Persist installer config ---
 
-$ConfigFile = Join-Path $GrokDir 'config.toml'
+$ConfigFile = Join-Path $QidiDir 'config.toml'
 $cliLines = @('installer = "internal"')
 if ($Channel -ne 'stable') {
     $cliLines += "channel = `"$Channel`""
@@ -288,11 +280,11 @@ if (-not (Test-Path $ConfigFile)) {
 
 # --- Fetch deployment config (deployment key only) ---
 
-if ($env:GROK_DEPLOYMENT_KEY) {
-    $ProxyUrl = if ($env:QIDI_PROXY_URL) { $env:QIDI_PROXY_URL } else { 'https://cli-chat-proxy.grok.com/v1' }
+if ($env:QIDI_DEPLOYMENT_KEY) {
+    $ProxyUrl = if ($env:QIDI_PROXY_URL) { $env:QIDI_PROXY_URL } else { 'https://api.qidiai.ltd/v1' }
     Write-Host '  Fetching deployment config...' -ForegroundColor DarkGray
     try {
-        $headers = @{ 'Authorization' = "Bearer $($env:GROK_DEPLOYMENT_KEY)" }
+        $headers = @{ 'Authorization' = "Bearer $($env:QIDI_DEPLOYMENT_KEY)" }
         $deployResponse = Invoke-RestMethod -Uri "$ProxyUrl/deployment/config" -Headers $headers -UseBasicParsing
     } catch {
         Write-Host "  Warning: failed to fetch deployment config from $ProxyUrl/deployment/config" -ForegroundColor Yellow
@@ -303,8 +295,8 @@ if ($env:GROK_DEPLOYMENT_KEY) {
         $managedConfig = $deployResponse.managed_config
         $requirements = $deployResponse.requirements
 
-        $managedConfigPath = Join-Path $GrokDir 'managed_config.toml'
-        $requirementsPath = Join-Path $GrokDir 'requirements.toml'
+        $managedConfigPath = Join-Path $QidiDir 'managed_config.toml'
+        $requirementsPath = Join-Path $QidiDir 'requirements.toml'
 
         if ($managedConfig -and $managedConfig -ne 'null') {
             [System.IO.File]::WriteAllText($managedConfigPath, $managedConfig, [System.Text.Encoding]::UTF8)

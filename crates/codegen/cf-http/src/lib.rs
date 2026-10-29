@@ -178,7 +178,7 @@ pub fn process_user_agent_string() -> String {
 
     UserAgent {
         origin,
-        agent_product: "grok-shell",
+        agent_product: "qidi-shell",
         agent_version,
         platform: PlatformInfo::current(),
     }
@@ -188,7 +188,7 @@ pub fn process_user_agent_string() -> String {
 pub fn session_user_agent_string(origin: &OriginClientInfo) -> String {
     UserAgent {
         origin: origin.clone(),
-        agent_product: "grok-shell",
+        agent_product: "qidi-shell",
         agent_version: agent_version(),
         platform: PlatformInfo::current(),
     }
@@ -236,15 +236,15 @@ pub fn client_type_from_origin(origin: Option<&OriginClientInfo>) -> ClientType 
     ClientType::from_client_identifier(origin.map(|o| o.product.as_str()))
 }
 
-/// Process-level client identifier (`QIDI_CLIENT_NAME` env var, default `"grok-shell"`).
+/// Process-level client identifier (`QIDI_CLIENT_NAME` env var, default `"qidi-shell"`).
 pub fn process_client_identifier() -> String {
-    std::env::var("QIDI_CLIENT_NAME").unwrap_or_else(|_| "grok-shell".to_string())
+    std::env::var("QIDI_CLIENT_NAME").unwrap_or_else(|_| "qidi-shell".to_string())
 }
 
 /// Header telling cli-chat-proxy whether this process is a single-prompt
 /// (`grok -p`) run or an interactive session; feeds the `client_mode`
 /// metric label.
-pub const CLIENT_MODE_HEADER: &str = "x-grok-client-mode";
+pub const CLIENT_MODE_HEADER: &str = "x-qidi-client-mode";
 
 /// One-way latch: set to `"headless"` at startup by the non-TUI entry points
 /// (`run_single_turn` for `grok -p`, `run_headless_inner` for
@@ -616,14 +616,14 @@ mod tests {
             product: "grok-desktop".to_string(),
             version: Some("1.2.3".to_string()),
         });
-        assert!(with_version.starts_with("grok-desktop/1.2.3 grok-shell/"));
+        assert!(with_version.starts_with("grok-desktop/1.2.3 qidi-shell/"));
         assert!(with_version.contains(" ("));
 
         let without_version = session_user_agent_string(&OriginClientInfo {
             product: "grok-web".to_string(),
             version: None,
         });
-        assert!(without_version.starts_with("grok-web grok-shell/"));
+        assert!(without_version.starts_with("grok-web qidi-shell/"));
         assert!(!without_version.starts_with("grok-web/"));
     }
 

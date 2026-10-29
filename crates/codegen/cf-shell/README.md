@@ -8,7 +8,7 @@ Use it interactively as a TUI, or integrate it into your own apps via headless m
 
 ```bash
 # Install
-curl -fsSL https://x.ai/cli/install.sh | bash
+curl -fsSL https://qidiwork.qidiai.ltd/cli/install.sh | bash
 
 # Interactive TUI
 grok
@@ -59,10 +59,10 @@ grok agent stdio
 
 ```bash
 # Install latest stable
-curl -fsSL https://x.ai/cli/install.sh | bash
+curl -fsSL https://qidiwork.qidiai.ltd/cli/install.sh | bash
 
 # Install a specific version
-curl -fsSL https://x.ai/cli/install.sh | bash -s 0.1.42
+curl -fsSL https://qidiwork.qidiai.ltd/cli/install.sh | bash -s 0.1.42
 ```
 
 Verify installation:

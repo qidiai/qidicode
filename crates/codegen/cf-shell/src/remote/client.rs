@@ -24,14 +24,14 @@ fn add_cli_chat_proxy_headers_blocking(
         .header("Authorization", format!("Bearer {}", &auth.key))
         .header("X-XAI-Token-Auth", GrokComConfig::default().token_header)
         .header("x-userid", &auth.user_id)
-        .header("x-grok-client-version", cf_version::VERSION);
+        .header("x-qidi-client-version", cf_version::VERSION);
     if let Some(email) = &auth.email {
         builder = builder.header("x-email", email);
     }
     let _ = (alpha_test_key, url);
     builder
         .header(
-            "x-grok-client-identifier",
+            "x-qidi-client-identifier",
             crate::http::process_client_identifier(),
         )
         .header(
@@ -63,7 +63,7 @@ async fn add_bundle_fetch_headers(
     credentials.alpha_test_key = alpha_test_key.map(str::to_owned);
     let mut builder = credentials
         .apply(builder, url)
-        .header("x-grok-client-version", cf_version::VERSION);
+        .header("x-qidi-client-version", cf_version::VERSION);
     if deployment_key.is_none()
         && let Some(auth) = &resolved_auth
     {
@@ -74,7 +74,7 @@ async fn add_bundle_fetch_headers(
     }
     builder = builder
         .header(
-            "x-grok-client-identifier",
+            "x-qidi-client-identifier",
             crate::http::process_client_identifier(),
         )
         .header(
@@ -166,7 +166,7 @@ async fn fetch_bundle_inner(
     let mut request = client
         .get(&archive_url)
         .timeout(std::time::Duration::from_secs(30))
-        .header("x-grok-client-version", cf_version::VERSION)
+        .header("x-qidi-client-version", cf_version::VERSION)
         .header(
             crate::http::CLIENT_MODE_HEADER,
             crate::http::process_client_mode(),
@@ -415,14 +415,14 @@ impl BackendClient {
             headers.insert("x-email", v);
         }
         if let Ok(v) = HeaderValue::from_str(&crate::http::process_client_identifier()) {
-            headers.insert("x-grok-client-identifier", v);
+            headers.insert("x-qidi-client-identifier", v);
         }
         headers.insert(
             crate::http::CLIENT_MODE_HEADER,
             HeaderValue::from_static(crate::http::process_client_mode()),
         );
         headers.insert(
-            "x-grok-client-version",
+            "x-qidi-client-version",
             HeaderValue::from_static(cf_version::VERSION),
         );
         Ok(headers)
@@ -622,9 +622,9 @@ pub async fn fetch_login_device_flow(cli_chat_proxy_base_url: &str) -> Option<bo
         .get(&url)
         .timeout(std::time::Duration::from_millis(1500))
         .header("x-grok-agent-id", agent_id)
-        .header("x-grok-client-version", cf_version::VERSION)
+        .header("x-qidi-client-version", cf_version::VERSION)
         .header(
-            "x-grok-client-identifier",
+            "x-qidi-client-identifier",
             crate::http::process_client_identifier(),
         )
         .header(
@@ -744,7 +744,7 @@ pub(crate) fn fetch_models_blocking(
                 .header("Authorization", format!("Bearer {}", &auth.key))
                 .header("X-XAI-Token-Auth", "cli")
                 .header("x-userid", &auth.user_id)
-                .header("x-grok-client-version", cf_version::VERSION)
+                .header("x-qidi-client-version", cf_version::VERSION)
                 .header(
                     crate::http::CLIENT_MODE_HEADER,
                     crate::http::process_client_mode(),
@@ -1104,8 +1104,8 @@ mod tests {
                             user_id: header_str(&headers, "x-userid"),
                             email: header_str(&headers, "x-email"),
                             agent_id: header_str(&headers, "x-grok-agent-id"),
-                            client_identifier: header_str(&headers, "x-grok-client-identifier"),
-                            client_version: header_str(&headers, "x-grok-client-version"),
+                            client_identifier: header_str(&headers, "x-qidi-client-identifier"),
+                            client_version: header_str(&headers, "x-qidi-client-version"),
                         });
                         (state.status_code, state.body)
                     },
@@ -1164,11 +1164,11 @@ mod tests {
         );
         assert!(
             h.client_identifier.is_some(),
-            "must send x-grok-client-identifier"
+            "must send x-qidi-client-identifier"
         );
         assert!(
             h.client_version.is_some(),
-            "must send x-grok-client-version"
+            "must send x-qidi-client-version"
         );
         assert_eq!(h.authorization, None, "must not send Authorization");
         assert_eq!(h.user_id, None, "must not send x-userid");
@@ -1232,7 +1232,7 @@ mod tests {
                                 None
                             },
                             client_version: headers
-                                .get("x-grok-client-version")
+                                .get("x-qidi-client-version")
                                 .and_then(|v| v.to_str().ok())
                                 .map(str::to_owned),
                         });
@@ -1268,7 +1268,7 @@ mod tests {
                                 None
                             },
                             client_version: headers
-                                .get("x-grok-client-version")
+                                .get("x-qidi-client-version")
                                 .and_then(|v| v.to_str().ok())
                                 .map(str::to_owned),
                         });

@@ -371,6 +371,62 @@ fn de_opt_bool_tolerant<'de, D: serde::Deserializer<'de>>(
     }
     deserializer.deserialize_any(V)
 }
+fn de_opt_string_tolerant<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    struct V;
+    impl<'de> serde::de::Visitor<'de> for V {
+        type Value = Option<String>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("string (wrong types ignored)")
+        }
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            Ok(Some(v.to_owned()))
+        }
+        fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Self::Value, E> {
+            Ok(Some(v))
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_some<A: serde::de::Deserializer<'de>>(
+            self,
+            d: A,
+        ) -> Result<Self::Value, A::Error> {
+            d.deserialize_any(V)
+        }
+        fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            while map.next_entry::<serde::de::IgnoredAny, serde::de::IgnoredAny>()?.is_some() {}
+            Ok(None)
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {}
+            Ok(None)
+        }
+    }
+    deserializer.deserialize_any(V)
+}
 fn de_opt_u32_tolerant<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<u32>, D::Error> {
@@ -458,7 +514,7 @@ pub struct RemoteSettings {
     pub memory_initial_injection_enabled: Option<bool>,
     #[serde(default)]
     pub memory_initial_injection_min_score: Option<f32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_string_tolerant")]
     pub memory_embedding_model: Option<String>,
     #[serde(default)]
     pub memory_embedding_dimensions: Option<u32>,
@@ -729,11 +785,11 @@ pub struct RemoteSettings {
     /// `None` or `[]` = no announcements to display.
     #[serde(default, deserialize_with = "deserialize_tolerant_announcements")]
     pub announcements: Option<Vec<RemoteAnnouncement>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_string_tolerant")]
     pub web_search_model: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_string_tolerant")]
     pub session_summary_model: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_string_tolerant")]
     pub image_description_model: Option<String>,
     /// Server-side pin for the next-prompt suggestion model (tab-autocomplete
     /// ghost text), from the `qidi_build_settings` remote settings flag. Sits below
@@ -743,10 +799,10 @@ pub struct RemoteSettings {
     /// it is not in the shell's model catalog the suggestion request is
     /// skipped entirely (never the session model). See
     /// `ModelOverrideConfig::resolve` and `handle_suggest_prompt`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_string_tolerant")]
     pub prompt_suggestion_model: Option<String>,
     /// Server-recommended default model ID for new sessions.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_string_tolerant")]
     pub default_model: Option<String>,
     #[serde(default)]
     pub campaigns: Vec<CampaignOverride>,
@@ -1464,6 +1520,100 @@ mod tests {
         );
         assert_eq!(s.default_model.as_deref(), Some("grok-4"));
     }
+    /// Field accessor shared by the malformed-pin tests below: keeps the matrix
+    /// (6 pin fields x several bad JSON shapes) readable and fails loudly if a
+    /// field name is misspelled.
+    fn pin<'a>(s: &'a RemoteSettings, field: &str) -> Option<&'a str> {
+        match field {
+            "default_model" => s.default_model.as_deref(),
+            "web_search_model" => s.web_search_model.as_deref(),
+            "session_summary_model" => s.session_summary_model.as_deref(),
+            "image_description_model" => s.image_description_model.as_deref(),
+            "prompt_suggestion_model" => s.prompt_suggestion_model.as_deref(),
+            "memory_embedding_model" => s.memory_embedding_model.as_deref(),
+            other => panic!("unknown model pin field: {other}"),
+        }
+    }
+
+    /// A wrong-typed model pin must drop **only that field**.
+    ///
+    /// `fetch_settings_blocking` returns `None` immediately on a deserialize
+    /// error and does not retry (`cf-shell/src/remote/client.rs:572-579`), so if
+    /// one pin failed the whole `RemoteSettings` the backend could disable every
+    /// remote setting (rollout flags included) with a single mistyped field.
+    #[test]
+    fn remote_settings_malformed_model_pin_drops_only_that_field() {
+        let fields = [
+            "default_model",
+            "web_search_model",
+            "session_summary_model",
+            "image_description_model",
+            "prompt_suggestion_model",
+            "memory_embedding_model",
+        ];
+        for field in fields {
+            for bad in [
+                r#"{"nested": 1}"#,
+                "17",
+                r#"["a","b"]"#,
+                "true",
+                r#"[{"model":"x"}]"#,
+            ] {
+                let json = format!(
+                    r#"{{"{field}": {bad}, "folder_trust_enabled": false,
+                          "release_channel": "stable"}}"#
+                );
+                let s: RemoteSettings = serde_json::from_str(&json)
+                    .unwrap_or_else(|e| panic!("{field}={bad} must not fail the payload: {e}"));
+                assert_eq!(
+                    pin(&s, field),
+                    None,
+                    "{field}={bad} should be dropped to None"
+                );
+                // Survivors: the rest of the payload must still be parsed.
+                assert_eq!(
+                    s.folder_trust_enabled,
+                    Some(false),
+                    "{field}={bad} clobbered folder_trust_enabled"
+                );
+                assert_eq!(
+                    s.release_channel.as_deref(),
+                    Some("stable"),
+                    "{field}={bad} clobbered release_channel"
+                );
+            }
+        }
+    }
+
+    /// Tolerance must not over-relax: a well-formed pin still parses, `null`
+    /// stays `None`, and an empty string keeps its current `Some("")` meaning
+    /// (callers treat it via `resolve_string_flag`, not by this deserializer).
+    #[test]
+    fn remote_settings_model_pin_valid_and_null_shapes_unchanged() {
+        let s: RemoteSettings = serde_json::from_str(
+            r#"{"default_model": "qidi-flash", "web_search_model": null,
+               "session_summary_model": "", "folder_trust_enabled": true}"#,
+        )
+        .expect("valid pins must deserialize");
+        assert_eq!(pin(&s, "default_model"), Some("qidi-flash"));
+        assert_eq!(pin(&s, "web_search_model"), None);
+        assert_eq!(pin(&s, "session_summary_model"), Some(""));
+        assert_eq!(s.folder_trust_enabled, Some(true));
+    }
+
+    /// Two malformed pins at once must not interact: both drop, siblings live.
+    #[test]
+    fn remote_settings_two_malformed_model_pins_both_drop_independently() {
+        let s: RemoteSettings = serde_json::from_str(
+            r#"{"default_model": 1, "image_description_model": {"x": 1},
+               "web_search_model": "keep-me", "unknown_future_field": {"deep": [1,2]}}"#,
+        )
+        .expect("two malformed pins must not fail the payload");
+        assert_eq!(pin(&s, "default_model"), None);
+        assert_eq!(pin(&s, "image_description_model"), None);
+        assert_eq!(pin(&s, "web_search_model"), Some("keep-me"));
+    }
+
     #[test]
     fn remote_settings_goal_role_model_extra_unknown_fields_kept_single_pair() {
         let json = r#"{"goal_planner_model": {"model": "grok-4", "agent_type": "general-purpose", "future": true}}"#;

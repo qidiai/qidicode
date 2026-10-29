@@ -36,7 +36,7 @@ enum EnforcementOutcome {
 pub(crate) enum MinimumVersionError {
     /// `source` chains via `Error::source()`; omitted from `Display`.
     #[error(
-        "The minimum version \"{value}\" in your Grok configuration \
+        "The minimum version \"{value}\" in your QIDI configuration \
          isn't a valid version number. Update `cli.minimum_version` and try again."
     )]
     InvalidMinimum {
@@ -45,22 +45,22 @@ pub(crate) enum MinimumVersionError {
         source: semver::Error,
     },
     #[error(
-        "This version of Grok ({current}) is no longer supported. \
-         Run `grok update` to install version {minimum} or later."
+        "This version of QIDI ({current}) is no longer supported. \
+         Run `qidi update` to install version {minimum} or later."
     )]
     AutoUpdateDisabled { current: String, minimum: String },
     /// `npm` / `gh` / `internal` GCS — none detected.
     #[error(
-        "This version of Grok ({current}) is no longer supported. \
-         Run `grok update` to install version {minimum} or later."
+        "This version of QIDI ({current}) is no longer supported. \
+         Run `qidi update` to install version {minimum} or later."
     )]
     NoInstaller { current: String, minimum: String },
     /// `detail` is telemetry-only; omitted from `Display` to avoid stacking
     /// the installer's own action language.
     #[error(
-        "This version of Grok ({current}) is no longer supported, \
+        "This version of QIDI ({current}) is no longer supported, \
          and the update to version {minimum} didn't complete.\n\n\
-         Run `grok update` to try again."
+         Run `qidi update` to try again."
     )]
     UpgradeFailed {
         current: String,
@@ -70,7 +70,7 @@ pub(crate) enum MinimumVersionError {
     /// Latest release is known but still below the floor (vs `NoReleaseFound`,
     /// which couldn't probe at all).
     #[error(
-        "This version of Grok ({current}) is no longer supported. \
+        "This version of QIDI ({current}) is no longer supported. \
          Version {minimum} or later is required, but the most recent release is {latest}. \
          Contact your administrator."
     )]
@@ -81,15 +81,15 @@ pub(crate) enum MinimumVersionError {
     },
     /// Couldn't probe the registry — likely transient.
     #[error(
-        "This version of Grok ({current}) is no longer supported. \
+        "This version of QIDI ({current}) is no longer supported. \
          Version {minimum} or later is required, but no release was found. \
          Check your network connection, or contact your administrator."
     )]
     NoReleaseFound { current: String, minimum: String },
     /// `grok update --version X` requested a version below the floor.
     #[error(
-        "Cannot install Grok {target}: the configured minimum is {minimum}. \
-         Run `grok update` to install the latest allowed version."
+        "Cannot install QIDI {target}: the configured minimum is {minimum}. \
+         Run `qidi update` to install the latest allowed version."
     )]
     TargetBelowFloor { target: String, minimum: String },
 }
@@ -219,7 +219,7 @@ async fn enforce_minimum_version(
 
     info!(%current, %target, installer, "minimum_version: installing upgrade");
     eprintln!(
-        "This version of Grok ({current}) is no longer supported. \
+        "This version of QIDI ({current}) is no longer supported. \
          Updating to {target}…"
     );
 
@@ -281,7 +281,7 @@ pub async fn enforce_minimum_version_or_exit(update_config: &UpdateConfig) {
             // child process ever writes to a broken pipe. For now this
             // path is rare (only fires when the server pushes a minimum
             // version bump), so print a relaunch message instead.
-            eprintln!("Update installed. Run `grok` to start.");
+            eprintln!("Update installed. Run `qidi` to start.");
             std::process::exit(0);
         }
         Err(e) => {

@@ -16,7 +16,7 @@
 
 //! 5. `/etc/grok/requirements.toml`
 
-//! 6. macOS MDM managed preferences (`ai.x.grok`, admin-forced) — macOS only
+//! 6. macOS MDM managed preferences (`ai.qidi.code`, admin-forced) — macOS only
 
 //!
 

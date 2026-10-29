@@ -9,8 +9,18 @@ QIDI Code 是基于 grok-build 改造的 Rust AI 编码助手。我们非常重�
 请通过以下任一渠道私下报告:
 
 - **GitHub Security Advisory**(首选):
-  https://github.com/qidi-ai/qidicode/security/advisories/new
+  https://github.com/qidiai/qidicode/security/advisories/new
 - **邮箱**:security@qidi.ai
+
+<!-- TODO(需维护者确认，勿静默修改):
+     1) 仓库地址已按 `git remote -v`(github = https://github.com/qidiai/qidicode.git)
+        校正；GitHub API 确认 https://github.com/qidiai/qidicode 存在且 public=true，
+        而原写法 qidi-ai/qidicode 返回 404（仓库不存在）。
+        `/security/advisories/new` 这条路径本身未能从当前网络做 HTTP 校验
+        （github.com 网页端不可达），需确认该仓库已开启 private vulnerability reporting。
+     2) 邮箱域名待确认：项目自有域名为 qidiai.ltd（站点 qidiai.ltd /
+        qidiwork.qidiai.ltd 均返回 200），若 security@qidi.ai 不可达，
+        建议改为 security@qidiai.ltd。 -->
 
 报告时请尽量包含:
 

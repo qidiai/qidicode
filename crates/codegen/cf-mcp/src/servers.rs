@@ -3578,7 +3578,7 @@ impl McpClient {
         ClientInfo::new(
             capabilities,
             Implementation::new(
-                format!("grok-shell-{server_name}"),
+                format!("qidi-shell-{server_name}"),
                 cf_version::VERSION.to_string(),
             ),
         )
@@ -4175,7 +4175,7 @@ fn ensure_figma_user_agent(headers: &mut reqwest::header::HeaderMap, server_name
     }
     headers.insert(
         reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static("grok-cli"),
+        reqwest::header::HeaderValue::from_static("qidi-cli"),
     );
 }
 
@@ -4706,14 +4706,14 @@ mod tests {
         ensure_figma_user_agent(&mut headers, "figma", "https://mcp.figma.com/mcp");
         assert_eq!(
             headers.get(reqwest::header::USER_AGENT).unwrap(),
-            "grok-cli"
+            "qidi-cli"
         );
 
         let mut host_only = reqwest::header::HeaderMap::new();
         ensure_figma_user_agent(&mut host_only, "other", "https://mcp.figma.com/mcp");
         assert_eq!(
             host_only.get(reqwest::header::USER_AGENT).unwrap(),
-            "grok-cli"
+            "qidi-cli"
         );
     }
 

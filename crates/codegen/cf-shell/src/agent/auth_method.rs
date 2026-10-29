@@ -893,7 +893,7 @@ pub fn grok_com_auth_method(
 
 ) -> acp::AuthMethod {
 
-    let name = label.unwrap_or("Grok");
+    let name = label.unwrap_or("QIDI");
 
     let meta = if has_auth_provider_command {
 

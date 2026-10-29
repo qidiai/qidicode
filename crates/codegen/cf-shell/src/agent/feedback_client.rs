@@ -20,7 +20,7 @@ use prod_mc_cli_chat_proxy_types::feedback_types::{
 };
 
 /// Client version header sent on every request to cli-chat-proxy for version gating.
-const CLIENT_VERSION_HEADER: &str = "x-grok-client-version";
+const CLIENT_VERSION_HEADER: &str = "x-qidi-client-version";
 
 // ============================================================================
 // Turn delta wire types (local to qidi-code until cli-chat-proxy catches up)

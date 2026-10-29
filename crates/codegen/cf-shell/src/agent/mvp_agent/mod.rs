@@ -1152,7 +1152,7 @@ impl AuthRequestMeta {
 /// of remembering which headers the proxy expects.
 ///
 /// Headers injected:
-///  - `x-grok-client-version` -- required by the proxy's version-gate check.
+///  - `x-qidi-client-version` -- required by the proxy's version-gate check.
 ///    Uses `client_version` when provided, otherwise falls back to cli-chat-proxy
 ///    compile-time `CARGO_PKG_VERSION`.
 ///  - `X-XAI-Token-Auth` / `x-authenticateresponse` -- required by the
@@ -1169,7 +1169,7 @@ fn inject_proxy_headers(
     base_url: &str,
 ) {
     headers
-        .entry("x-grok-client-version".to_string())
+        .entry("x-qidi-client-version".to_string())
         .or_insert_with(|| {
             client_version
                 .map(String::from)

@@ -1251,8 +1251,8 @@ fn render_row_list_with_search_bar(
 
 fn render_docs_footer(buf: &mut Buffer, area: Rect, theme: &Theme) {
     const LONG: &str =
-        "Tip · Ask Grok: \"change theme to grokday\" or \"what does compact mode do?\"";
-    const SHORT: &str = "Tip · Ask Grok to change a setting";
+        "Tip · Ask QIDI: \"change theme to grokday\" or \"what does compact mode do?\"";
+    const SHORT: &str = "Tip · Ask QIDI to change a setting";
     let text = modal_window::fit_tip_line(&[LONG, SHORT], area.width as usize);
     modal_window::render_centered_tip_footer(buf, area, theme, text.as_ref());
 }
@@ -9872,7 +9872,7 @@ mod tests {
     }
 
     // -- User-feedback follow-up: always reserve a blank line between
-    //    the "Tip · Ask Grok…" docs footer and the keybindings hints.
+    //    the "Tip · Ask QIDI…" docs footer and the keybindings hints.
     //
     // Before this fix, when the hints wrapped to 2 lines (narrow modal
     // widths) the chrome's 2-row footer was fully consumed by hint
@@ -10675,7 +10675,7 @@ mod tests {
         );
 
         // SHORT path: width that fits SHORT but not LONG.
-        // SHORT = "Tip · Ask Grok to change a setting" (34 cells);
+        // SHORT = "Tip · Ask QIDI to change a setting" (34 cells);
         // LONG ≈ 73 cells. width=40 lands in the SHORT band.
         let (row_short, tip_start_short, trailing_short) = render(40);
         assert!(
@@ -10728,7 +10728,7 @@ mod tests {
         let mut tip_y: Option<u16> = None;
         for y in 0..area.height {
             let txt = buf_row_text(&buf, y, area.x, area.width);
-            if txt.contains("Tip") && txt.contains("Ask Grok") {
+            if txt.contains("Tip") && txt.contains("Ask QIDI") {
                 tip_y = Some(y);
                 break;
             }

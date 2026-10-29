@@ -41,7 +41,7 @@ impl From<reqwest::Error> for DeviceCodeError {
 // --- Public types ---
 
 /// Low-cardinality client-surface hint sent to the OAuth2 provider as the
-/// `x-grok-client-surface` header so device-flow metrics can separate logins a
+/// `x-qidi-client-surface` header so device-flow metrics can separate logins a
 /// human can actually finish (`Ui`, `Cli`) from headless automation
 /// (`Headless`) that mints a device code but can never reach the browser
 /// consent page — the traffic that otherwise pollutes the device-flow
@@ -146,10 +146,10 @@ pub async fn request_device_code(
         client
             .post(&url)
             // Lets oauth2-provider segment device-flow success by client version.
-            .header("x-grok-client-version", cf_version::VERSION)
+            .header("x-qidi-client-version", cf_version::VERSION)
             // Lets oauth2-provider separate human-completable logins from
             // headless automation in the device-flow funnel metrics.
-            .header("x-grok-client-surface", surface.as_str())
+            .header("x-qidi-client-surface", surface.as_str())
             .form(&[
                 ("client_id", client_id),
                 ("scope", scope_str.as_str()),
@@ -238,8 +238,8 @@ pub async fn complete_device_code_login(
         let resp = with_alpha_test_key(
             client
                 .post(&token_url)
-                .header("x-grok-client-version", cf_version::VERSION)
-                .header("x-grok-client-surface", surface.as_str())
+                .header("x-qidi-client-version", cf_version::VERSION)
+                .header("x-qidi-client-surface", surface.as_str())
                 .form(&[
                     ("grant_type", DEVICE_GRANT_TYPE),
                     ("device_code", device_code.device_code.as_str()),

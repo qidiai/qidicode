@@ -140,7 +140,7 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
                     .post(format!("{}/embeddings", self.api_base))
                     .json(&body_json)
                     .header("X-XAI-Token-Auth", "cli")
-                    .header("x-grok-client-version", cf_version::VERSION);
+                    .header("x-qidi-client-version", cf_version::VERSION);
 
                 let req = match request.build() {
                     Ok(r) => r,

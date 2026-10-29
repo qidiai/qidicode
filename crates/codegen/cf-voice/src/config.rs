@@ -28,13 +28,13 @@ pub struct VoiceConfig {
 
     /// Request-identity headers attached to every STT handshake so the backend
     /// can attribute and meter voice usage by client — mirroring the
-    /// `x-grok-client-identifier` / `User-Agent` headers the sampler and imagine
+    /// `x-qidi-client-identifier` / `User-Agent` headers the sampler and imagine
     /// request paths send. These are **runtime identity, not user config**:
     /// `#[serde(skip)]` keeps them out of the parsed `[voice]` table (a user
     /// can't spoof them) and the pager fills them in after parsing. Empty →
     /// the corresponding header is omitted.
     ///
-    /// `x-grok-client-identifier` value (e.g. `"grok-shell"`).
+    /// `x-qidi-client-identifier` value (e.g. `"grok-shell"`).
     #[serde(skip)]
     pub client_identifier: String,
     /// `User-Agent` value (e.g. `"grok-shell/1.2.3 (macos; aarch64)"`).

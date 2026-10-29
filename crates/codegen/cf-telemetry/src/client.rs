@@ -229,7 +229,7 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
                     "locale": "English",
                 },
                 "device_attributes": {
-                    "app_name": "Grok Code",
+                    "app_name": "QIDI Code",
                 },
             },
             // api_key intentionally header-only (x-api-key); never in the body.
@@ -260,7 +260,7 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
         props.insert("distinct_id".into(), json!(user_id));
         props.insert("time".into(), json!(time_secs));
         props.insert("$insert_id".into(), json!(insert_id));
-        props.insert("app_name".into(), json!("Grok Code"));
+        props.insert("app_name".into(), json!("QIDI Code"));
         props.insert("user_type".into(), json!("LoggedIn"));
         props.insert("country".into(), json!(ctx.country));
         props.insert("language".into(), json!(ctx.language));
@@ -292,7 +292,7 @@ pub fn sync_profile() {
         let mut props = std::collections::HashMap::new();
         props.insert("agent_id".into(), json!(agent_id));
         props.insert("shell_version".into(), json!(client.shell_version));
-        props.insert("app_name".into(), json!("Grok Code"));
+        props.insert("app_name".into(), json!("QIDI Code"));
         if let Some(ref client_type) = client.client_type {
             props.insert("client_type".into(), json!(client_type));
         }

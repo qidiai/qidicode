@@ -3542,7 +3542,7 @@ fn reset_overlay_dims_all_rows_except_target() {
 }
 
 /// User-feedback follow-up: the settings modal renders a 1-line
-/// "Ask Grok" tip footer at the bottom of the content area in
+/// "Ask QIDI" tip footer at the bottom of the content area in
 /// Browse, FilterFocused, and PickingEnum modes (always-on tip).
 /// The footer is suppressed in `EditingValue` because the editor
 /// needs every line for input + validation. This pins the
@@ -3578,8 +3578,8 @@ fn docs_footer_renders_for_browse_and_picker() {
             all_text.push('\n');
         }
         assert!(
-            all_text.contains("Ask Grok"),
-            "[{fixture_label}] docs footer (`Ask Grok`) must appear in the rendered modal:\n\
+            all_text.contains("Ask QIDI"),
+            "[{fixture_label}] docs footer (`Ask QIDI`) must appear in the rendered modal:\n\
              {all_text}"
         );
         assert!(

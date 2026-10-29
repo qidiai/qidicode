@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - System prompt identity changed from "Grok released by xAI" to "QIDI Code"
+- Outbound self-identification rebranded to QIDI: telemetry `app_name` `"Grok Code"` → `"QIDI Code"`, HTTP `User-Agent` agent product and `QIDI_CLIENT_NAME` default `grok-shell` → `qidi-shell`, storage client headers `x-grok-client-*` → `x-qidi-client-*` (server-side readers must be updated to match)
+- Update/reinstall advice and the CLI release origin now point at QIDI's own host: `https://qidiwork.qidiai.ltd/cli/install.sh` / `install.ps1` / channel pointers (previously the upstream x.ai CLI CDN path); `SECURITY.md` advisory link corrected to the real repo `github.com/qidiai/qidicode`
+- Removed the unreferenced `crates/codegen/cf-pager/npm/` packaging tree (declared `@xai-official/grok`, nothing in the repo built or published it)
 - TUI menu items and status bar localized to bilingual (Chinese + English)
 - Provider switched to intern-s1 (InternLM/书生大模型) via OpenAI-compatible API
 
