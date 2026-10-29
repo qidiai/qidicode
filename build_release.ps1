@@ -17,6 +17,13 @@ Write-Host " 预计 40~90 分钟，请耐心等待..."
 Write-Host " 中途请勿关闭此窗口"
 Write-Host "======================================"
 
+# 发布构建必须打上 QIDI_VERSION：未打戳的内核会把 folder-trust 整套安全门当成
+# dev 构建直接旁路（见 crates/codegen/cf-workspace/build.rs 的兜底）。
+$kernelVersion = (Select-String -Path "$PSScriptRoot\crates\codegen\cf-pager-bin\Cargo.toml" `
+    -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+$env:QIDI_VERSION = $kernelVersion
+Write-Host " 发布版本戳 QIDI_VERSION = $kernelVersion"
+
 cargo build --release -j 8 *> build_log.txt
 
 if ($LASTEXITCODE -eq 0) {

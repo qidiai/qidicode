@@ -393,6 +393,15 @@ pub fn project_claude_settings_present(cwd: &Path) -> bool {
         .any(|p| p.is_file())
 }
 
+/// Whether `path` came from the project tree reached from `cwd` rather than the
+/// user's own `~/.claude`. Used to refuse repo-tier self-granted bypass, on the
+/// SAME walk the loaders read so classification can't drift from loading.
+pub(crate) fn is_repo_tier_settings_path(cwd: &Path, path: &Path) -> bool {
+    collect_project_claude_paths(cwd)
+        .iter()
+        .any(|candidate| candidate == path)
+}
+
 /// Collect .claude settings file paths from cwd up to repo root.
 ///
 /// Resolves the repo root by `.git` EXISTENCE (not `git2` validity), kept

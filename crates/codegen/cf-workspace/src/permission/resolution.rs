@@ -618,7 +618,25 @@ fn resolve_claude_settings_inner(
             && let Some(raw) = &settings.default_mode
         {
             default_mode_source = Some(path.clone());
-            let mode = parse_default_mode_claiming_scope(raw, &path, &mut all_skipped);
+            let mut mode = parse_default_mode_claiming_scope(raw, &path, &mut all_skipped);
+            // Repo-tier settings ship inside the cloned project, so they must not
+            // grant themselves `bypassPermissions` (a catch-all `Allow Any`). The
+            // slot stays claimed, so a looser parent mode cannot resurface.
+            if mode.effects().bypass_permissions
+                && policy_block.is_none()
+                && is_repo_tier_settings_path(cwd, &path)
+            {
+                warn!(
+                    path = %path.display(),
+                    "repo-tier defaultMode=bypassPermissions ignored: project settings cannot self-grant bypass"
+                );
+                all_skipped.push(SkippedPermission {
+                    rule: "defaultMode=bypassPermissions".to_string(),
+                    reason: "repo-tier settings cannot self-grant bypass; treated as default"
+                        .to_string(),
+                });
+                mode = DefaultPermissionMode::Default;
+            }
             applied_mode = Some(mode);
             prompt_policy = mode.effects().prompt_policy;
         }
@@ -2898,7 +2916,7 @@ mod tests {
     // ═══════════════════════════════════════════════════════════════════════
 
     #[test]
-    fn bypass_permissions_produces_catch_all_allow() {
+    fn repo_tier_bypass_does_not_produce_catch_all_allow() {
         let tmp = tempfile::tempdir().unwrap();
         let claude_dir = tmp.path().join(".claude");
         std::fs::create_dir_all(&claude_dir).unwrap();
@@ -2909,12 +2927,20 @@ mod tests {
         .unwrap();
 
         // pin=None keeps this hermetic on machines whose real policy pins yolo.
-        let (cfg, _, path) =
+        let (cfg, skipped, path) =
             resolve_claude_settings_inner(tmp.path(), None, UserDefaultModeLoad::Apply).unwrap();
-        assert_eq!(cfg.rules.len(), 1);
-        assert_eq!(cfg.rules[0].action, RuleAction::Allow);
-        assert_eq!(cfg.rules[0].tool, ToolFilter::Any);
-        assert!(cfg.rules[0].pattern.is_none());
+        assert!(
+            cfg.rules.is_empty(),
+            "repo-tier bypass must not synthesize a catch-all Allow, got {:?}",
+            cfg.rules
+        );
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].rule, "defaultMode=bypassPermissions");
+        assert!(
+            skipped[0].reason.contains("repo-tier"),
+            "refusal reason should name the tier, got {:?}",
+            skipped[0].reason
+        );
         // source_path must point to the file that provided defaultMode,
         // even when no explicit permissions block exists.
         assert!(
@@ -2937,17 +2963,21 @@ mod tests {
 
         let (cfg, _, _) =
             resolve_claude_settings_inner(tmp.path(), None, UserDefaultModeLoad::Apply).unwrap();
-        assert_eq!(cfg.rules.len(), 2);
+        // The explicit deny is the only rule: repo-tier bypass is refused, so no
+        // synthetic catch-all Allow is appended alongside it.
+        assert_eq!(cfg.rules.len(), 1);
         // Deny rule exists
         assert!(cfg.rules.iter().any(|r| r.action == RuleAction::Deny));
-        // Catch-all Allow Any exists
-        assert!(cfg.rules.iter().any(|r| r.action == RuleAction::Allow
-            && r.tool == ToolFilter::Any
-            && r.pattern.is_none()));
+        assert!(
+            !cfg.rules
+                .iter()
+                .any(|r| r.action == RuleAction::Allow && r.tool == ToolFilter::Any),
+            "repo-tier bypass must not append a catch-all Allow even next to explicit denies"
+        );
     }
 
     #[test]
-    fn bypass_permissions_overrides_accept_edits_cross_file() {
+    fn repo_tier_bypass_claims_slot_without_granting() {
         let tmp = tempfile::tempdir().unwrap();
         let repo_dir = tmp.path().join("repo");
         std::fs::create_dir_all(repo_dir.join(".git")).unwrap();
@@ -2964,7 +2994,7 @@ mod tests {
         let sub_dir = repo_dir.join("sub");
         std::fs::create_dir_all(&sub_dir).unwrap();
 
-        // Sub-dir: bypassPermissions (most-specific, should win)
+        // Sub-dir: bypassPermissions (most-specific, so it claims the slot)
         let sub_claude = sub_dir.join(".claude");
         std::fs::create_dir_all(&sub_claude).unwrap();
         std::fs::write(
@@ -2975,9 +3005,14 @@ mod tests {
 
         let (cfg, _, _) =
             resolve_claude_settings_inner(&sub_dir, None, UserDefaultModeLoad::Apply).unwrap();
-        // Should produce Allow Any (bypassPermissions), NOT Allow Edit (acceptEdits)
-        assert_eq!(cfg.rules.len(), 1);
-        assert_eq!(cfg.rules[0].tool, ToolFilter::Any);
+        // The repo-tier bypass is refused, but it still claims the mode slot, so
+        // the parent acceptEdits must not resurface either: no synthetic rule at
+        // all. This is the fail-safe half of "most specific wins".
+        assert!(
+            cfg.rules.is_empty(),
+            "refused repo-tier bypass must claim the slot without granting anything, got {:?}",
+            cfg.rules
+        );
     }
 
     const PIN: &str = YOLO_PIN_REASON_REQUIREMENTS;
@@ -3765,6 +3800,41 @@ mod tests {
                 .iter()
                 .any(|s| s.rule.contains("dontask") || s.rule.contains("defaultMode=")),
             "typo should be recorded for grok inspect"
+        );
+    }
+
+    #[test]
+    fn repo_tier_bypass_mode_cannot_self_grant_catch_all_allow() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(repo.join(".claude")).unwrap();
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::write(
+            repo.join(".claude/settings.json"),
+            r#"{"permissions": {"defaultMode": "bypassPermissions"}}"#,
+        )
+        .unwrap();
+
+        let (cfg, skipped, _) =
+            resolve_claude_settings_inner(&repo, None, UserDefaultModeLoad::Apply).unwrap();
+        assert_eq!(
+            cfg.prompt_policy,
+            PromptPolicy::Ask,
+            "repo-tier bypass must fall back to default (Ask)"
+        );
+        assert!(
+            !cfg.rules.iter().any(|r| {
+                r.action == RuleAction::Allow
+                    && matches!(r.tool, ToolFilter::Any)
+                    && r.pattern.is_none()
+            }),
+            "repo-tier settings must never synthesize a catch-all Allow Any"
+        );
+        assert!(
+            skipped
+                .iter()
+                .any(|s| s.rule.contains("bypassPermissions") && s.reason.contains("repo-tier")),
+            "the refusal should be recorded for grok inspect"
         );
     }
 
