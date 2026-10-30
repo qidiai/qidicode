@@ -135,7 +135,7 @@
 | 编码手 | **默认 `a`agnes-2.5-flash``（限时免费，0.4s）/ `a`agnes-3.0-flash``（免费，512K，需强推理时开 Thinking）**；成本口径（以 deepseek-flash 为 1×）：`codely-flash` = deepseek-flash 别名 **1×**、`codely-core` = glm-5.3 别名 **4×**、`kimi-k3` **10×**。升级位 `jw/kimi-k3-1` 仅用于关键任务。**不要把 codely-core 当默认**（4 倍成本、质量同 glm-5.3）。 | 按规格书写码+自测；**并行前提：任务文件零交集**（同 crate 不同文件可并行，同 crate 高内聚改动合并给一人） |
 **?? luyou ????????2026-10-17 ?????????????**??????????**?????????????????**??? intern key ??ocr-4 ?????? 429?quota exceeded ? key??? codely ?? free ??**??? GLM ??codely-core?**?K3 ????free ?????? pro ? GLM ????? K3 ????? **pro/????'39640','58863'?????????K3 ?????**?? K3 ??? = pro/??????????? 10-20 ????????????? 429??? ?????**K3/kimi ? 429 = pro ?????????/????GLM ? 429 = free ????????? pro??DeepSeek ? = ?????deepseek-v4-pro ???**?
 
-| 审计 | **首席深审 `GLM-5.3-FLASHX`**（codely pro 账号 39640，3.4s，**计费 1×（与 deepseek-flash 同价）**，池模型只能直选、不能做兜底）；**巡查 `Qwen/Qwen3.8-Flash-Next`**（ModelScope 免费池 0.6s）或 `a`agnes-2.5-flash``（免费 0.4s）；**第二席 `jw/kimi-k3-1`**（jiuwei，6/6 硬题，10× 成本）。apigoto `GLM-5.3-222` / `claude-haiku-5-5` 自 2026-10-22 起余额 0.1 元不可用。**2026-10-29 二次勘误**：`claude-haiku-5-5-ago-222` 探针可用（3.9s PONG，能跑只读审计并已产出完整报告），**但 0.1 元余额只够短任务**——同日子代理跑到 50 次工具调用 / 34 分钟、累计 5.32M tokens 时被 `429 Credits不足，账户余额 0.1 不足 1 元、无法自动兑换` 中止（退出码 1）。**结论：haiku 可用于探针与 10 分钟内的小审计，长审计必须选别的席位或先充值**；`go-claude-haiku-5-5` 路由始终 401 `Go requires a credential`（不可用）。 | 双模型交叉审计；结论分歧时以代码证据裁决 |
+| 审计 | **首席深审 `GLM-5.3-FLASHX`**（codely pro 账号 39640，3.4s，**计费 1×（与 deepseek-flash 同价）**，池模型只能直选、不能做兜底）；**巡查 `Qwen/Qwen3.8-Flash-Next`**（ModelScope 免费池 0.6s）或 `a`agnes-2.5-flash``（免费 0.4s）；**第二席 `jw/kimi-k3-1`**（jiuwei，6/6 硬题，10× 成本）。apigoto `GLM-5.3-222` / `claude-haiku-5-5` 自 2026-10-22 起余额 0.1 元不可用。**2026-10-29 二次勘误**：`claude-haiku-5-5-ago-222` 探针可用（3.9s PONG，能跑只读审计并已产出完整报告），**但 0.1 元余额只够短任务**——同日子代理跑到 50 次工具调用 / 34 分钟、累计 5.32M tokens 时被 `429 Credits不足，账户余额 0.1 不足 1 元、无法自动兑换` 中止（退出码 1）。**结论：haiku 可用于探针与 10 分钟内的小审计，长审计必须选别的席位或先充值**；`go-claude-haiku-5-5` 路由始终 401 `Go requires a credential`（不可用）。**2026-10-30 三次勘误（apigoto 额度性质）**：apigoto **每天都有推广收益到账**，余额按天恢复、呈波动态——10-29 全天 429（余额 0.1 元），10-30 16:45 实测 `www.apigoto.com` 对 `deepseek-flash` 返回 200。所以"不可用"这类判定**只在当天有效**，跨天必须重测；另注意小写 `deepseek-flash` 由 apigoto 与 sensenova 同时声明，`match()` 先到先得 → 该请求实际由 apigoto 服务，**不是 52duck**（裸名 `deepseek-v4.1-flash` 又被 sensenova 抢，52duck 只能靠独占别名到达）。 | 双模型交叉审计；结论分歧时以代码证据裁决 |
 | 只读探查 | `subagent_type="explore"` / `plan`（只读侦察/方案规划；**2026-10-19 起可指定 `Qwen/Qwen3.8-Flash-Next`（modelscope 魔粒池，slug `qwen3.8-flash-next-ms-222`）——零成本白嫖池，6/6 推理基准支撑规划质量；重规划仍建议 GLM/haiku**） | 只读侦察/规划 |
 | 隔离 | `isolation="worktree"` | 需要隔离时用（有冷构建代价） |
 
@@ -165,7 +165,7 @@
 | intern `intern-s2` | ✓ 1.8s | 月额度，月初恢复 |
 | 52duck / openrouter | ✓ 0.6 / 3.4s | 免费档 |
 | Gemini `gs/*`（11 个） | ✓ 1–40s | 免费档，按日重置 |
-| apigoto 付费档 | ✗ 429 欠费（余额 0.1 元） | 待充值 ≥1 元或推广收入 |
+| apigoto 付费档 | △ **每日有推广收益到账**（用户 2026-10-30 告知），额度按天恢复、**会波动**：2026-10-29 全天 `429 Credits不足（余额 0.1 不足 1 元）`，2026-10-30 16:45 实测同一通道 `deepseek-flash` 返回 **200 OK** | 用法：**派活前先打一发小请求验当日可用性**，不要把 apigoto 当稳定线路或兜底目标；欠费日仍会整批 429 |
 
 **Agnes key 池实测（2026-10-22）**：
 
