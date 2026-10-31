@@ -203,6 +203,64 @@ def cmd_add(args) -> int:
     return 0
 
 
+DISABLED_MARK = "# [disabled by qidi-model-sync"
+
+
+def cmd_restore(args) -> int:
+    """把 prune 注释掉的条目还原（仅还原中转已重新路由的那些）。"""
+    cfg = load_config(args.config)
+    entries = relay_entries(cfg, args.relay)
+    key = args.api_key or pick_client_key(entries)
+    catalog = fetch_catalog(args.relay, key)
+
+    lines = open(args.config, encoding="utf-8").read().splitlines(keepends=True)
+    out, i, restored, kept = [], 0, [], []
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith(DISABLED_MARK):
+            m = re.search(r"model=(\S+)", line)
+            model = m.group(1) if m else None
+            j = i + 1
+            block = []
+            while j < len(lines) and lines[j].startswith("#"):
+                block.append(lines[j])
+                j += 1
+            # 注释体里第一行就是被注释掉的 [model."X"] 表头；若丢掉它，
+            # key/value 就会漂到上一个表格里（TOML 不允许跨表写 key）。
+            block_lines = [b[2:] if b.startswith("# ") else b[1:] if b.startswith("#") else b for b in block]
+            group_ok = args.group is None or (
+                len(block_lines) > 1 and "group = \"{}\"".format(args.group) in block_lines
+            )
+            if model and model in catalog and group_ok:
+                restored.append(model)
+                out.extend(block_lines)
+            else:
+                kept.append(model)
+                out.append(line)
+                out.extend(block)
+            i = j
+            continue
+        out.append(line)
+        i += 1
+
+    if not restored:
+        log("没有可还原的条目（剩余注释 %d 条）" % len(kept))
+        return 0
+
+    log("可还原 %d 条：%s" % (len(restored), ", ".join(restored)))
+    if not args.apply:
+        log("(dry-run) 加 --apply 写入")
+        return 0
+
+    new_text = "".join(out)
+    tomllib.loads(new_text)
+    bak = "%s.bak-%s" % (args.config, time.strftime("%Y%m%d-%H%M%S"))
+    shutil.copy2(args.config, bak)
+    open(args.config, "w", encoding="utf-8", newline="\n").write(new_text)
+    log("已写入 %s（备份 %s）" % (args.config, os.path.basename(bak)))
+    return 0
+
+
 def cmd_prune(args) -> int:
     cfg = load_config(args.config)
     entries = relay_entries(cfg, args.relay)
@@ -252,7 +310,7 @@ def cmd_prune(args) -> int:
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="云端中转模型清单同步器")
-    p.add_argument("action", choices=["check", "add", "prune"])
+    p.add_argument("action", choices=["check", "add", "prune", "restore"])
     p.add_argument("--relay", default=DEFAULT_RELAY)
     p.add_argument("--config", default=DEFAULT_CONFIG)
     p.add_argument("--api-key", default=None)
@@ -264,7 +322,7 @@ def main(argv=None) -> int:
     p.add_argument("--ctx", type=int, default=None)
     p.add_argument("--apply", action="store_true")
     args = p.parse_args(argv)
-    return {"check": cmd_check, "add": cmd_add, "prune": cmd_prune}[args.action](args)
+    return {"check": cmd_check, "add": cmd_add, "prune": cmd_prune, "restore": cmd_restore}[args.action](args)
 
 
 if __name__ == "__main__":

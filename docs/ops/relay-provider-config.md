@@ -261,5 +261,34 @@ python tools/model-sync/sync_relay_models.py prune --group intern --apply
 3. 新增条目要**重启 qidicode** 才进模型注册表（启动时缓存）。
 4. 只做"中转 → 本地"单向同步；中转配置本身仍按 §四 的流程人工审慎变更。
 5. 推理类模型（如 `Agents-A1`）`max_tokens` 给小了会全部消耗在 `reasoning_content` 上、`content` 为空——验收时给到 64 以上。
+6. 上游 `/v1/models` 的清单**不等于**该 key 的授权清单（unisound 列 29 个、实际只有 1 个有权限；jiuwei 列 5 个、实际全 403）——append 前先实发一次 POST 验证。
 
-**残留待清（2026-11-01）**：`dimleap` 15（用户主动裁剪掉的模型）、`openai-next` 3（该 provider 已从云端删除）、无组 4（`GLM-5.3` / `GLM-5.3-FLASH` / `KIMI-K3` / `step-5-preview` 旧名）、`codely` 1（`glm-5.3-flashx`）。
+**残留待清（2026-11-01）**：`openai-next` 3（该 provider 已从云端删除）、无组 4（`GLM-5.3` / `GLM-5.3-FLASH` / `KIMI-K3` / `step-5-preview` 旧名）、`codely` 1（`glm-5.3-flashx`）。（`dimleap` 15 属用户主动裁剪口径，保留注释不清；`intern` 5 条已随 2026-11-01 同步恢复。）
+
+---
+
+## 十二、中转侧模型清单自同步（model_sync）
+
+**位置**：`/opt/codely-relay/model_sync_linux.py`（仓内版本 `tools/relay-model-sync/model_sync_linux.py`，改完要 scp 上去再生效）
+
+**职责边界**：只做"上游 → 中转 config.json"。本地 qidicode 的 `config.toml` 不归它管（用第十一节的 `sync_relay_models.py`）。
+
+**规则**：
+- **append-only**：上游新增 → 自动并入 `provider.models`；上游消失 → 只写日志报告，绝不删（一次 401 就会误删一整个 provider 的模型，代价太大）。
+- 单 provider 单次上限 40 个，`CHAT_HINT` 过滤杂项，名字含 `:`（`:free`/`:batch`/`:fast`）的一律不加。
+- **同名冲突规避**：候选名若已被更靠前的 provider 占住（`match()` 语义），跳过并记账。
+- 写盘走 tmp + `os.replace` 原子替换 + 每日一份备份（`config.json.bak-modelsync-<日期>`）；**写盘后需 `chmod 600 config.json`（原子替换会丢权限）**。
+
+**策略表**（在脚本 `POLICY` 里维护）：
+
+| 策略 | provider |
+|---|---|
+| `append` | intern、kimi-ai、modelscope、antling、openscale、sensenova |
+| `report` | 52duck、apigoto、lyrouter、agnes、openrouter、jiuwei |
+| `skip` | dimleap（用户裁剪过）、amd（上游故障）、gs（无首尔出口）、unisound（授权面窄）、本地端点类 |
+
+**触发**：
+- 每日 cron（`/etc/cron.d/qidi-model-sync`，03:30 低峰）：`/usr/bin/python3 /opt/codely-relay/model_sync_linux.py`，日志 `/opt/codely-relay/model_sync.log`。
+- 手动：`sudo python3 /opt/codely-relay/model_sync_linux.py [--dry-run]`。
+
+**闭环**：cron 写入后 `_load_providers()` 的 mtime 热加载立即生效（无需重启服务）；本地侧跑 `tools/model-sync/sync_relay_models.py check`，看到新模型后 `add --provider intern --apply`。
