@@ -40,6 +40,7 @@ DEFAULT_RELAY = "https://luyou.qidiai.ltd:8443/v1"
 DEFAULT_CONFIG = os.path.expanduser(r"~\.qidi\config.toml")
 MANAGED_BEGIN = "# >>> qidi-model-sync managed"
 MANAGED_END = "# <<< qidi-model-sync managed"
+MIN_CATALOG = 50  # 低于此数视为中转异常，拒绝据此 prune/restore
 DUMP_REMOTE = r'''
 import json
 cfg = json.load(open("/opt/codely-relay/config.json"))
@@ -76,7 +77,12 @@ def fetch_catalog(relay: str, key: str, timeout: int = 30) -> set[str]:
     )
     with urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context()) as r:
         data = json.loads(r.read().decode("utf-8"))
-    return {m["id"] for m in data.get("data", []) if isinstance(m, dict) and m.get("id")}
+    ids = {m["id"] for m in data.get("data", []) if isinstance(m, dict) and m.get("id")}
+    # fail-closed：中转异常时宁可什么都不做，也不能让空目录把本地条目批量注释掉
+    # （审计 D5）。
+    if len(ids) < MIN_CATALOG:
+        raise SystemExit("中转目录仅 %d 个模型（阈值 %d），疑似异常，已中止" % (len(ids), MIN_CATALOG))
+    return ids
 
 
 def pick_client_key(entries: dict[str, dict]) -> str:
@@ -144,6 +150,30 @@ def strip_managed(text: str, group: str) -> str:
     return pattern.sub("\n", text)
 
 
+def managed_models(text: str, group: str) -> list[str]:
+    """读取托管块里已有的 model 名（重写块前必须先保住它们）。"""
+    pattern = re.compile(
+        re.escape(MANAGED_BEGIN) + r" group=" + re.escape(group) + r".*?"
+        + re.escape(MANAGED_END),
+        re.S,
+    )
+    m = pattern.search(text)
+    if not m:
+        return []
+    return re.findall(r'^model = "([^"]+)"', m.group(0), re.M)
+
+
+def atomic_write_text(path: str, text: str) -> None:
+    """同目录临时文件 + fsync + 保留权限后 replace（审计 D11）。"""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    shutil.copymode(path, tmp)
+    os.replace(tmp, path)
+
+
 def cmd_add(args) -> int:
     cfg = load_config(args.config)
     entries = relay_entries(cfg, args.relay)
@@ -163,7 +193,9 @@ def cmd_add(args) -> int:
     same_group = [c for c in entries.values() if (c.get("group") or "") == group]
     sample = same_group[0] if same_group else next(iter(entries.values()))
     base_url = str(sample.get("base_url") or args.relay)
-    ctx = int(args.ctx or sample.get("context_window") or 1048576)
+    ctx = int(args.ctx or 131072)
+    if not args.ctx:
+        log("注意：未指定 --ctx，新条目按 128K 记；已知窗口更长的请用 --ctx 覆盖")
 
     existing_models = {str(c.get("model")) for c in entries.values()}
     missing = [m for m in remote["models"] if m not in existing_models and m in catalog]
@@ -177,11 +209,18 @@ def cmd_add(args) -> int:
         log("无需新增。")
         return 0
 
+    text = open(args.config, encoding="utf-8").read()
+    # 关键：旧托管块里的模型必须先收集再重写。strip_managed 会整块删掉，
+    # 若只写本轮 missing，之前加过的条目会一起消失（审计 D2）。
+    carried = managed_models(text, group)
+    targets = list(dict.fromkeys(carried + missing))
+
     blocks = []
-    for model in missing:
+    for model in targets:
         mid = model + args.suffix
         blocks.append(render_block(mid, model, group, base_url, key, ctx))
-        log("  + [model.\"%s\"]  model=%s" % (mid, model))
+        if model in missing:
+            log("  + [model.\"%s\"]  model=%s" % (mid, model))
 
     if not args.apply:
         log("\n(dry-run) 加 --apply 写入")
@@ -197,7 +236,7 @@ def cmd_add(args) -> int:
 
     bak = "%s.bak-%s" % (args.config, time.strftime("%Y%m%d-%H%M%S"))
     shutil.copy2(args.config, bak)
-    open(args.config, "w", encoding="utf-8", newline="\n").write(new_text)
+    atomic_write_text(args.config, new_text)
     log("\n已写入 %s（备份 %s）" % (args.config, os.path.basename(bak)))
     log("注意：qidicode 的模型注册表在启动时缓存，需要重启才会出现新条目。")
     return 0
@@ -214,7 +253,7 @@ def cmd_restore(args) -> int:
     catalog = fetch_catalog(args.relay, key)
 
     lines = open(args.config, encoding="utf-8").read().splitlines(keepends=True)
-    out, i, restored, kept = [], 0, [], []
+    out, i, restored, kept, legacy = [], 0, [], [], []
     while i < len(lines):
         line = lines[i]
         if line.startswith(DISABLED_MARK):
@@ -222,15 +261,24 @@ def cmd_restore(args) -> int:
             model = m.group(1) if m else None
             j = i + 1
             block = []
-            while j < len(lines) and lines[j].startswith("#"):
+            while j < len(lines) and lines[j].startswith("#") and not lines[j].startswith(DISABLED_MARK):
                 block.append(lines[j])
                 j += 1
-            # 注释体里第一行就是被注释掉的 [model."X"] 表头；若丢掉它，
-            # key/value 就会漂到上一个表格里（TOML 不允许跨表写 key）。
+            # 注释体首行必须是被注释掉的表头，否则说明这是旧版 prune 留下的
+            # 无表头块（审计 D1）：拒绝自动恢复，交给备份或人工处理。
             block_lines = [b[2:] if b.startswith("# ") else b[1:] if b.startswith("#") else b for b in block]
+            has_header = bool(block_lines) and block_lines[0].lstrip().startswith("[model.")
+            # 行尾带 \n，比较前必须 strip，否则 group 过滤永远不命中。
+            stripped = [x.strip() for x in block_lines]
             group_ok = args.group is None or (
-                len(block_lines) > 1 and "group = \"{}\"".format(args.group) in block_lines
+                len(stripped) > 1 and ('group = "%s"' % args.group) in stripped
             )
+            if not has_header:
+                legacy.append(model)
+                out.append(line)
+                out.extend(block)
+                i = j
+                continue
             if model and model in catalog and group_ok:
                 restored.append(model)
                 out.extend(block_lines)
@@ -243,6 +291,8 @@ def cmd_restore(args) -> int:
         out.append(line)
         i += 1
 
+    if legacy:
+        log("跳过旧版无表头注释块（需人工/备份处理）：%s" % ", ".join(str(x) for x in legacy))
     if not restored:
         log("没有可还原的条目（剩余注释 %d 条）" % len(kept))
         return 0
@@ -256,7 +306,7 @@ def cmd_restore(args) -> int:
     tomllib.loads(new_text)
     bak = "%s.bak-%s" % (args.config, time.strftime("%Y%m%d-%H%M%S"))
     shutil.copy2(args.config, bak)
-    open(args.config, "w", encoding="utf-8", newline="\n").write(new_text)
+    atomic_write_text(args.config, new_text)
     log("已写入 %s（备份 %s）" % (args.config, os.path.basename(bak)))
     return 0
 
@@ -282,8 +332,11 @@ def cmd_prune(args) -> int:
     while i < len(lines):
         header = re.match(r'\[model\."?([^\]]+?)"?\]\s*$', lines[i].strip())
         if header and header.group(1) in targets:
-            out.append("# [disabled by qidi-model-sync %s] 中转已不路由 model=%s\n"
+            # 表头本身必须被注释保留：restore 依赖它重建表格，否则 key/value
+            # 会漂进上一张表（审计 D1，实测 tomllib 报 Cannot overwrite a value）。
+            out.append("# [disabled by qidi-model-sync %s] model=%s\n"
                        % (time.strftime("%Y-%m-%d"), entries[header.group(1)].get("model")))
+            out.append("# " + lines[i])
             j = i + 1
             while j < len(lines) and not lines[j].lstrip().startswith("["):
                 out.append("# " + lines[j] if lines[j].strip() else lines[j])
@@ -303,7 +356,7 @@ def cmd_prune(args) -> int:
     tomllib.loads(new_text)
     bak = "%s.bak-%s" % (args.config, time.strftime("%Y%m%d-%H%M%S"))
     shutil.copy2(args.config, bak)
-    open(args.config, "w", encoding="utf-8", newline="\n").write(new_text)
+    atomic_write_text(args.config, new_text)
     log("已写入 %s（备份 %s），实际注释 %d 条" % (args.config, os.path.basename(bak), hit))
     return 0
 

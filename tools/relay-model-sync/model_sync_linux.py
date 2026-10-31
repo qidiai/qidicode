@@ -22,11 +22,13 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
 import shutil
 import sys
+import tempfile
 import time
 
 import httpx
@@ -90,12 +92,31 @@ def log(msg: str) -> None:
 
 
 def atomic_write_json(path: str, obj) -> None:
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    """同目录临时文件 + 显式 0600 + fsync + replace。
+
+    审计 D4：mkstemp 默认 0600，但 open() 会按 umask 建出 0644 再 replace，
+    导致 config.json（原本 600，内含全部上游 key）变成全局可读。这里在
+    replace **之前**就把权限钉死，避免暴露窗口。
+    """
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".config.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o600)
+        try:
+            os.chown(tmp, 0, 0)
+        except PermissionError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def provider_keys(p: dict) -> list[str]:
@@ -122,15 +143,19 @@ def fetch_upstream(base_url: str, key: str, timeout: int = 20) -> list[str]:
     return out
 
 
-def claimed_by(providers: dict, name: str, before: str) -> str | None:
-    """名字是否已被某个更靠前的 provider 抢走（first-match-wins）。"""
+def claimed_by(providers: dict, name: str, current: str) -> str | None:
+    """名字是否已被**任何其他** provider 占住。
+
+    审计 D3：只看前后排序是不够的——给靠前的 provider 追加一个靠后的
+    provider 已在服务的同名模型，会直接改写现网流量归属。默认一律跳过，
+    确需改道请用 provider 独占别名。
+    """
     for pname, p in providers.items():
-        if pname == before:
-            return None
-        if not p.get("enabled", True):
+        if pname == current:
             continue
         if name in (p.get("models") or []) or name in (p.get("model_aliases") or {}):
-            return pname
+            suffix = "" if p.get("enabled", True) else "(disabled)"
+            return pname + suffix
     return None
 
 
@@ -138,6 +163,15 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
+
+    # 审计 D10：cron 与手动执行可能重叠，同一 tmp 名会互相截断。整段流程加锁。
+    lock_path = CFG_FILE + ".lock"
+    lock = open(lock_path, "w")
+    try:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log("另一个同步进程正在运行，本次跳过")
+        return 0
 
     with open(CFG_FILE, encoding="utf-8") as f:
         cfg = json.load(f)

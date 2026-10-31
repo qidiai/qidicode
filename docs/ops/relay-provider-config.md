@@ -276,8 +276,8 @@ python tools/model-sync/sync_relay_models.py prune --group intern --apply
 **规则**：
 - **append-only**：上游新增 → 自动并入 `provider.models`；上游消失 → 只写日志报告，绝不删（一次 401 就会误删一整个 provider 的模型，代价太大）。
 - 单 provider 单次上限 40 个，`CHAT_HINT` 过滤杂项，名字含 `:`（`:free`/`:batch`/`:fast`）的一律不加。
-- **同名冲突规避**：候选名若已被更靠前的 provider 占住（`match()` 语义），跳过并记账。
-- 写盘走 tmp + `os.replace` 原子替换 + 每日一份备份（`config.json.bak-modelsync-<日期>`）；**写盘后需 `chmod 600 config.json`（原子替换会丢权限）**。
+- **同名冲突规避**：候选名若已被**任何其他** provider（不论排序前后，含 disabled）占住，一律跳过并记账。只看前序会出问题——给靠前的 provider 追加一个靠后 provider 已在服务的同名模型，等于静默改写流量归属（审计 D3）。
+- 写盘走同目录 `mkstemp` + **写前 `chmod 0600` + `chown root:root`** + fsync + `os.replace`，再配 `flock` 防 cron 与手动执行重叠；每日一份备份（`config.json.bak-modelsync-<日期>`）。（2026-11-01 k3.1 审计 D4：早期版本用 `open()` 建 tmp，umask 会把 config.json 变成 644，已修。）
 
 **策略表**（在脚本 `POLICY` 里维护）：
 
@@ -287,8 +287,31 @@ python tools/model-sync/sync_relay_models.py prune --group intern --apply
 | `report` | 52duck、apigoto、lyrouter、agnes、openrouter、jiuwei |
 | `skip` | dimleap（用户裁剪过）、amd（上游故障）、gs（无首尔出口）、unisound（授权面窄）、本地端点类 |
 
+**已知局限（审计 D8）**：append 只依据上游 `/v1/models`，不代表该 key 真有权限。`kimi-ai` 列为 append 但其 6 个模型实测只有 2 个可用，所以**新出现的条目仍需人工实发一次 POST 才算可用**；授权语义不明的通道请留在 `report`。
+
 **触发**：
 - 每日 cron（`/etc/cron.d/qidi-model-sync`，03:30 低峰）：`/usr/bin/python3 /opt/codely-relay/model_sync_linux.py`，日志 `/opt/codely-relay/model_sync.log`。
 - 手动：`sudo python3 /opt/codely-relay/model_sync_linux.py [--dry-run]`。
 
-**闭环**：cron 写入后 `_load_providers()` 的 mtime 热加载立即生效（无需重启服务）；本地侧跑 `tools/model-sync/sync_relay_models.py check`，看到新模型后 `add --provider intern --apply`。
+**闭环**：cron 写入后 `_load_providers()` 的 mtime 热加载立即生效（无需重启服务）；本地侧先跑 `tools/model-sync/sync_relay_models.py check` 看失效面，再用 `add --provider intern --from-ssh ubuntu@111.231.166.204 --group intern`（dry-run 看增量）→ 加 `--apply`。`add` 必须给 `--models` 或 `--from-ssh` 之一。
+
+---
+
+## 十三、审计记录（2026-11-01，k3.1 独立审计）
+
+审计对象：`a6d3889` 的模型清单同步实现与文档主张。结论：**初版不通过**，13 条缺陷，已修 7 条高/中级。
+
+| 编号 | 严重度 | 问题 | 处置 |
+|---|---|---|---|
+| D1 | 高 | `prune` 用 marker 顶替表头，`restore` 却假定表头存在 → 还原时 key/value 漂进上一张表，`tomllib` 报 `Cannot overwrite a value`（本机已实测复现） | 已修：prune 保留 `# [model."X"]`；restore 校验表头、遇到下一个 marker 即停；旧格式块拒绝自动恢复。回归测试 `tools/model-sync/test_sync_relay_models.py` 覆盖往返等价 |
+| D2 | 高 | 重复 `add` 会整块重写托管块，只写本轮增量 → 之前加过的模型消失 | 已修：重写前先收集块内已有 model 名做并集；测试覆盖"第二轮 A 不丢" |
+| D3 | 高 | `claimed_by` 只查前序 provider，给前序 provider 追加后序已在服务的同名模型会改道 | 已修：扫描任何其他 provider（含 disabled），一律跳过 |
+| D4 | 高 | `open()` 建 tmp 受 umask 影响，把 config.json 从 600 变 644（已实测发生） | 已修：`mkstemp` + 写前 `chmod 0600` + `chown root` + fsync + replace |
+| D5 | 中 | 中转返回空目录时会把本地条目批量注释掉 | 已修：目录 < 50 个模型即 fail-closed 中止 |
+| D10 | 中 | 固定 tmp 名、无锁，cron 与手动执行可互相截断 | 已修：`flock` + `mkstemp` 唯一名 |
+| D11 | 中 | 本地三种写盘为直接 truncate，进程崩溃可留半截 config | 已修：同为 tmp + fsync + 保留 mode + replace |
+| D6/D7 | 中 | TOML 表头变体/多行字符串会误判；restore 无表头时静默错位 | 部分修（表头校验 + marker 边界 + `tomllib` 兜底）；表头写法变体仍未全覆盖，遇到非标准写法会因校验失败而不写盘（fail-safe） |
+| D8 | 中 | append 只依据上游清单，不验证该 key 是否真有权限 | 未修（成本高）：降级为文档警示 + 关键通道留 `report` |
+| D9 | 中 | 新条目 ctx 默认取同组样本（曾为 1M），可能高估 | 已改为显式 `--ctx`，缺省 128K 并提示 |
+| D12 | 低 | provider 故障时退出码仍为 0 | 未修：已写日志与 `report["errors"]`，后续接监控再加非零退出 |
+| D13 | 低 | 文档闭环命令缺必填参数 | 已修 |
