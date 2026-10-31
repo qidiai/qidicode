@@ -228,3 +228,38 @@ curl -s -X POST https://luyou.qidiai.ltd:8443/v1/chat/completions \
   -d '{"model":"dimleap/glm-5.3","messages":[{"role":"user","content":"reply PONG"}],"max_tokens":8}'
 # 判据：sudo grep 'api.dimleap.cn/v1/chat' /opt/codely-relay/proxy.log | tail -1   -> 200
 ```
+
+---
+
+## 十一、模型清单同步（本地 config.toml ← 中转）
+
+**问题**：中转的 `providers[*].models` 随上游更新，而 qidicode 的 `~/.qidi/config.toml` 是手写清单。两份清单互不知道对方，漂移出两类故障：
+
+- 中转已下线、本地还留着 → 选中即 `404 model_not_found`
+- 中转新增、本地没有 → 明明能用却选不到
+
+2026-11-01 实测：本地 134 条指向中转的条目中 **23 条已失效**（dimleap 15、openai-next 3、无组 4、codely 1）；`intern` 组另有 5 条失效、4 个新模型缺席——即当时用户遇到的现象。
+
+**工具**：`tools/model-sync/sync_relay_models.py`（Python 3.11+ 标准库，无第三方依赖）
+
+| 动作 | 作用 | 默认行为 |
+|---|---|---|
+| `check` | 拉中转 `/v1/models`，逐条比对本地 `model` 字段，列出失效条目与受影响 group | 只读 |
+| `add --provider X [--from-ssh HOST] [--group G]` | 把 provider 的新模型补进 config.toml 托管块（可重复执行、自动去重） | dry-run |
+| `prune --group G` | 把失效条目注释掉（注释保留、随时可恢复） | dry-run |
+
+```powershell
+python tools/model-sync/sync_relay_models.py check
+python tools/model-sync/sync_relay_models.py add --provider intern --from-ssh ubuntu@111.231.166.204 --group intern --apply
+python tools/model-sync/sync_relay_models.py prune --group intern --apply
+```
+
+**纪律**：
+
+1. 写盘前必须 `tomllib` 自检 + 备份（工具内建；校验不过就不写）。
+2. "中转登记了"**不等于**能用：新条目必须实发一次 `POST /v1/chat/completions` 才算同步完成（历史上多次出现登记齐全但 401/404/空回复）。
+3. 新增条目要**重启 qidicode** 才进模型注册表（启动时缓存）。
+4. 只做"中转 → 本地"单向同步；中转配置本身仍按 §四 的流程人工审慎变更。
+5. 推理类模型（如 `Agents-A1`）`max_tokens` 给小了会全部消耗在 `reasoning_content` 上、`content` 为空——验收时给到 64 以上。
+
+**残留待清（2026-11-01）**：`dimleap` 15（用户主动裁剪掉的模型）、`openai-next` 3（该 provider 已从云端删除）、无组 4（`GLM-5.3` / `GLM-5.3-FLASH` / `KIMI-K3` / `step-5-preview` 旧名）、`codely` 1（`glm-5.3-flashx`）。
