@@ -99,8 +99,14 @@ dimleap 的响应是自定义结构 `{"success":true,"data":{"models":[...],"tot
 原因：`_FALLBACK_TRIGGER_STATUS = {401,402,403,429,503}`（`routes/proxy.py:3201`）**含 401**。若 enabled=true 而 key 是空的，请求得到 401 → 触发兜底 → **静默换成 agnes 回答，调用方以为线路正常**。
 `enabled=false` 的行为已验证：`404 {"code":"model_not_found"}` —— 响亮失败，不兜底。
 
-**6. 写入后必须回读**
-`settings.py` 在配置解析失败时会**静默回落到默认值**（`persist` 相关路径同理），所以"写入成功"不等于"配置生效"。标准动作：
+**6. 空 `models` 现在是合法状态（2026-11-01 修复）**
+旧行为：`_load_providers()` 要求 `base_url and keys and models` 三者齐备，否则**整个 provider 被丢弃**并打 WARNING。而控制台"添加通道"表单只收集 `name / base_url / api_key / enabled`（`static/app.js:950-1000`），写入的 `models` 恒为 `[]` → **新建的通道永远不出现在列表里，也就永远填不上模型**（先有鸡还是先有蛋）。
+现行为（`proxy_core/providers.py:440`，`if base_url and keys:`）：空 `models` 的 provider 正常加载、卡片可见，再点「↻ 刷新模型」从上游 `/v1/models` 回填。
+- 已验证：临时注入 `models: []` 的探针 provider，加载数 21 → 22 且该 provider 在列；移除后回到 21（配置逐字节还原）。
+- 副作用审查：全部 `models` 消费者（`match`、`all_models`、`water.py`、`routes/admin.py`、`routes/proxy.py:1377`）都走 `.get("models") or []`，空列表不会抛 `KeyError`，只是不可路由。
+- 因此**空 `models` + `enabled=false` 现在是推荐的"先建卡、后填模型"写法**，不再需要绕过控制台手改 JSON。
+
+**7. 写入后必须回读**`settings.py` 在配置解析失败时会**静默回落到默认值**（`persist` 相关路径同理），所以"写入成功"不等于"配置生效"。标准动作：
 ```bash
 sudo cp config.json config.json.bak-<用途>-$(date +%y%m%d-%H%M%S)
 sudo python3 - <<'PY'
@@ -109,7 +115,7 @@ print(len(c['providers']), c['providers']['<name>']['enabled'])
 PY
 ```
 
-**7. 验证判据（唯一）**
+**8. 验证判据（唯一）**
 ```
 relay 日志出现：POST https://<上游host>/v1/chat/completions "HTTP/1.1 200"
 ```
@@ -119,29 +125,31 @@ relay 日志出现：POST https://<上游host>/v1/chat/completions "HTTP/1.1 200
 
 ---
 
-## 五、现有 provider 清单（19 个，2026-10-31 快照）
+## 五、现有 provider 清单（21 个，2026-11-01 快照 / `sudo python3 /tmp/list.py` 实测）
 
 | # | provider | 上游 host | 模型数 | 别名数 | enabled | media | 备注 |
 |---|---|---|---|---|---|---|---|
-| 1 | `modelscope` | api-inference.modelscope.cn | 37 | 0 | True | - | 魔粒池，每日 00:00 恢复 |
-| 2 | `52duck` | api.52duck.cn | 2 | 0 | True | - | **登记名与上游不一致**：登记 `Deepseek-flash`/`GLM-5.2`，该 key 实际只服务 `deepseek-v4.1-flash`（需别名，见 §八） |
-| 3 | `stepplan` | api.stepfun.com | 5 | 0 | **False** | - | 阶跃 Step Plan |
-| 4 | `openscale` | api.openscale.so | 8 | 0 | True | - | 声明 `deepseek-v4.1-flash`、`z-ai/glm-5.3-flash`（抢同名） |
-| 5 | `antling` | api.ant-ling.com | 5 | 0 | True | - | |
-| 6 | `apigoto` | www.apigoto.com | 20 | 0 | True | - | **每日推广收益到账、余额按天波动**；欠费日整批 429；抢 `deepseek-flash`/`glm-5.3` |
-| 7 | `openrouter` | openrouter.ai | 3 | 0 | True | - | |
-| 8 | `sensenova` | token.sensenova.cn | 7 | 0 | True | - | tpm/rpm 滑动窗限流；抢 `deepseek-v4-flash`、`glm-5.2`、`deepseek-v4.1-flash` |
-| 9 | `stepfun` | api.stepfun.com | 3 | 0 | **False** | - | |
-| 10 | `agnes` | api.agnes-ai.cn | 7 | 0 | True | **True** | 免费档 512K；图像/视频也已开通（受 media 闸门控制） |
-| 11 | `intern` | discovery-api.intern-ai.org.cn | 6 | 2 | True | - | 月额度；抢 `kimi-k2.6`、`deepseek-v4-flash-0731`、`deepseek-v4-pro-0813` |
-| 12 | `opencode` | 127.0.0.1:4096 | 11 | 0 | True | - | 本机 |
-| 13 | `npu` | 127.0.0.1:18765 | 1 | 0 | True | - | 自建 NPU 端点 |
-| 14 | `opencode-go` | opencode.ai | 4 | 38 | True | - | **全部 401 `Go requires a credential`（不可用）** |
-| 15 | `gs` | generativelanguage.googleapis.com | 14 | 14 | True | - | Google，经首尔 SOCKS 出口 |
-| 16 | `jiuwei` | jiuweiapi.top | 5 | 5 | True | - | `jw/*` 别名 |
-| 17 | `unisound` | maas-api.unisound.com | 1 | 0 | True | - | 仅 `u2-flash` 有权限 |
-| 18 | `lyrouter` | api.lyrouter.com | 27 | 0 | True | **False** | 在表尾 → 同名被前面抢；媒体闸门关 |
-| 19 | `dimleap` | api.dimleap.cn | 31 | 12 | **False** | False | 2026-10-31 接入；**免费额度站**；43 个 chat 全可路由；等 key 后开 |
+| 1 | `amd` | developer.amd.com.cn | 15 | 15 | True | - | 2026-10-31 接入；别名 `amd/*`；**上游当日 500/502，待厂商修复** |
+| 2 | `kimi-ai` | api.kimi.com/coding/v1 | 6 | 6 | True | False | Kimi **Code** 订阅线（`sk-kimi-*`）；实测仅 `kimi-for-coding` / `k3-256k` 200，其余 403 套餐档位 |
+| 3 | `modelscope` | api-inference.modelscope.cn | 37 | 0 | True | - | 魔粒池，每日 00:00 恢复 |
+| 4 | `52duck` | api.52duck.cn | 2 | 0 | True | - | **登记名与上游不一致**：登记 `Deepseek-flash`/`GLM-5.2`，该 key 实际只服务 `deepseek-v4.1-flash`（需别名，见 §八） |
+| 5 | `stepplan` | api.stepfun.com | 5 | 0 | **False** | - | 阶跃 Step Plan |
+| 6 | `openscale` | api.openscale.so | 8 | 0 | True | - | 声明 `deepseek-v4.1-flash`、`z-ai/glm-5.3-flash`（抢同名） |
+| 7 | `antling` | api.ant-ling.com | 5 | 0 | True | - | |
+| 8 | `apigoto` | www.apigoto.com | 20 | 0 | True | - | **每日推广收益到账、余额按天波动**；欠费日整批 429；抢 `deepseek-flash`/`glm-5.3` |
+| 9 | `openrouter` | openrouter.ai | 3 | 0 | True | - | |
+| 10 | `sensenova` | token.sensenova.cn | 7 | 0 | True | - | tpm/rpm 滑动窗限流；抢 `deepseek-v4-flash`、`glm-5.2`、`deepseek-v4.1-flash` |
+| 11 | `stepfun` | api.stepfun.com | 3 | 0 | **False** | - | |
+| 12 | `agnes` | api.agnes-ai.cn | 7 | 0 | True | **True** | 免费档 512K；图像/视频也已开通（受 media 闸门控制） |
+| 13 | `intern` | discovery-api.intern-ai.org.cn | 6 | 2 | True | - | 月额度；抢 `kimi-k2.6`、`deepseek-v4-flash-0731`、`deepseek-v4-pro-0813` |
+| 14 | `opencode` | 127.0.0.1:4096 | 11 | 0 | True | - | 本机 |
+| 15 | `npu` | 127.0.0.1:18765 | 1 | 0 | True | - | 自建 NPU 端点 |
+| 16 | `opencode-go` | opencode.ai | 4 | 38 | True | - | **全部 401 `Go requires a credential`（不可用）** |
+| 17 | `gs` | generativelanguage.googleapis.com | 14 | 14 | True | - | Google，经首尔 SOCKS 出口 |
+| 18 | `jiuwei` | jiuweiapi.top | 5 | 5 | True | - | `jw/*` 别名 |
+| 19 | `unisound` | maas-api.unisound.com | 1 | 0 | True | - | 仅 `u2-flash` 有权限 |
+| 20 | `lyrouter` | api.lyrouter.com | 27 | 0 | True | **False** | 在表尾 → 同名被前面抢；媒体闸门关 |
+| 21 | `dimleap` | api.dimleap.cn | 18 | 12 | True | False | 2026-10-31 接入；**免费额度站**；18 个模型是用户裁剪后的口径（勿恢复 43 个）；`dimleap/*` 别名 |
 
 ---
 
@@ -183,7 +191,8 @@ relay 日志出现：POST https://<上游host>/v1/chat/completions "HTTP/1.1 200
 2. **`model_fallbacks['deepseek-flash']` 里的旧名 `Deepseek-v4-flash`**（52duck 2026-10-18 改名后失配，兜底永远跳过它）；同时给 `Deepseek-flash` **不配**兜底。
 3. **apigoto 的小写 `deepseek-flash`** 是否摘掉：欠费日会白吃 400+ 次 429，但它是"当日可用"的波浪型资源。
 4. **billing 探测按 provider 适配**：对 52duck 停止空探。
-5. **dimleap 填 key 后**：先验请求名形态（裸名 vs `vendor/name`），再决定是否批量改 `models`/`model_aliases`。
+5. ~~**dimleap 填 key 后**：先验请求名形态~~ → **已完成**：已启用（18 个模型 + 12 个别名），别名形态经实测可用。
+6. **`amd` 上游 500/502**：等厂商修复；模型与别名已登记（15+15），恢复即用。`kimi-ai` 只有 2 个模型能真正调通（其余 403 套餐档位），派活前先探活。
 
 ---
 
@@ -196,6 +205,7 @@ relay 日志出现：POST https://<上游host>/v1/chat/completions "HTTP/1.1 200
 | 2026-10-28 | 媒体默认拒绝闸门 `media_enabled`（¥15 事故后） |
 | 2026-10-30 | 确认 apigoto 每日推广收益、余额按天波动；小写 `deepseek-flash` 实际由 apigoto 服务 |
 | 2026-10-31 | 接入 `dimleap`（43 个 chat：31 真名 + 12 独占别名，含 `dimleap/glm-5.3`、`glm-5.3-flash`）；`enabled=false` 等 key；24 个媒体模型未登记（闸门） |
+| 2026-11-01 | **修复"空 models 通道不可见"**（`providers.py:440` 去掉 `and models`，备份 `providers.py.bak-fixA-20261031`）；接入 `kimi-ai`（Kimi Code 线）与 `amd`（15 模型 + `amd/*` 别名）；`dimleap` 启用于用户裁剪后的 18 模型；provider 总数 19 → 21 |
 
 ---
 
