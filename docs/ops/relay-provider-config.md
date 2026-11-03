@@ -157,12 +157,61 @@ relay 日志出现：POST https://<上游host>/v1/chat/completions "HTTP/1.1 200
 
 - **触发兜底的状态**：`401/402/403/429/503`（`routes/proxy.py:3201`）；**最多 3 跳**（`_MAX_FALLBACK_DEPTH = 3`）。
 - **`model_fallbacks` 现有 27 条**，形如：
-  `Qwen/Qwen3.8-Flash-Next -> ['Qwen/Qwen3.8-27B', 'agnes-3.0-flash', 'gs/gemini-3.5-flash']`。
+  `Qwen/Qwen3.8-Flash-Next -> ['Qwen/Qwen3.8-27B', 'amd/Qwen3.8-27B', 'gs/gemini-3.5-flash']`。
 - **跨族兜底的风险（实际发生过两次）**：编码手任务在 `deepseek-flash` 429 后被兜到 `agnes-3.0-flash`（免费档）跑了 4 轮工具调用，最后撞上 `gs/gemini-3.5-flash` 接不住 `tools` 载荷（400）整链失败。**派编码任务时，目标模型不要配跨族兜底，宁可响亮失败。**
+
+### 6.1 2026-11-04 兜底链重构（用户裁定：agnes 能力不足，会造成信息污染）
+
+**决策**：`agnes-3.0-flash` 从**全部 12 条**兜底链移除，替换为 amd 同族**真模型**。
+**依据**（用户原话）："它的能力太差了，会造成信息污染的"；"兜底链 amd 的模型 deepseek-v4.1-flash 不要用假模型代替"。
+
+| 主模型 | 替换前 → 替换后 |
+|---|---|
+| `deepseek-ai/DeepSeek-V4.1-Flash-1017` | `deepseek-flash` → ~~`agnes-3.0-flash`~~ **`amd/DeepSeek-V4.1-Flash`** → `gs/gemini-3.5-flash` → `deepseek/deepseek-v4.1-flash-1017` |
+| `Qwen/Qwen3.8-27B` | `qwen3.8-max` → **`amd/Qwen3.8-27B`** → `gs/...` → `qwen/qwen3.8-max` |
+| `Qwen/Qwen3.8-Flash-Next` | `Qwen/Qwen3.8-27B` → **`amd/Qwen3.8-27B`** → `gs/...` |
+| `Qwen/Qwen3.5-397B-A17B` | `Qwen/Qwen3.8-27B` → **`amd/Qwen3.8-27B`** → `gs/...` |
+| `ZhipuAI/GLM-5.2` | `glm-5.3` → **`amd/GLM-5.3-Flash`** → `gs/...` → `z-ai/glm-5.3` |
+| `deepseek-flash` | `Deepseek-v4-flash` → **`amd/DeepSeek-V4.1-Flash`** → `gs/...` |
+| `qwen3.8-max` / `qwen3.7-plus` | `Qwen/Qwen3.8-27B` → `Deepseek-v4-flash` → **`amd/Qwen3.8-27B`** |
+| `glm-5.3` / `glm-5.3-flash` | `deepseek/deepseek-chat` → **`amd/GLM-5.3-Flash`** |
+| `kimi-k3` / `claude-haiku-5-5` | `jw/kimi-k3-1` → **`amd/DeepSeek-V4.1-Flash`** |
+
+**校验**：改后 `残余含 agnes 的链 = 0`；`model_fallbacks` 总条数仍 27。
+**备份**：`/tmp/config.json.bak-fb-20261104-043605`（改前完整配置；`/tmp` 会被清，长期留档以本文为准）。
+**热加载**：`chain = (load_config().get("model_fallbacks") or {}).get(model)`（`routes/proxy.py:3293`）**每次请求重读**，改完**不需要重启**。
+
+### 6.2 AMD 池实测特性（2026-11-04）
+
+| 特性 | 实测 |
+|---|---|
+| **并发上限** | **32**；满了返回 `429 Model 'X' is at its concurrency limit (32)`，需重试 |
+| **响应波动** | `amd/DeepSeek-V4.1-Flash` 12–68s；`amd/DeepSeek-V4-Flash` 18.8s |
+| **偶发坏响应** | `amd/GLM-5.3-Flash` 有一次返回**字面量字符串 `'None'`**（非空、非错误），后两次正常返回 `Hello!` |
+| **V4.1 与 V4 独立** | `amd/DeepSeek-V4.1-Flash` → served `self-dploy/DeepSeek-V4.1-Flash`；`amd/DeepSeek-V4-Flash` → served `self-dploy/DeepSeek-V4-Flash`。**两个独立条目，不得互相顶替** |
+
+### 6.3 推理模型的 max_tokens 陷阱（2026-11-04 实测）
+
+`deepseek-ai/DeepSeek-V4.1-Flash-1017` 与 `deepseek/deepseek-v4.1-flash-1017` 都是**推理模型**：先输出 `reasoning_content`，再输出 `content`。
+
+```
+max_tokens=8   → finish_reason: length, content='' ，reasoning 占满预算
+max_tokens=32  → finish_reason: stop,   content='PONG' ✅
+max_tokens=64  → 正常
+```
+
+**后果**：客户端传小 `max_tokens` 时会拿到 **HTTP 200 + 空正文**，比报错更难发现。
+relay 对空 content 有处理（`EMPTY_COOLDOWN_S = 30`，`routes/proxy.py:2327` 冷却换号），
+但**反复触发会把好 key 打入冷却**，表现为"额度还在却一直失败"。
+
+**处置**：客户端/网关侧对推理模型设 `max_tokens` 下限（≥64）；排障时先看 `finish_reason` 是否为 `length`。
+
 - **注水检测**：relay 会对"请求名 ≠ 返回名"打 WARNING（`注水嫌疑（模型名不符）`）。实测：
   - `bytedance/doubao-seed-2.1-pro` → 返回 `doubao-seed-2-1-pro-260915`（同族全名，良性）
   - `lyrouter/auto` → 返回 `glm-5.2`（**平台自选模型，不可预测，别当确定型号用**）
 - **冷却**：provider 失败后进入冷却，冷却期内该 provider 被 `match()` 跳过；日志里的"不是可用外部通道"常常就是冷却中的表现。
+  - 常量：`EMPTY_COOLDOWN_S = 30`（空响应）、`ERROR_COOLDOWN_S = 60`（5xx）、`QUOTA_COOLDOWN_S = 600`（配额耗尽）
+  - 冷却状态落盘 `cooldowns.json`（provider 级），`saved_at` 字段可判断快照时间
 
 ---
 
@@ -206,6 +255,7 @@ relay 日志出现：POST https://<上游host>/v1/chat/completions "HTTP/1.1 200
 | 2026-10-30 | 确认 apigoto 每日推广收益、余额按天波动；小写 `deepseek-flash` 实际由 apigoto 服务 |
 | 2026-10-31 | 接入 `dimleap`（43 个 chat：31 真名 + 12 独占别名，含 `dimleap/glm-5.3`、`glm-5.3-flash`）；`enabled=false` 等 key；24 个媒体模型未登记（闸门） |
 | 2026-11-01 | **修复"空 models 通道不可见"**（`providers.py:440` 去掉 `and models`，备份 `providers.py.bak-fixA-20261031`）；接入 `kimi-ai`（Kimi Code 线）与 `amd`（15 模型 + `amd/*` 别名）；`dimleap` 启用于用户裁剪后的 18 模型；provider 总数 19 → 21 |
+| **2026-11-04** | **兜底链重构**：`agnes-3.0-flash` 从全部 **12 条** `model_fallbacks` 移除（用户裁定：能力不足会造成信息污染），替换为 amd 同族真模型（DeepSeek→`amd/DeepSeek-V4.1-Flash`、Qwen→`amd/Qwen3.8-27B`、GLM→`amd/GLM-5.3-Flash`）。备份 `/tmp/config.json.bak-fb-20261104-043605`。同时记录 AMD 池三项特性（并发上限 32 / 偶发坏响应 / V4.1 与 V4 不得互相顶替）与推理模型 `max_tokens` 陷阱（见 §6.1–6.3） |
 
 ---
 
