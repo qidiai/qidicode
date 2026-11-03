@@ -128,11 +128,23 @@
 
 ## 9. 子代理编排（乐团模式，实测有效）
 
+> **⚠️ 2026-11-04 用户裁定（席位选择总原则）**：
+> **质量优先于成本。免费只在"质量可接受"时才优先——不能因为免费就把项目搞坏。**
+> 判据不是"这个模型不要钱"，而是"这个模型能否胜任当前任务"。能力不足导致的返工（上下文污染、重复沟通、错误结论）
+> 所消耗的 token 与时间，远高于省下的那点费用。
+>
+> **具体落地**：`agnes` 系已退出 relay 兜底链（2026-11-04，12 条链全部替换为 amd 同族真模型）——
+> 用户原话"它的能力太差了，会造成信息污染的"。agnes 仍可用于**低风险的短任务**（探针、格式转换、简单查询），
+> 但**不得进入兜底链、不得做审计席、不得承担需要事实准确性的工作**。
+>
+> **另一条**：兜底链用 `amd/DeepSeek-V4.1-Flash` 时**必须是真 V4.1**，不得用 `amd/DeepSeek-V4-Flash`（V4）顶替——
+> 二者是独立条目、能力不同，混用等于静默降级（2026-11-04 实测：`amd/DeepSeek-V4.1-Flash` → served `self-dploy/DeepSeek-V4.1-Flash`）。
+
 | 角色 | 模型 / 类型 | 用途 |
 |---|---|---|
-**⚠️ step-5（阶跃）订阅时限（2026-10-17 用户告知，勘误 v2：非 apigoto）**：step-5 订阅 **2026-10-20 过期**——step-5 系模型（step-5-preview-222/step-5-preview/opencode-go step-5-preview-free）届时失效或降级。222 池（DeepSeek/K3/GLM 系）不受影响。step-5 位替代：luyou sonnet-5-5（今日实测可用）/zen 免费位其他模型/kimi 系。
+**⚠️ step-5（阶跃）订阅时限（2026-10-17 用户告知，勘误 v2：非 apigoto）**：step-5 订阅 **2026-10-20 过期**——step-5 系模型（step-5-preview-222/step-5-preview/opencode-go step-5-preview-free）届时失效或降级。222 池（DeepSeek/K3/GLM 系）不受影响。step-5 位替代：luyou sonnet-5-5（今日实测可用）/zen 免费位其他模型/kimi 系。**2026-11-03 用户更新套餐后实测 `step-5-preview-222` 恢复可用（2.4s PONG），可作审计席。**
 
-| 编码手 | **默认 `a`agnes-2.5-flash``（限时免费，0.4s）/ `a`agnes-3.0-flash``（免费，512K，需强推理时开 Thinking）**；成本口径（以 deepseek-flash 为 1×）：`codely-flash` = deepseek-flash 别名 **1×**、`codely-core` = glm-5.3 别名 **4×**、`kimi-k3` **10×**。升级位 `jw/kimi-k3-1` 仅用于关键任务。**不要把 codely-core 当默认**（4 倍成本、质量同 glm-5.3）。 | 按规格书写码+自测；**并行前提：任务文件零交集**（同 crate 不同文件可并行，同 crate 高内聚改动合并给一人） |
+| 编码手 | **首选 `qwen3.8-flash-next-ms-222`（魔搭，1.8s，稳定有内容）**；备选 `amd-deepseek-v41-flash-222`（真 V4.1，但**池并发易满 429，需重试 2–3 次**，且响应 12–68s 波动）；再备 `amd-deepseek-v4-flash-222`（V4，18.8s 慢）。成本口径（以 deepseek-flash 为 1×）：`codely-flash` = deepseek-flash 别名 **1×**、`codely-core` = glm-5.3 别名 **4×**、`kimi-k3` **10×**。升级位 `jw/kimi-k3-1` 仅用于关键任务。**不要把 codely-core 当默认**（4 倍成本、质量同 glm-5.3）。**agnes 系不再作为编码手默认**（2026-11-04 起）。 | 按规格书写码+自测；**并行前提：任务文件零交集**（同 crate 不同文件可并行，同 crate 高内聚改动合并给一人） |
 **【2026-10-31 卫生审计停用：本段原文 GBK 乱码损毁不可读】**残段可辨主题：luyou 渠道 2026-10-17 用户告知的额度机制（intern key、K3/GLM 系 429 语义、pro 账号 '39640'/'58863'、K3 429≈pro 档 10-20 分钟内挤占）。该主题存活口径见下方「luyou/codely 池为每日共享额度制」行与 2026-10-22 资源盘点表；原文不可恢复，勿据本段派活。
 
 | 审计 | **首席深审 `GLM-5.3-FLASHX`**（codely pro 账号 39640，3.4s，**计费 1×（与 deepseek-flash 同价）**，池模型只能直选、不能做兜底）；**巡查 `Qwen/Qwen3.8-Flash-Next`**（ModelScope 免费池 0.6s）或 `a`agnes-2.5-flash``（免费 0.4s）；**第二席 `jw/kimi-k3-1`**（jiuwei，6/6 硬题，10× 成本；**2026-10-31 实测 403，派前先探活**）。apigoto `GLM-5.3-222` / `claude-haiku-5-5` 自 2026-10-22 起余额 0.1 元不可用。**2026-10-29 二次勘误**：`claude-haiku-5-5-ago-222` 探针可用（3.9s PONG，能跑只读审计并已产出完整报告），**但 0.1 元余额只够短任务**——同日子代理跑到 50 次工具调用 / 34 分钟、累计 5.32M tokens 时被 `429 Credits不足，账户余额 0.1 不足 1 元、无法自动兑换` 中止（退出码 1）。**结论：haiku 可用于探针与 10 分钟内的小审计，长审计必须选别的席位或先充值**；`go-claude-haiku-5-5` 路由始终 401 `Go requires a credential`（不可用）。**2026-10-30 三次勘误（apigoto 额度性质）**：apigoto **每天都有推广收益到账**，余额按天恢复、呈波动态——10-29 全天 429（余额 0.1 元），10-30 16:45 实测 `www.apigoto.com` 对 `deepseek-flash` 返回 200。所以"不可用"这类判定**只在当天有效**，跨天必须重测；另注意小写 `deepseek-flash` 由 apigoto 与 sensenova 同时声明，`match()` 先到先得 → 该请求实际由 apigoto 服务，**不是 52duck**（裸名 `deepseek-v4.1-flash` 又被 sensenova 抢，52duck 只能靠独占别名到达）。 | 双模型交叉审计；结论分歧时以代码证据裁决 |
@@ -188,7 +200,7 @@
 | `codely-core` | **glm-5.3** | **4×** | 质量更好但贵 4 倍，不要当默认 |
 | `GLM-5.3-FLASHX` / `glm-5.3-flash` | GLM-5.3 轻量档 | **1×** | **与 deepseek-flash 同价**，审计首席可放心用（2026-10-22 用户口径） |
 | `kimi-k3` | Kimi K3 | **10×** | 仅关键任务 |
-| `a`agnes-2.5-flash`` / `a`agnes-3.0-flash`` | Agnes | **免费（限时）** | 512K 上下文、10 RPM |
+| `a`agnes-2.5-flash`` / `a`agnes-3.0-flash`` | Agnes | **免费（限时）** | 512K 上下文、10 RPM。**2026-11-04 裁定：能力不足，退出兜底链与审计席**，仅限低风险短任务 |
 
 **实测可用面**（2026-10-22 逐项探测）：
 
@@ -283,12 +295,17 @@
 
 **角色映射（2026-10-22 起）**：
 
-- **编码手**：`a`agnes-2.5-flash``（默认，免费）→ `a`agnes-3.0-flash``（复杂任务，可开 Thinking）→ `codely-flash`（1×）
-- **审计首席**：`GLM-5.3-FLASHX`（4× 级，直选）｜**巡查**：`Qwen/Qwen3.8-Flash-Next` 或 `a`agnes-2.5-flash``（免费）｜**第二席**：`jw/kimi-k3-1`（10×）
+- **编码手**：`qwen3.8-flash-next-ms-222`（默认，1.8s 稳定）→ `amd-deepseek-v41-flash-222`（真 V4.1，并发易满需重试）→ `codely-flash`（1×）
+- **审计首席**：`GLM-5.3-FLASHX`（1× 级，直选）｜**巡查**：`Qwen/Qwen3.8-Flash-Next`（免费且质量可接受）｜**第二席**：`jw/kimi-k3-1`（10×，派前探活）
 - **长文/研究/多模态**：`gs/gemini-3.5-flash`（免费档）
-- **relay 兜底链（3 跳上限）**：DeepSeek/Qwen/GLM 系 → 同族 → `a`agnes-3.0-flash``（免费）→ `gs/gemini-3.5-flash`（免费）
+- **relay 兜底链（2026-11-04 起）**：`deepseek-flash` → **`amd/DeepSeek-V4.1-Flash`（真 V4.1，禁用 V4 顶替）** → `gs/gemini-3.5-flash` → 同族外部通道。**agnes 已全链移除**。
 
-**纪律**：免费额度（agnes 10 RPM、Gemini 日配额、魔粒 750/日、jiuwei 10 元）优先用于高价值任务；`codely-core`（4×）与 `kimi-k3`（10×）只在确有必要时用。
+**纪律（2026-11-04 修订）**：**质量优先于成本**——免费额度（Gemini 日配额、魔粒 750/日、jiuwei 10 元）优先用于高价值任务，但**前提是该模型能胜任**；`codely-core`（4×）与 `kimi-k3`（10×）只在确有必要时用。**不得因"免费"把能力不足的模型放进兜底链或审计席**（agnes 系即因此退出，见本节顶部裁定）。
+
+**AMD 池实测特性（2026-11-04）**：
+- **并发上限 32**，满了返回 `429 concurrency limit (32)`，需重试
+- **偶发坏响应**：`amd/GLM-5.3-Flash` 曾返回字面量字符串 `'None'`
+- **V4.1 与 V4 是独立条目**：`amd/DeepSeek-V4.1-Flash` → served `self-dploy/DeepSeek-V4.1-Flash`；`amd/DeepSeek-V4-Flash` → served `self-dploy/DeepSeek-V4-Flash`。**不得互相顶替**。
 
 
 ### 笔记本侧 AI 工具调用双路径（2026-10-20 用户裁定：**默认走本机**，两条路都留）
