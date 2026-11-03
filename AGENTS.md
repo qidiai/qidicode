@@ -337,8 +337,8 @@
 
 ## 11. 环境硬约束（本机实测，新会话必读）
 
-1. **本机无 `rg`**；内置 grep 工具在本环境 **100% 返空**（2026-10-19 全面测试实测：`fn main` 内置 0 vs `git grep` 89；根因链：Windows 构建不捆绑 rg（cf-shell/build.rs:43）+ PATH 无 rg 回落裸名（ripgrep.rs:99））→ **一律用 `git grep`**。⚠️ 2026-10-19 已修"静默" half（commit 45828f22：spawn 失败错误写入 stdout，不再伪装成"没有匹配"）——**但本机仍无 rg，grep 依旧不可搜索，只是现在会明说**；rg 捆绑根治（F2b 启动期探针/Windows 解捆）在批次 2
-2. **PowerShell 不支持 `&&`**（用 `;`）；控制台 GBK 中文乱码 → `Get-Content -Encoding UTF8`
+1. ~~**本机无 `rg`**；内置 grep 工具在本环境 **100% 返空**~~ → **2026-11-03 已修复**：`rg.exe` 装进 `%USERPROFILE%\.cargo\bin`（该目录在启动期 PATH 内，免重启），内置 grep **实测可用**（搜已跟踪文件 15 行、未跟踪文件 1 行，见 §13）。`git grep` 不再是唯一选择，但注意它**只搜已跟踪文件**——历史上多次误判（"某处没调用"）都源于此盲区，现在用内置 grep 可避免。根因归档：`cf-tools/build.rs` 在 `target_os == "windows"` 时**主动跳过捆绑**并注明 "Users install ripgrep separately"，`grep/ripgrep.rs:169` 运行时回落 PATH 裸名 `rg`。
+2. **PowerShell 不支持 `&&`**（用 `;`）；控制台 GBK 中文乱码 → `Get-Content -Encoding UTF8`。⚠️ **2026-11-03 起工具层 shell 已切换为 Git Bash**（`QIDI_SHELL=bash`，见 §13.2）——工具调用里跑的是 **bash 语法**（`&&`/管道/循环可用），不再是 PowerShell。仅当显式 `QIDI_SHELL=powershell` 时才用本条的 PS 规则。
 3. **禁止递归扫描**：`target/`、`mem-log/`、`tmp_relay/`、`9.22方案/scripts`、`C:\Users\ASUS\.qidi\sessions\`（1.9 万文件）——都会卡死。**会话压缩阈值实测（2026-10-20）**：默认 **85%**（`cf-shell/src/util/config/resolve/compaction.rs:2` `DEFAULT_AUTO_COMPACT_THRESHOLD_PERCENT`），优先级 env `QIDI_AUTO_COMPACT_THRESHOLD_PERCENT` > 用户 config `[model.<id>].auto_compact_threshold_percent` / `[session]` > 服务端下发 > 默认；**1M 窗口模型要到 ~85 万 token 才触发压缩**——大窗口下"一天不压缩"属预期（实测 973K 会话确实在越阈后自动压缩）；嫌晚可设 env=60 提前触发；`[skills].subagent_denied_skills` 是**显式替换**非合并（写配置=整体取代默认集）（按需小范围扫可以，全量递归必卡）；**会话归档用 junction 模式**（2026-10-20 首用）：7 天未活动的会话 `Move-Item` 到 `E:\qidi-sessions-archive\<项目>\` + 原位 `mklink /J` 回填——C 盘字节真释放且选择器/`/resume` 无感；归档包带 README+catalog（convention 见 `G:\qidi-sessions-archive\2026-09-18\`）；反向=删 junction（`rmdir` 纯联接勿加 /s）+ move 回
 4. `Format-Table` 输出有缓冲错位——重要判断以具体值/行号为准，勿凭表格位置
 5. `read_file` 只能读 workspace 内文件（C 盘日志用终端 `-Encoding UTF8` 读）
@@ -389,3 +389,54 @@
     $res = $cls.Create('<完整命令行>', '<工作目录>')   # ReturnValue=0 即成
     ```
     注意 `Invoke-CimMethod -MethodName Create` 在 PS 5.1 传 `ProcessStartupInformation` 会报"无法提供 .NET 类型 CimType"，**必须走 `[WMIClass]` 而非 CIM cmdlet**；WMI 创建的进程**继承不到当前 shell 的环境变量**，路径一律写绝对路径。**起可视 GUI 后的标准动作**：起 → `Start-Sleep 10` 探活 → **换一次新的工具调用再查一次**（跨调用存活才算真 Detached，同调用内探活无效）。同类已知坑三处：`QidiSeoulProxy` 计划任务、ai-bridge Hub 的 `Win32_Process.Create`、本条。给用户起浏览器时要用**独立数据目录且避开 `qidi-browser-*` 前缀**（不撞 F9 清理面），收尾只按自建目录名精确杀，勿按 `msedge.exe` 名字乱杀用户窗口
+
+---
+
+## 13. 工具链与 shell（2026-11-03，立项 v3，step-5 两轮审计通过）
+
+> 规格：`docs/tooling/2026-11-03-工具链修复立项.md`（v3，唯一真值）
+> 起因：2026-11-03 单会话实测 152 请求 / 6,026 万输入 / 输入输出比 **1257:1**，返工是主成本；返工主因是工具链缺陷。
+
+### 13.1 工具状态（2026-11-03 实测）
+
+| 状态 | 工具 | 说明 |
+|---|---|---|
+| ✅ 真可用 | `git` `gh` `python` `node` `cargo` `rustc` `tar` `tree` `ssh` `scp` `docker` `kubectl` | 裸名可调 |
+| ✅ **2026-11-03 新增** | `rg`（`.cargo\bin`）、`.shims` 20 件（jq/xxd/sha256sum/base64/sed/awk/diff/file/unzip/patch/perl/openssl/cygpath 等） | 需重启 qidi 后 `.shims` 生效 |
+| ⚠️ **别名陷阱** | `curl` 必须写 `curl.exe`；`wget` **根本不存在**（只有 PS 别名）；`bash` 裸名 → `C:\Windows\system32\bash.exe`（WSL，会卡住） | 见 13.3 |
+| ❌ 仍缺 | `fd` `sqlite3` `7z` `uv` `bat` `delta` | 非阻塞项 |
+
+**内置 `grep` 工具已恢复**（依赖 rg，2026-11-03 验证：搜已跟踪文件与未跟踪文件均正常）。此前长期返空，导致只能用 `git grep`——而 `git grep` **搜不到未跟踪文件**，这正是 2026-11-03 一次误判的根因。
+
+### 13.2 shell 选择
+
+`QIDI_SHELL` 环境变量可切换工具层 shell（`crates/codegen/cf-config/src/shell.rs:36-70`）：
+
+| 值 | 效果 |
+|---|---|
+| `bash` / `gitbash` / `git-bash` | Git Bash（已设；`bash -c` 不加载 profile，`bash -l` 的 PTY 路径会加载） |
+| `pwsh` | PowerShell 7 |
+| `powershell` | **powershell.exe**（注意：写 `powershell.exe` 带 `.exe` 会落进 unknown 分支） |
+| `cmd` / `cmd.exe` | cmd.exe |
+
+Git Bash 分支已预设 `MSYS_NO_PATHCONV=1` 与 `MSYS2_ARG_CONV_EXCL=*`（`shell.rs:363`），**Windows 路径不会被转换**。
+
+**为什么用 bash**：PS 5.1 不支持 `&&`、别名阴影严重（`curl`/`wget`）、双引号内 `$()` 会展开。这三类失败在 2026-11-03 会话中各出现约 10 次。
+
+### 13.3 已知坑（踩过才写）
+
+| 坑 | 现象 | 正确做法 |
+|---|---|---|
+| `bash` 裸名 | 落入 WSL 启动器，未装发行版时长时间等待 | 用全路径 `C:\Program Files\Git\bin\bash.exe`，或依赖 `QIDI_SHELL=bash` |
+| `curl` 别名 | 被 `Invoke-WebRequest` 遮蔽，参数不兼容 | 写 `curl.exe` |
+| `wget` | **全盘无 exe**，只有 PS 别名，行为完全不同 | 用 `curl.exe` 或 `Invoke-WebRequest` |
+| `setx PATH` | User PATH 已 1327 字符，`setx` 有 1024/2048 截断风险，**静默损坏** | 用 `[Environment]::SetEnvironmentVariable(...,'User')`，改前备份、改后回读校验 |
+| 整目录入 PATH | 会把 `link.exe` 带进来，**cargo 链接直接失败且难定位** | 只用精选 `.shims`，排除 `link/find/sort/tar/gzip/ssh` |
+| 子进程环境变量 | 改系统/用户环境变量后，**运行中的进程看不到**（继承启动期环境块） | 需重启进程；免重启只能用**已在启动期 PATH 内**的目录（如 `.cargo\bin`） |
+
+### 13.4 回滚
+
+- `rg`：删 `%USERPROFILE%\.cargo\bin\rg.exe` 即可（无需重启）
+- `.shims`：删目录 + 从 User PATH 移除该项（需重启生效）
+- `QIDI_SHELL`：`[Environment]::SetEnvironmentVariable('QIDI_SHELL',$null,'User')`（需重启生效）
+- PATH 备份：`%USERPROFILE%\path-backup-*.txt`
