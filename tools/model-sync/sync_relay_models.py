@@ -198,7 +198,18 @@ def cmd_add(args) -> int:
         log("注意：未指定 --ctx，新条目按 128K 记；已知窗口更长的请用 --ctx 覆盖")
 
     existing_models = {str(c.get("model")) for c in entries.values()}
-    missing = [m for m in remote["models"] if m not in existing_models and m in catalog]
+    # 审计 D12：去重必须同时按「模型名」和「将生成的条目 ID」全量核对。
+    # 早版只扫指向 relay 的条目（entries），于是模型名已存在于**非 relay 条目**
+    # （如直连 apigoto 的同名条目）时被误判为 missing，生成同 ID 写入 → TOML
+    # 重复键、整份 config.toml 语法崩坏。真实案例：claude-sonnet-5-5-222 已指向
+    # apigoto 直连，同步 xq 时撞名。
+    existing_ids = set((cfg.get("model") or {}).keys())
+    candidates = [m for m in remote["models"] if m not in existing_models and m in catalog]
+    missing = [m for m in candidates if (m + args.suffix) not in existing_ids]
+    id_clash = [m for m in candidates if (m + args.suffix) in existing_ids]
+    if id_clash:
+        log("跳过（条目 ID 已被非 %s 条目占用，避免 TOML 重复键）：%s"
+            % (args.relay, ", ".join("%s -> %s" % (m, m + args.suffix) for m in id_clash)))
     skipped = [m for m in remote["models"] if m not in catalog]
 
     log("provider %s：中转登记 %d，本地已覆盖 %d，待新增 %d"

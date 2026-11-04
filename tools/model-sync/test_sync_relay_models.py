@@ -98,9 +98,52 @@ def test_add_is_idempotent():
     return tmp
 
 
+def test_add_skips_id_taken_by_non_relay_entry():
+    """D12：模型名已存在于**非 relay 条目**时，不得生成同 ID（TOML 重复键）。
+
+    真实案例：claude-sonnet-5-5-222 指向 apigoto 直连，同步 xq 时
+    裸名去重漏判 → 写入同 ID → 整份 config.toml 语法崩坏。
+    """
+    tmp = tempfile.mkdtemp()
+    path = os.path.join(tmp, "config.toml")
+    io.open(path, "w", encoding="utf-8", newline="\n").write(
+        '[model."alive-222"]\n'
+        'model = "alive"\n'
+        'base_url = "https://relay.test/v1"\n'
+        'api_key = "k"\n'
+        'group = "intern"\n'
+        "context_window = 131072\n"
+        "\n"
+        '[model."claude-sonnet-5-5-222"]\n'
+        'model = "claude-sonnet-5-5"\n'
+        'base_url = "https://www.apigoto.com/v1"\n'   # 非 relay
+        'api_key = "k"\n'
+        'group = "apigoto"\n'
+        "context_window = 200000\n"
+    )
+    before = keys(path)
+    m.fetch_catalog = lambda relay, key, timeout=30: {"claude-sonnet-5-5", "claude-opus-5-5"}
+    m.cmd_add(ns(path, models="claude-sonnet-5-5,claude-opus-5-5"))
+    after = keys(path)
+    check("撞名条目未被重复生成（D12）", "claude-sonnet-5-5-222" in after and len(after) == len(before) + 1,
+          "%s -> %s" % (before, after))
+    check("不撞名的正常新增", "claude-opus-5-5-222" in after, str(after))
+    # 关键：写出来的文件必须仍是合法 TOML
+    try:
+        tomllib.load(open(path, "rb"))
+        ok = True
+        detail = ""
+    except Exception as e:  # noqa: BLE001
+        ok = False
+        detail = str(e)
+    check("写入后 config.toml 仍是合法 TOML（D12）", ok, detail)
+    return tmp
+
+
 if __name__ == "__main__":
     test_prune_restore_roundtrip()
     test_add_is_idempotent()
+    test_add_skips_id_taken_by_non_relay_entry()
     print()
     print("FAILED:", FAILS if FAILS else "none")
     sys.exit(1 if FAILS else 0)
