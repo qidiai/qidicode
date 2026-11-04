@@ -125,34 +125,42 @@ relay 日志出现：POST https://<上游host>/v1/chat/completions "HTTP/1.1 200
 
 ---
 
-## 五、现有 provider 清单（21 个，2026-11-01 快照 / `sudo python3 /tmp/list.py` 实测）
+## 五、现有 provider 清单（**27 个**，2026-11-04 快照 / `all_providers()` 实测）
+
+> 上一版是 2026-11-01 的 21 个快照，**已严重过期**（modelscope 37→18；agnes / gs / dimleap / jiuwei /
+> apigoto 等已停用）。本表以实测为准，复现命令见 §十。
 
 | # | provider | 上游 host | 模型数 | 别名数 | enabled | media | 备注 |
 |---|---|---|---|---|---|---|---|
-| 1 | `amd` | developer.amd.com.cn | 15 | 15 | True | - | 2026-10-31 接入；别名 `amd/*`；**上游当日 500/502，待厂商修复** |
-| 2 | `kimi-ai` | api.kimi.com/coding/v1 | 6 | 6 | True | False | Kimi **Code** 订阅线（`sk-kimi-*`）；实测仅 `kimi-for-coding` / `k3-256k` 200，其余 403 套餐档位 |
-| 3 | `modelscope` | api-inference.modelscope.cn | 37 | 0 | True | - | 魔粒池，每日 00:00 恢复 |
-| 4 | `52duck` | api.52duck.cn | 2 | 0 | True | - | **登记名与上游不一致**：登记 `Deepseek-flash`/`GLM-5.2`，该 key 实际只服务 `deepseek-v4.1-flash`（需别名，见 §八） |
-| 5 | `stepplan` | api.stepfun.com | 5 | 0 | **False** | - | 阶跃 Step Plan |
-| 6 | `openscale` | api.openscale.so | 8 | 0 | True | - | 声明 `deepseek-v4.1-flash`、`z-ai/glm-5.3-flash`（抢同名） |
-| 7 | `antling` | api.ant-ling.com | 5 | 0 | True | - | |
-| 8 | `apigoto` | www.apigoto.com | 20 | 0 | True | - | **每日推广收益到账、余额按天波动**；欠费日整批 429；抢 `deepseek-flash`/`glm-5.3` |
+| 1 | `amd` | developer.amd.com.cn | 15 | 15 | True | - | 别名 `amd/*`；并发上限 32（实测曾报 108）；V4.1 与 V4 独立不得互顶（§6.2） |
+| 2 | `kimi-ai` | api.kimi.com | 6 | 6 | True | - | Kimi **Code** 订阅线（`sk-kimi-*`） |
+| 3 | `modelscope` | api-inference.modelscope.cn | 18 | 0 | True | - | 魔粒池，每日 00:00 恢复 |
+| 4 | `52duck` | api.52duck.cn | 1 | 0 | True | - | **登记名与上游不一致**：登记 `Deepseek-flash`，该 key 实际只服务 `deepseek-v4.1-flash` |
+| 5 | `stepplan` | api.stepfun.com | 2 | 0 | True | - | 阶跃 Step Plan |
+| 6 | `openscale` | api.openscale.so | 6 | 0 | **False** | - | 曾抢 `deepseek-v4.1-flash`、`z-ai/glm-5.3-flash` |
+| 7 | `antling` | api.ant-ling.com | 5 | 0 | **False** | - | |
+| 8 | `apigoto` | www.apigoto.com | 20 | 0 | **False** | - | **每日推广收益到账、余额按天波动**；欠费日整批 429 |
 | 9 | `openrouter` | openrouter.ai | 3 | 0 | True | - | |
-| 10 | `sensenova` | token.sensenova.cn | 7 | 0 | True | - | tpm/rpm 滑动窗限流；抢 `deepseek-v4-flash`、`glm-5.2`、`deepseek-v4.1-flash` |
+| 10 | `sensenova` | token.sensenova.cn | 8 | 0 | True | - | tpm/rpm 滑动窗限流 |
 | 11 | `stepfun` | api.stepfun.com | 3 | 0 | **False** | - | |
-| 12 | `agnes` | api.agnes-ai.cn | 7 | 0 | True | **True** | 免费档 512K；图像/视频也已开通（受 media 闸门控制） |
-| 13 | `intern` | discovery-api.intern-ai.org.cn | 6 | 2 | True | - | 月额度；抢 `kimi-k2.6`、`deepseek-v4-flash-0731`、`deepseek-v4-pro-0813` |
-| 14 | `opencode` | 127.0.0.1:4096 | 11 | 0 | True | - | 本机 |
+| 12 | `agnes` | api.agnes-ai.cn | 7 | 0 | **False** | - | **已停用**（用户裁定：能力不足会造成信息污染，见 §6.1） |
+| 13 | `intern` | discovery-api.intern-ai.org.cn | 13 | 2 | True | - | 月额度，月初恢复 |
+| 14 | `opencode` | 127.0.0.1:4096 | 11 | 0 | True | - | 本机 serve 桥 |
 | 15 | `npu` | 127.0.0.1:18765 | 1 | 0 | True | - | 自建 NPU 端点 |
-| 16 | `opencode-go` | opencode.ai | 4 | 38 | True | - | **全部 401 `Go requires a credential`（不可用）** |
-| 17 | `gs` | generativelanguage.googleapis.com | 14 | 14 | True | - | Google，经首尔 SOCKS 出口 |
-| 18 | `jiuwei` | jiuweiapi.top | 5 | 5 | True | - | `jw/*` 别名 |
-| 19 | `unisound` | maas-api.unisound.com | 1 | 0 | True | - | 仅 `u2-flash` 有权限 |
-| 20 | `lyrouter` | api.lyrouter.com | 27 | 0 | True | **False** | 在表尾 → 同名被前面抢；媒体闸门关 |
-| 21 | `dimleap` | api.dimleap.cn | 18 | 12 | True | False | 2026-10-31 接入；**免费额度站**；18 个模型是用户裁剪后的口径（勿恢复 43 个）；`dimleap/*` 别名 |
+| 16 | `opencode-go` | opencode.ai | 4 | 38 | **False** | - | 全部 401 `Go requires a credential`（不可用） |
+| 17 | `gs` | generativelanguage.googleapis.com | 14 | 14 | **False** | - | **已停用**（用户 2026-11-04 决定）；经首尔 SOCKS 出口；兜底链引用已清（§6.4） |
+| 18 | `jiuwei` | jiuweiapi.top | 5 | 5 | **False** | - | `jw/*` 别名 |
+| 19 | `unisound` | maas-api.unisound.com | 5 | 0 | True | - | |
+| 20 | `lyrouter` | api.lyrouter.com | 9 | 0 | True | **False** | 媒体闸门关 |
+| 21 | `dimleap` | api.dimleap.cn | 18 | 12 | **False** | False | 免费额度站；18 模型是用户裁剪口径（勿恢复 43 个） |
+| 22 | `r4` | api.r4.codes | 5 | 5 | True | - | 声明裸名 `claude-opus-5`、`claude-sonnet-5`（**与 xq 撞名，见 §6.6**） |
+| 23 | `tierflow` | tierflow.cn | 3 | 0 | **False** | - | |
+| 24 | `smtell` | coding.smtell.com | 1 | 0 | True | - | |
+| 25 | `atria` | api.atria-asi.ai | 1 | 0 | **False** | - | |
+| 26 | `zynk` | free.zynk.bot.cd | 8 | 8 | **False** | - | |
+| 27 | **`xq`** | **xiaoqiai.xyz** | **31** | **31** | **True** | **False** | **2026-11-04 接入**；纯 Claude 31 模型；`xq/*` 别名；见 §6.6 |
 
 ---
-
 ## 六、兜底、冷却与注水检测
 
 - **触发兜底的状态**：`401/402/403/429/503`（`routes/proxy.py:3201`）；**最多 3 跳**（`_MAX_FALLBACK_DEPTH = 3`）。
@@ -285,6 +293,56 @@ relay 对空 content 有处理（`EMPTY_COOLDOWN_S = 30`，`routes/proxy.py:2327
 
 ---
 
+### 6.6 2026-11-04 接入 `xq`（xiaoqiai.xyz，纯 Claude 31 模型）
+
+**来源**：用户提供站点与 key（`xq-` 前缀，label `xq-main`），要求"claude 的模型"。
+
+**配置**（追加在 `providers` **末尾**，第 27 位）：
+
+| 字段 | 值 |
+|---|---|
+| `base_url` | `https://xiaoqiai.xyz/v1` |
+| `models` | 31 个（`claude-haiku-4-5` ~ `claude-sonnet-5-thinking`，含 `-thinking` 变体与连字符/点号双写法） |
+| `model_aliases` | 31 个，统一 `xq/<原名>` |
+| `enabled` | `true` |
+| `media_enabled` | `false` |
+
+**为什么必须追加在末尾**：`match()`（`proxy_core/providers.py:518`）按 provider **字典序先到先得**返回第一个声明该模型的**启用** provider。
+站点有 2 个模型与已启用的 `r4` 撞名（`claude-opus-5`、`claude-sonnet-5`）。把 `xq` 放在 `r4` 之后：
+
+| 请求名 | 命中 | 说明 |
+|---|---|---|
+| 裸名 `claude-opus-5` / `claude-sonnet-5` | **r4** | 与接入前一致，**行为零变化** |
+| 裸名 `claude-opus-5-5` / `claude-haiku-5-5` 等其余 29 个 | **xq** | 新增可达 |
+| `xq/claude-opus-5` / `xq/claude-sonnet-5` | **xq** | 显式指定，绕过 r4 |
+
+**验证**（成本受控：`/v1/models` 免费；chat 只打 4 发 `max_tokens=8` 的 ping）：
+
+| 检查 | 结果 |
+|---|---|
+| 结构校验 | 仅新增 `xq` 一个 provider，其余 26 个与其余顶层键**逐字节未动**；provider 顺序 = 原序 + `xq` |
+| 路由裁决（本地 `match()`，零成本） | 上表三行全部符合预期 |
+| 端到端（经中转） | `xq/claude-haiku-5-5` → **200**，`served=claude-haiku-5-5`，content `Pong.` |
+| 服务 | `systemctl is-active` = `active`，**未重启**（mtime 热加载） |
+
+**备份**：`/opt/codely-relay/config.json.bak-20261104-231038`（root:root 0600）。
+**回滚**：`sudo cp /opt/codely-relay/config.json.bak-20261104-231038 /opt/codely-relay/config.json`。
+
+**上游特性（实测，勿再重复大测试——用户明确要求成本受控）**：
+- **按模型波动，不是按 key**：同一把 key，`claude-haiku-5-5` 200，而 `claude-haiku-4-5` 返 `502 All available accounts exhausted`、
+  `claude-sonnet-4-5` 返 `502 Upstream stream ended without a response`。**这是上游账号池对个别模型临时耗尽，重试或换模型即可，不是 key 失效。**
+- 排障时先换一个模型再判 key 生死，别一遇 502 就判通道死亡。
+
+**意外收获**：本机 `~/.qidi/config.toml` 原有三个 Claude 条目（`claude-opus-5-5-222` / `claude-opus-4-7-222` / `claude-sonnet-4-6-222`，
+均指向 luyou）在接入前**没有任何启用的 provider 声明这些裸名 → 404 不可达**；接入 `xq` 后三者自动恢复可达。
+
+**待办**：`~/.qidi/config.toml` 尚未同步这 31 个模型（下拉框选不到）。
+工具：`python tools/model-sync/sync_relay_models.py add --provider xq --group xq --from-ssh ubuntu@111.231.166.204 --ctx 200000 --apply`
+（干跑显示待新增 28 条，已有 3 条被去重）。**注意**：该工具按裸名生成条目，
+`claude-opus-5` / `claude-sonnet-5` 两条会落到 r4 而非 xq——若要显式走 xq，需把这两条的 `model` 改成 `xq/` 前缀。
+
+---
+
 ## 七、排障速查（错误码 → 真实含义 → 处置）
 
 | 现象 | 真实含义 | 处置 |
@@ -328,6 +386,7 @@ relay 对空 content 有处理（`EMPTY_COOLDOWN_S = 30`，`routes/proxy.py:2327
 | **2026-11-04** | **兜底链重构**：`agnes-3.0-flash` 从全部 **12 条** `model_fallbacks` 移除（用户裁定：能力不足会造成信息污染），替换为 amd 同族真模型（DeepSeek→`amd/DeepSeek-V4.1-Flash`、Qwen→`amd/Qwen3.8-27B`、GLM→`amd/GLM-5.3-Flash`）。备份 `/tmp/config.json.bak-fb-20261104-043605`。同时记录 AMD 池三项特性（并发上限 32 / 偶发坏响应 / V4.1 与 V4 不得互相顶替）与推理模型 `max_tokens` 陷阱（见 §6.1–6.3） |
 | **2026-11-04（晚）** | **清除停用 provider 的兜底链残留引用**：用户停用 `gs` 后仍报 `no usable credential for provider 'gs'`——根因是 9 条链仍以 `gs/gemini-3.5-flash` 为跳点（禁用不停引用）。从 9 条链移除该跳，`providers.gs` 禁用状态与 14 模型目录未动；失效引用 12 个禁用 provider 逐一核对后归零。备份 `config.json.bak-20261104-171525`，mtime 热加载未重启。新增「兜底链完整性自检」命令（§十）与 §6.4 事故记录 |
 | **2026-11-04（深夜）** | **deepseek-v4.1 系兜底链收敛为单一 amd 真模型**（用户裁定「兜底链 amd 的模型 deepseek-v4.1-flash 不要用假模型代替」）：三条链（`deepseek-ai/DeepSeek-V4.1-Flash-1017`、`deepseek-flash`、裸名 `deepseek-ai/DeepSeek-V4.1-Flash`）统一改为 `['amd/DeepSeek-V4.1-Flash']`，清掉含 V4 假模型在内的全部其余跳点。备份 `config.json.bak-20261104-174344`。详见 §6.5 |
+| **2026-11-04（更晚）** | **接入 `xq`（xiaoqiai.xyz，纯 Claude 31 模型 + `xq/*` 别名）**：追加在 `providers` 末尾以避开与 `r4` 的 `claude-opus-5`/`claude-sonnet-5` 撞名（`match()` 字典序先到先得，裸名仍归 r4，行为零变化）。端到端 `xq/claude-haiku-5-5` 200。**顺带修复**本机 config.toml 三个原有 Claude 条目（`claude-opus-5-5`/`claude-opus-4-7`/`claude-sonnet-4-6` 此前 404 不可达）。上游按模型波动（同 key 有的 200、有的 502 账号池耗尽），勿因一次 502 判 key 失效。同时**校正 §五 provider 清单**（21→27，原 11-01 快照已严重过期）。备份 `config.json.bak-20261104-231038`。详见 §6.6 |
 
 ---
 
