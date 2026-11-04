@@ -247,6 +247,42 @@ relay 对空 content 有处理（`EMPTY_COOLDOWN_S = 30`，`routes/proxy.py:2327
 > 禁用是"关闭一扇门"，兜底链是"写在纸上的路线"——门关了，路线还在，走到尽头就是静默死亡。
 > 每次 `enabled=false` 都应当作一次配置变更的**一半**，另一半是清引用。
 
+### 6.5 2026-11-04 deepseek-v4.1 系兜底链收敛为单一 amd 真模型
+
+**裁定（用户原话）**：「兜底链 amd 的模型 deepseek-v4.1-flash 不要用假模型代替」
+——兜底链里 amd 的那个模型就是 `deepseek-v4.1-flash`，**除此以外任何跳点都是"用假模型代替"，全部清掉**。
+
+**背景**：§6.1 那次重构把 `agnes-3.0-flash` 换成了 `amd/DeepSeek-V4.1-Flash`（这一步是对的，且验证过是真 V4.1 而非 V4 顶替），
+但**其他跳点原样留在链里**——`deepseek-flash`、`gs/gemini-3.5-flash`、`deepseek/deepseek-v4.1-flash-1017`、
+以及 `Deepseek-v4-flash`（**这是 V4，正是"假模型顶替"的典型**）。用户随后停用 gs，这些残留跳点立刻变成死跳（见 §6.4）。
+
+**改动**（三条链统一收敛为单一跳 `['amd/DeepSeek-V4.1-Flash']`）：
+
+| 链 | 改前 | 改后 |
+|---|---|---|
+| `deepseek-ai/DeepSeek-V4.1-Flash-1017` | `['deepseek-flash', 'amd/DeepSeek-V4.1-Flash', 'deepseek/deepseek-v4.1-flash-1017']` | `['amd/DeepSeek-V4.1-Flash']` |
+| `deepseek-flash` | `['Deepseek-v4-flash', 'amd/DeepSeek-V4.1-Flash']` | `['amd/DeepSeek-V4.1-Flash']` |
+| `deepseek-ai/DeepSeek-V4.1-Flash`（裸名） | `['deepseek-flash', 'Deepseek-v4-flash', 'deepseek/deepseek-chat']` | `['amd/DeepSeek-V4.1-Flash']` |
+
+**验证**：
+- 结构化校验：仅上述 3 条链变化，其余 24 条链与 `providers` 逐字节未动
+- 功能实测：`deepseek-ai/DeepSeek-V4.1-Flash-1017` → 200（served `self-dploy/DeepSeek-V4.1-Flash`，首次 429 并发限流属可重试）；
+  `deepseek-flash` → 200 ×2
+- 完整性自检：失效引用 0；`systemctl is-active` = `active`（未重启）
+
+**备份**：`/opt/codely-relay/config.json.bak-20261104-174344`（root:root 0600）。
+**回滚**：`sudo cp /opt/codely-relay/config.json.bak-20261104-174344 /opt/codely-relay/config.json`（热加载生效）。
+
+**遗留观测（非本次引入，未处理）**：裸名 `deepseek-ai/DeepSeek-V4.1-Flash` 虽在 `providers.modelscope.models` 中声明且该 provider 启用，
+直连却返回 `400 Model id : deepseek-ai/DeepSeek-V4.1-Flash , has no provider supported`。
+本机 `~/.qidi/config.toml` **未引用该裸名**（只用 `-1017` 后缀与 `deepseek-v4.1-flash`），故无实际影响；
+`providers` 段经结构化校验证明本次未改动，该现象为改动前既有。
+
+**纪律补充**：
+> 「兜底只留同族真模型」要落到**链的每一跳**上，不能只落在"替换掉那个坏的那一跳"。
+> 换掉一个坏跳点 ≠ 链干净了——剩下的跳点仍然是"你没指定过的模型"，仍然是静默降级面。
+> 用户说"不要用假模型代替"时，含义是**整条链只准有那一个真模型**。
+
 ---
 
 ## 七、排障速查（错误码 → 真实含义 → 处置）
@@ -291,6 +327,7 @@ relay 对空 content 有处理（`EMPTY_COOLDOWN_S = 30`，`routes/proxy.py:2327
 | 2026-11-01 | **修复"空 models 通道不可见"**（`providers.py:440` 去掉 `and models`，备份 `providers.py.bak-fixA-20261031`）；接入 `kimi-ai`（Kimi Code 线）与 `amd`（15 模型 + `amd/*` 别名）；`dimleap` 启用于用户裁剪后的 18 模型；provider 总数 19 → 21 |
 | **2026-11-04** | **兜底链重构**：`agnes-3.0-flash` 从全部 **12 条** `model_fallbacks` 移除（用户裁定：能力不足会造成信息污染），替换为 amd 同族真模型（DeepSeek→`amd/DeepSeek-V4.1-Flash`、Qwen→`amd/Qwen3.8-27B`、GLM→`amd/GLM-5.3-Flash`）。备份 `/tmp/config.json.bak-fb-20261104-043605`。同时记录 AMD 池三项特性（并发上限 32 / 偶发坏响应 / V4.1 与 V4 不得互相顶替）与推理模型 `max_tokens` 陷阱（见 §6.1–6.3） |
 | **2026-11-04（晚）** | **清除停用 provider 的兜底链残留引用**：用户停用 `gs` 后仍报 `no usable credential for provider 'gs'`——根因是 9 条链仍以 `gs/gemini-3.5-flash` 为跳点（禁用不停引用）。从 9 条链移除该跳，`providers.gs` 禁用状态与 14 模型目录未动；失效引用 12 个禁用 provider 逐一核对后归零。备份 `config.json.bak-20261104-171525`，mtime 热加载未重启。新增「兜底链完整性自检」命令（§十）与 §6.4 事故记录 |
+| **2026-11-04（深夜）** | **deepseek-v4.1 系兜底链收敛为单一 amd 真模型**（用户裁定「兜底链 amd 的模型 deepseek-v4.1-flash 不要用假模型代替」）：三条链（`deepseek-ai/DeepSeek-V4.1-Flash-1017`、`deepseek-flash`、裸名 `deepseek-ai/DeepSeek-V4.1-Flash`）统一改为 `['amd/DeepSeek-V4.1-Flash']`，清掉含 V4 假模型在内的全部其余跳点。备份 `config.json.bak-20261104-174344`。详见 §6.5 |
 
 ---
 
