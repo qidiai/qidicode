@@ -157,7 +157,8 @@ relay 日志出现：POST https://<上游host>/v1/chat/completions "HTTP/1.1 200
 
 - **触发兜底的状态**：`401/402/403/429/503`（`routes/proxy.py:3201`）；**最多 3 跳**（`_MAX_FALLBACK_DEPTH = 3`）。
 - **`model_fallbacks` 现有 27 条**，形如：
-  `Qwen/Qwen3.8-Flash-Next -> ['Qwen/Qwen3.8-27B', 'amd/Qwen3.8-27B', 'gs/gemini-3.5-flash']`。
+  `Qwen/Qwen3.8-Flash-Next -> ['Qwen/Qwen3.8-27B', 'amd/Qwen3.8-27B']`。
+  （2026-11-04 后已无 `gs/*` 跳点，见 §6.4。）
 - **跨族兜底的风险（实际发生过两次）**：编码手任务在 `deepseek-flash` 429 后被兜到 `agnes-3.0-flash`（免费档）跑了 4 轮工具调用，最后撞上 `gs/gemini-3.5-flash` 接不住 `tools` 载荷（400）整链失败。**派编码任务时，目标模型不要配跨族兜底，宁可响亮失败。**
 
 ### 6.1 2026-11-04 兜底链重构（用户裁定：agnes 能力不足，会造成信息污染）
@@ -213,6 +214,39 @@ relay 对空 content 有处理（`EMPTY_COOLDOWN_S = 30`，`routes/proxy.py:2327
   - 常量：`EMPTY_COOLDOWN_S = 30`（空响应）、`ERROR_COOLDOWN_S = 60`（5xx）、`QUOTA_COOLDOWN_S = 600`（配额耗尽）
   - 冷却状态落盘 `cooldowns.json`（provider 级），`saved_at` 字段可判断快照时间
 
+### 6.4 2026-11-04 停用 provider 后兜底链静默死亡（"停掉了还总是出错"）
+
+**现象**：用户把云端 `gs` 停掉后，长任务编码手仍然报错：
+`API error (status 400): proxy_upstream_error: upstream returned 400 for model 'gs/gemini-3.5-flash'`，
+`--debug-file` 抓到更底层的一条：`status_code=503 error="proxy_upstream_error: no usable credential for provider 'gs'"`。
+
+**根因**：`providers.gs.enabled = false` 只停用了供应商本身，**不会**把 `model_fallbacks` 里指向它的跳点摘掉。
+当时 27 条链里有 **9 条**仍以 `gs/gemini-3.5-flash` 为其中一跳。链条只有在**前置跳点失败时**才会走到 gs
+（amd 并发打满 429、sensenova 配额冷却 503 等），所以：
+
+| 疑点 | 解释 |
+|---|---|
+| 为什么"换什么模型 slug 都一样" | 问题不在模型，在链；9 条链覆盖了 deepseek/Qwen/GLM/MiniMax/Step 全族 |
+| 为什么是间歇的 | 主跳点成功时根本走不到 gs；只有主跳点失败才暴露 |
+| 为什么停用了还报错 | 停用 ≠ 移除引用，链走到该跳即"无可用凭据"当场死亡 |
+| 为什么整条请求死而不是降级 | 该跳是链尾或链中最后一跳，走完即返回致命错误，客户端 `is_retryable=false` |
+
+**处置**：从 9 条链移除 `gs/gemini-3.5-flash` 这一跳，**未动 `providers.gs` 的禁用状态**（停用是用户有意的）。
+`providers.gs.models` 的 14 个条目原样保留（那是 provider 目录，不是兜底链）。
+
+**验证**：
+- 结构化审计：全库**被引用但 provider 已禁用的目标 = 0**（12 个禁用 provider 逐一核对）
+- 功能实测：`deepseek-flash` 从"gs 凭据致命错误"变为"amd 429 可重试限流"——链条到 amd 即结束，证明 gs 已不在链中
+- 服务 `systemctl is-active qidi-relay` = `active`，未重启（mtime 热加载）
+
+**备份**：`/opt/codely-relay/config.json.bak-20261104-171525`（root:root 0600，改前完整配置）。
+**回滚**：`sudo cp /opt/codely-relay/config.json.bak-20261104-171525 /opt/codely-relay/config.json`（热加载生效）。
+
+**教训（写入纪律）**：
+> **停用任何 provider 后，必须同步审计 `model_fallbacks` 的引用。**
+> 禁用是"关闭一扇门"，兜底链是"写在纸上的路线"——门关了，路线还在，走到尽头就是静默死亡。
+> 每次 `enabled=false` 都应当作一次配置变更的**一半**，另一半是清引用。
+
 ---
 
 ## 七、排障速查（错误码 → 真实含义 → 处置）
@@ -256,6 +290,7 @@ relay 对空 content 有处理（`EMPTY_COOLDOWN_S = 30`，`routes/proxy.py:2327
 | 2026-10-31 | 接入 `dimleap`（43 个 chat：31 真名 + 12 独占别名，含 `dimleap/glm-5.3`、`glm-5.3-flash`）；`enabled=false` 等 key；24 个媒体模型未登记（闸门） |
 | 2026-11-01 | **修复"空 models 通道不可见"**（`providers.py:440` 去掉 `and models`，备份 `providers.py.bak-fixA-20261031`）；接入 `kimi-ai`（Kimi Code 线）与 `amd`（15 模型 + `amd/*` 别名）；`dimleap` 启用于用户裁剪后的 18 模型；provider 总数 19 → 21 |
 | **2026-11-04** | **兜底链重构**：`agnes-3.0-flash` 从全部 **12 条** `model_fallbacks` 移除（用户裁定：能力不足会造成信息污染），替换为 amd 同族真模型（DeepSeek→`amd/DeepSeek-V4.1-Flash`、Qwen→`amd/Qwen3.8-27B`、GLM→`amd/GLM-5.3-Flash`）。备份 `/tmp/config.json.bak-fb-20261104-043605`。同时记录 AMD 池三项特性（并发上限 32 / 偶发坏响应 / V4.1 与 V4 不得互相顶替）与推理模型 `max_tokens` 陷阱（见 §6.1–6.3） |
+| **2026-11-04（晚）** | **清除停用 provider 的兜底链残留引用**：用户停用 `gs` 后仍报 `no usable credential for provider 'gs'`——根因是 9 条链仍以 `gs/gemini-3.5-flash` 为跳点（禁用不停引用）。从 9 条链移除该跳，`providers.gs` 禁用状态与 14 模型目录未动；失效引用 12 个禁用 provider 逐一核对后归零。备份 `config.json.bak-20261104-171525`，mtime 热加载未重启。新增「兜底链完整性自检」命令（§十）与 §6.4 事故记录 |
 
 ---
 
@@ -265,6 +300,15 @@ relay 对空 content 有处理（`EMPTY_COOLDOWN_S = 30`，`routes/proxy.py:2327
 # 结构自检
 sudo python3 -c "import json;c=json.load(open('/opt/codely-relay/config.json'));\
 print(len(c['providers']),'providers');[print(k,len(v.get('models',[])),len(v.get('model_aliases',{})),v.get('enabled',True)) for k,v in c['providers'].items()]"
+
+# 兜底链完整性自检（停用 provider 后必跑；输出"失效引用 0"才算干净）
+sudo python3 -c "
+import json,re
+c=json.load(open('/opt/codely-relay/config.json'))
+off={n for n,p in c['providers'].items() if p.get('enabled') is False}
+bad=[t for k,v in c['model_fallbacks'].items() for t in (v if isinstance(v,list) else [v])
+     if re.match(r'^([^/]+)/',str(t)) and re.match(r'^([^/]+)/',str(t)).group(1) in off]
+print('禁用 providers:',sorted(off)); print('失效引用:',bad or 0)"
 
 # 某模型会落到哪个 provider（不真的发请求）
 sudo python3 -c "
