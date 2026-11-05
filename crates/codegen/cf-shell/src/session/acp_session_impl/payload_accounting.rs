@@ -1090,9 +1090,9 @@ mod tests {
     }
 
     /// 黄金钉死：固定 ASCII 组装 → 逐 section 精确字节/估算（断言带 section 名）。
-    /// 常量为 serde 实测钉死（2026-10-18 校准轮，全部机器实证）：
+    /// 字节为 serde 实测（2026-10-18）；token 于 2026-11-05 按校准公式重算：
     /// items: [System(41B), AGENTS(106B), User(55B), ToolResult(59B), Assistant(35B)]
-    /// tools: ToolSpec{"t1","abcd",{"a":1}} → 55B / 2 tok（serde 实测）
+    /// tools: ToolSpec{"t1","abcd",{"a":1}} → 55B / 3 tok（逐段 floor 0+1+2）
     /// 残差 = 数组框架（2 括号 + 4 逗号 = 6B）——证明分账无重叠无遗漏。
     #[test]
     fn golden_full_partition_exact_bytes_and_tokens() {
@@ -1107,27 +1107,29 @@ mod tests {
         let obs = observe(SessionKind::Main, "tap-golden", &items, &tools);
         let s = &obs.sections;
         assert_eq!(s.system_prompt_static.bytes, 41, "systemPromptStatic bytes");
-        assert_eq!(s.system_prompt_static.est_tokens, 2, "systemPromptStatic estTokens (11 ascii bytes / 4)");
+        assert_eq!(s.system_prompt_static.est_tokens, 3, "systemPromptStatic estTokens (floor(11*10/34)=3)");
         assert_eq!(s.system_prompt_dynamic_memory.bytes, 0, "systemPromptDynamicMemory bytes");
+        assert_eq!(s.system_prompt_dynamic_memory.est_tokens, 0, "systemPromptDynamicMemory estTokens");
         assert_eq!(s.agents_md.bytes, 106, "agentsMd bytes (serde 实测)");
-        assert_eq!(s.agents_md.est_tokens, 2, "agentsMd estTokens");
+        assert_eq!(s.agents_md.est_tokens, 3, "agentsMd estTokens (floor(11*10/34)=3)");
         assert_eq!(s.builtin_tool_defs.bytes, 55, "builtinToolDefs bytes (serde 实测)");
-        assert_eq!(s.builtin_tool_defs.est_tokens, 2, "builtinToolDefs estTokens (shared estimate_tool_spec_tokens caliber, serde 实测)");
+        assert_eq!(s.builtin_tool_defs.est_tokens, 3, "builtinToolDefs estTokens (shared estimate_tool_spec_tokens: 0+1+2)");
         assert_eq!(s.builtin_tool_defs.tool_count, 1, "builtinToolDefs toolCount");
         assert!(s.builtin_tool_defs.hosted_tools.is_none(), "hostedTools absent when empty");
         assert_eq!(s.conversation_history.bytes, 149, "conversationHistory bytes (55+59+35, serde 实测)");
         assert_eq!(s.conversation_history.item_count, 3, "conversationHistory itemCount");
+        assert_eq!(s.conversation_history.est_tokens, 1, "conversationHistory estTokens (0+1+0)");
         assert_eq!(s.unattributed_residual.bytes, 6, "unattributedResidual bytes = JSON array framing only");
         assert_eq!(s.unattributed_residual.est_tokens, 1, "unattributedResidual estTokens (6/4)");
         // 透镜：近 5 条 TR（本例 1 条）。
         assert_eq!(obs.lenses.recent5_tool_results.bytes, 59, "recent5ToolResults bytes");
-        // R10.5 对称修复后无图例不变：est_tokens 仍纯 content（4 ascii bytes / 4）。
-        assert_eq!(obs.lenses.recent5_tool_results.est_tokens, 1, "recent5ToolResults estTokens (content-only TR, no images)");
+        // R10.5 对称修复后无图例不变：est_tokens 仍纯 content。
+        assert_eq!(obs.lenses.recent5_tool_results.est_tokens, 1, "recent5ToolResults estTokens (floor(4*10/34)=1, no images)");
         assert_eq!(obs.lenses.recent5_tool_results.tool_result_count, 1, "recent5ToolResults count");
         assert_eq!(obs.lenses.recent5_tool_results.total_tool_results, 1, "totalToolResults");
         assert_eq!(obs.lenses.attachments.image_count, 0, "attachments images");
         // Σ（分区行含 hosted/residual）= est_total。
-        assert_eq!(obs.est_total_tokens(), 8, "estTotalTokens sum (2+0+2+2+1+1)");
+        assert_eq!(obs.est_total_tokens(), 11, "estTotalTokens sum (3+0+3+3+1+1)");
         // session-kind 标签（P1-4）。
         assert_eq!(obs.session_kind, "main", "sessionKind tag");
     }
@@ -1140,9 +1142,11 @@ mod tests {
         let s = &obs.sections;
         // wire = {"type":"system","content":"base<memory-context>mem</memory-context>"} = 70B（serde 实测）
         assert_eq!(s.system_prompt_static.bytes, 34, "systemPromptStatic bytes = wire(70) - block(36)");
-        assert_eq!(s.system_prompt_static.est_tokens, 1, "systemPromptStatic estTokens (4 ascii bytes / 4)");
+        assert_eq!(s.system_prompt_static.est_tokens, 1, "systemPromptStatic estTokens (floor(4*10/34)=1)");
         assert_eq!(s.system_prompt_dynamic_memory.bytes, 36, "systemPromptDynamicMemory bytes = block text");
-        assert_eq!(s.system_prompt_dynamic_memory.est_tokens, 9, "systemPromptDynamicMemory estTokens (36/4)");
+        assert_eq!(s.system_prompt_dynamic_memory.est_tokens, 10, "systemPromptDynamicMemory estTokens (floor(36*10/34)=10)");
+        assert_eq!(s.unattributed_residual.est_tokens, 0, "unattributedResidual estTokens (2/4=0)");
+        assert_eq!(obs.est_total_tokens(), 11, "estTotalTokens sum (1+10+0+0+0+0)");
         // 分账无遗漏：static + memory + 框架 = wire 总量。
         assert_eq!(
             s.system_prompt_static.bytes + s.system_prompt_dynamic_memory.bytes

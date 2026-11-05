@@ -469,7 +469,7 @@ impl ChatStateHandle {
         .ok_or(())
     }
 
-    /// `total_tokens` plus bytes/4 estimate of tool results pushed since the
+    /// `total_tokens` plus character-aware estimate of conversation items pushed since the
     /// last model response. Used by `check_preflight_overflow`.
     pub async fn get_estimated_total_tokens(&self) -> u64 {
         self.query("GetEstimatedTotalTokens", |reply| {
@@ -479,7 +479,7 @@ impl ChatStateHandle {
         .unwrap_or(0)
     }
 
-    /// Bytes/4 estimate of all non-system conversation items.
+    /// Character-aware estimate of all non-system conversation items.
     pub async fn get_estimated_messages_tokens(&self) -> u64 {
         self.query("GetEstimatedMessagesTokens", |reply| {
             ChatStateCommand::GetEstimatedMessagesTokens { reply }

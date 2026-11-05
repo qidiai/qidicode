@@ -106,7 +106,8 @@ const RECAP_BUDGET_HEADROOM_TOKENS: u64 = 4_000;
 
 /// Budget-aware variant of [`build_recap_items`]. Best-effort: returns a
 /// structurally-valid, non-empty request trimmed to the estimated prompt budget
-/// (the same bytes/4 estimator compaction triggers on) to prevent
+/// (the same character-aware estimator compaction triggers on: 3.4 ASCII
+/// chars/token, 4/5 token per CJK character) to prevent
 /// `ic_400_prompt_too_long` on long sessions. Not an absolute guarantee — a
 /// degenerate tiny window, an oversized retained `System` prefix, or estimator
 /// optimism can still exceed the real limit (the 85% + headroom + 500k cap make

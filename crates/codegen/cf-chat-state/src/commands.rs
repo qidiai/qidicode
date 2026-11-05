@@ -271,10 +271,10 @@ pub enum ChatStateCommand {
         reply: oneshot::Sender<crate::usage::UsageLedger>,
     },
 
-    /// `total_tokens` + bytes/4 delta from tool results since last model response.
+    /// `total_tokens` + character-aware delta from conversation items since last model response.
     GetEstimatedTotalTokens { reply: oneshot::Sender<u64> },
 
-    /// Bytes/4 estimate of all non-system conversation items.
+    /// Character-aware estimate of all non-system conversation items.
     GetEstimatedMessagesTokens { reply: oneshot::Sender<u64> },
 
     /// Get sampling config.

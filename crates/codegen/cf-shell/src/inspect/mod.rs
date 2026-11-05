@@ -509,8 +509,8 @@ async fn list_instructions(cwd: &Path) -> Vec<InstructionFile> {
                 size_bytes: size,
                 // P0-1 口径统一：指令文件（含中文密集的 AGENTS.md）的
                 // approx_tokens 与 /context、system_prompt 同走字符感知
-                // 估算，bytes/4 对中文内容会高估 ~13-50%；纯 ASCII 文件
-                // 两式恒等，显示值不变。display-only，无决策影响。
+                // 估算：ASCII 为 3.4 字符/token，CJK 为 4/5 token/字；
+                // 两者均不再与旧 bytes/4 口径恒等。display-only，无决策影响。
                 approx_tokens: estimate_tokens_aware(&c.content) as usize,
                 path: c.file_path,
                 scope,

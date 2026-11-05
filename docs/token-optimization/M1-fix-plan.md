@@ -178,17 +178,20 @@ pub fn estimate_tokens_aware(s: &str) -> u64 {
 | 逐项 MAPE 16% | 两常数混排互补 | 单条可偏 20%+ | 对外只声称"聚合层"；根治靠 M2 |
 | 非 DeepSeek 词表 | GLM/Kimi/Qwen 未标定 | 方向未知 | 只声称 DeepSeek 系 |
 
-**直接消费方（21 处，`git grep estimate_tokens_aware` 实测）**：
+**直接消费方（原 21 处 + cf-sampler 12 处 = 33 处）**：
 
 | 文件 | 行 | 方向 |
 |---|---|---|
-| `cf-chat-state/src/actor/state.rs` | 28,54,55,56,70,77,85,87,92,95,103（**11 处**） | 用量↑ → 压缩更早 |
+| `cf-chat-state/src/actor/state.rs` | 27,53,54,55,70,77,85,87,92,95,103（**11 处**） | 用量↑ → 压缩更早 |
 | `cf-shell/src/inspect/mod.rs` | 514（+import :21） | `/context` 显示↑ |
-| `cf-shell/.../payload_accounting.rs` | 505,509,608,613,851,1185,1200（**7 处**） | 计量↑、preflight 判**趋严** |
+| `cf-shell/.../payload_accounting.rs` | 505,509,611,616,854,1192,1207（**7 处**） | 计量↑、preflight 判**趋严** |
 | `cf-shell/src/session/acp_types.rs` | 421,432（**2 处**） | ACP 上报↑ |
+| `cf-sampler/src/actor/request_task.rs` | 957,965,973,977,982,986,991,999,1000,1001,1007,1011（**12 处**） | 截断回退的 prompt/output 镜像估算↑，budget-boost stop-loss 更保守 |
 
 **间接消费方（经 `estimate_item_tokens` / `get_estimated_total_tokens`，本单同样受影响）**：
-`mutations.rs:137,172`（`estimated_tokens_since_model` 累加——正是 preflight 的数据源）、`compaction_utils.rs:132,141,145,185`、`cf-shell/session/compaction.rs:307`、`payload_accounting.rs:515,521,538,547,561,1186`、`session_recap.rs:136,792,796`、`two_pass.rs:130`。方向全部同向（估算↑、判定趋严）。
+`mutations.rs`（`estimated_tokens_since_model` 累加——正是 preflight 的数据源）、`compaction_utils.rs`（fit/truncate 预算）、`cf-shell/session/compaction.rs`（压缩触发与 preflight）、`payload_accounting.rs`（分账与图片计量）、`session_recap.rs`（recap 预算与边界构造）、`two_pass.rs`（two-pass 预算）。此处按文件与函数语义登记，不把已漂移的历史行号当作派工坐标；方向全部同向（估算↑、判定趋严）。
+
+**阈值行为消费方**：`cf-shell/src/agent/subagent/mod.rs:1169,1318` 经 `estimate_conversation_tokens` 驱动 fork/resume 的 80% 上下文窗口阈值。估算↑会使 oversize fork 更早从 verbatim 回退到摘要，也会使超大 resume 更早进入显式拒绝分支；这是本常数变更已声明的行为变化面，验收必须覆盖 cf-shell 全量测试。
 
 ---
 
@@ -199,10 +202,11 @@ pub fn estimate_tokens_aware(s: &str) -> u64 {
 3. `cargo test -p cf-chat-state --lib` 全绿（含 §3.2 A **10 处** + B **11 处** = ≥21 处；若还有清单外红灯，按 §3.0 规则重算）。
 4. `cargo test -p cf-shell --lib` 全绿（按 AGENTS.md §12 现行口径：**跳过 17 项**、`CARGO_PROFILE_TEST_DEBUG='0'` + C 盘热 target，基线 5630 passed / 0 failed / 7 ignored；含 §3.3 inspect 1 处 + §3.4 session_recap 1 处）。
 5. `cargo check --workspace` 0 error。
-6. 离线复算（**仅标定机可跑**，语料不入库）：`python target/tmp/token-calib/impl_ratio.py corpus_strat2.jsonl tokenizer_v41.json` → **0.9811 ± 0.005**。
-7. 出 exe 后：同一会话 `/context` 百分比**上升**；压缩触发点**提前**（约 89% → 约 85%）。**方向是"提前"**。
+6. `cargo test -p cf-sampler` 全绿，覆盖 `request_task.rs` 的截断回退镜像估算器。
+7. 离线复算（**仅标定机可跑**，语料不入库）：`python target/tmp/token-calib/impl_ratio.py corpus_strat2.jsonl tokenizer_v41.json` → **0.9811 ± 0.005**。
+8. 出 exe 后：同一会话 `/context` 百分比**上升**；压缩触发点**提前**（约 89% → 约 85%）。**方向是"提前"**。
 
-> **闸 2 的范围声明（五轮审计建议）**：上述门只覆盖 3 个受影响 crate（cf-token-estimation / cf-chat-state / cf-shell）。**cf-pager 等其它 crate 与集成测试不在门内**（4+1 轮审计与 §5 消费方地图均未发现那里钉了估算值，但未穷举）。派工前加一条廉价兜底：
+> **闸 2 的范围声明（五轮审计建议，2026-11-05 补入 cf-sampler）**：上述门覆盖 4 个受影响 crate（cf-token-estimation / cf-chat-state / cf-shell / cf-sampler）。**cf-pager 等其它 crate 与集成测试不在门内**（4+1 轮审计与 §5 消费方地图均未发现那里钉了估算值，但未穷举）。派工前加一条廉价兜底：
 > `git grep -nE "estimate_tokens_aware|estimate_item_tokens|get_estimated_total_tokens|101_000|40_000|4_000" -- crates/codegen/cf-pager crates/codegen/cf-tools`（红线才处理，无命中即记录"已扫无命中"）。
 
 ---
@@ -212,7 +216,7 @@ pub fn estimate_tokens_aware(s: &str) -> u64 {
 | 风险 | 说明 | 缓解 |
 |---|---|---|
 | 压缩更早触发 | 估算变准 → 同量内容显示更高 → 可能多一次摘要 | 修正方向；发布说明；观察一周成本 |
-| 连带断言（**已定位 28 处 / 5 文件，剩余靠全量跑绿 + 规则兜底**） | `lib.rs` 5(+1 新增) + `state.rs` 10 + `tests.rs` 11 + `inspect` 1 + `session_recap` 1 | §3 已给逐个新值；§3.0 双闸；§6-3/6-4 三 crate 覆盖 |
+| 连带断言（**已定位 28 处 / 5 文件，剩余靠全量跑绿 + 规则兜底**） | `lib.rs` 5(+1 新增) + `state.rs` 10 + `tests.rs` 11 + `inspect` 1 + `session_recap` 1 | §3 已给逐个新值；§3.0 双闸；§6-1/6-3/6-4/6-6 四 crate 覆盖 |
 | 观感"用得变快了" | 显示口径变化 | 帮助文案注明 |
 | preflight 更早报溢出 | 计量趋严 | 安全方向；误报先查 double-count |
 | **回滚** | 纯常数 + 测试 + 夹具 | `git revert` 单提交；**已核实无持久化旧口径**（`estimated_tokens_since_model`/`total_tokens` 皆为内存派生，`ChatState::new` 从原文重算） |
