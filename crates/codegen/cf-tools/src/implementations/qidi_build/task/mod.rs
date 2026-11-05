@@ -161,14 +161,11 @@ impl cf_tool_runtime::Tool for TaskTool {
             )));
         }
 
-        // Treat blank/empty/"null" resume_from as absent (models sometimes emit these).
-        let resume_from = input.resume_from.and_then(|s| {
-            let trimmed = s.trim();
-            is_valid_resume_id(trimmed).then(|| trimmed.to_string())
-        });
+        // Treat blank/empty/"null" resume_from as absent and strip stray quotes.
+        let resume_from = input.resume_from.as_deref().and_then(sanitize_quoted_arg);
 
         // Model overrides are soft-ignored on resume (source model is always pinned).
-        let model = cf_tool_types::sanitize_optional_arg(input.model);
+        let model = input.model.as_deref().and_then(sanitize_quoted_arg);
         let model = if resume_from.is_some() {
             if let Some(ref ignored) = model {
                 tracing::debug!(
@@ -2437,6 +2434,86 @@ mod tests {
             .await
             .unwrap();
         handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn model_quote_variants_are_sanitized() {
+        for (raw, case) in [
+            ("\"test-model", "unmatched leading quote"),
+            ("test-model\"", "unmatched trailing quote"),
+            ("\"test-model\"", "matched quotes"),
+            ("`test-model`", "backticks"),
+            ("\"  test-model  \"", "whitespace inside quotes"),
+        ] {
+            let (backend, mut rx) = make_backend();
+            let resources = resources_for_task(backend);
+            let shared = resources.into_shared();
+            let handle = tokio::spawn(async move {
+                let request = unwrap_spawn(rx.recv().await.unwrap());
+                assert_eq!(
+                    request.runtime_overrides.model.as_deref(),
+                    Some("test-model"),
+                    "{case} must be sanitized before model validation"
+                );
+                request
+                    .result_tx
+                    .send(SubagentResult {
+                        success: true,
+                        output: "ok".into(),
+                        subagent_id: request.id.clone(),
+                        child_session_id: request.id.clone(),
+                        ..Default::default()
+                    })
+                    .unwrap();
+            });
+
+            let mut input = task_input("general-purpose", false);
+            input.model = Some(raw.into());
+            let _ = cf_tool_runtime::Tool::run(&TaskTool, test_ctx(shared), input)
+                .await
+                .unwrap_or_else(|e| panic!("{case} should not fail: {e}"));
+            handle.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn resume_from_quote_variants_are_sanitized() {
+        for (raw, case) in [
+            ("\"prev-id", "unmatched leading quote"),
+            ("prev-id\"", "unmatched trailing quote"),
+            ("\"prev-id\"", "matched quotes"),
+            ("`prev-id`", "backticks"),
+            ("\"  prev-id  \"", "whitespace inside quotes"),
+        ] {
+            let (backend, mut rx) = make_backend();
+            let resources = resources_for_task(backend);
+            let shared = resources.into_shared();
+            let handle = tokio::spawn(async move {
+                let request = unwrap_spawn(rx.recv().await.unwrap());
+                assert_eq!(
+                    request.resume_from.as_deref(),
+                    Some("prev-id"),
+                    "{case} must be sanitized before resume dispatch"
+                );
+                request
+                    .result_tx
+                    .send(SubagentResult {
+                        success: true,
+                        output: "resumed".into(),
+                        subagent_id: request.id.clone(),
+                        child_session_id: request.id.clone(),
+                        ..Default::default()
+                    })
+                    .unwrap();
+            });
+
+            let mut input = task_input("general-purpose", false);
+            input.resume_from = Some(raw.into());
+            let _ = cf_tool_runtime::Tool::run(&TaskTool, test_ctx(shared), input)
+                .await
+                .unwrap_or_else(|e| panic!("{case} should not fail: {e}"));
+            handle.await.unwrap();
+        }
     }
 
     #[tokio::test]

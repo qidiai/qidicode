@@ -194,7 +194,7 @@ fn recover_truncated_tail_unit(
 }
 /// Truncate one item's content text to at most `max_tokens`, appending a `[... truncated N bytes ...]` marker (structural fields kept).
 fn truncate_item_to_tokens(item: ConversationItem, max_tokens: u64) -> ConversationItem {
-    let max_bytes = (max_tokens as usize).saturating_mul(4);
+    let max_bytes = cf_token_estimation::estimate_chars_aware(max_tokens) as usize;
     match item {
         ConversationItem::ToolResult(mut t) => {
             if let Some(s) = truncate_text_to_bytes(&t.content, max_bytes) {
@@ -3571,6 +3571,11 @@ The user asked to read main.rs and lib.rs. main.rs prints hello world, lib.rs ha
             ConversationItem::Assistant(a) => {
                 assert!(a.content.contains("truncated"));
                 assert!(a.content.len() < huge.len());
+                assert!(
+                    cf_token_estimation::estimate_tokens_aware(&a.content) <= 100,
+                    "calibrated truncation must not exceed the 100-token ASCII budget: {:?}",
+                    a.content
+                );
             }
             other => panic!("expected truncated trailing assistant, got {other:?}"),
         }

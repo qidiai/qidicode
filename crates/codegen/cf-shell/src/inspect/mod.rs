@@ -1969,14 +1969,18 @@ mod tests {
 
     /// `list_instructions` must size instruction files with the
     /// character-aware estimator (P0-1 口径统一): Chinese-heavy
-    /// AGENTS.md gets the CJK 3/5 ratio instead of the raw bytes/4
-    /// over-estimate; pure-ASCII content is identical under both
-    /// formulas, so existing display values for ASCII files are
-    /// unchanged. Display-only surface — no decision reads it.
+    /// AGENTS.md gets the CJK 4/5 ratio (0.8 token per 字) instead of
+    /// bytes/4, which reports only 3 bytes x 1/4 = 0.75 token per 字 for
+    /// the 3-byte UTF-8 encoding and therefore under-counts it. ASCII is
+    /// **not** identical under the two formulas either: the aware
+    /// estimator runs at ~3.4 chars/token while bytes/4 stays at 4.0, so
+    /// ASCII display values move up with the new rate (see
+    /// `estimate_tokens_aware`'s "diverges" note). Display-only surface —
+    /// no decision reads it.
     #[tokio::test]
     async fn list_instructions_approx_tokens_is_cjk_aware() {
-        // 200 CJK chars -> 600 UTF-8 bytes; aware = ceil(200*3/5)
-        // = 120 tokens, bytes/4 would report 150.
+        // 200 CJK chars -> 600 UTF-8 bytes; aware = ceil(200*4/5)
+        // = 160 tokens, bytes/4 still reports 600/4 = 150.
         let zh = "你好世界".repeat(50);
         let cwd = tempfile::tempdir().unwrap();
         std::fs::write(cwd.path().join("AGENTS.md"), &zh).unwrap();
@@ -1998,8 +2002,9 @@ mod tests {
             "approx_tokens must use the CJK-aware estimator, not bytes/4"
         );
         assert!(
-            entry.approx_tokens < cf_token_estimation::estimate_tokens(&zh) as usize,
-            "aware estimate must under-cut the bytes/4 over-estimate for CJK"
+            entry.approx_tokens > cf_token_estimation::estimate_tokens(&zh) as usize,
+            "at the calibrated CJK rate (4/5 token per 字) the aware estimate is \
+             above the bytes/4 figure, which under-counts CJK"
         );
     }
 }

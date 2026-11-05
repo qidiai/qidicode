@@ -287,6 +287,29 @@ pub fn stream_chat_completions<'a>(
         }
 
         // ── Build the final response ─────────────────────────────────
+        // Diagnostics only, emitted before the accumulator is consumed: one
+        // `debug` line per tool-call index describing what actually got
+        // assembled. `args_len` is the byte length of the argument buffer
+        // built from the deltas above. This is the sampler-side ground truth
+        // for a "parallel tool calls, the first one is truncated" report —
+        // if the length is short HERE the bytes were already lost upstream
+        // (transport / SSE re-framing), and if it is complete the loss is
+        // downstream of this transform. Only lengths are logged (never the
+        // payload): this line is meant to be on for every turn, and the full
+        // argument bodies already travel with `Completed`. Observation only:
+        // `tool_call_acc` is read, never modified, and the log is emitted
+        // before it is consumed.
+        for (index, (id, name, args)) in &tool_call_acc {
+            tracing::debug!(
+                request_id = %request_id,
+                tool_index = *index,
+                tool_name = %name,
+                call_id = %id,
+                args_len = args.len(),
+                "chat_completions: tool call accumulated at stream end"
+            );
+        }
+
         let tool_calls: Vec<ToolCall> = tool_call_acc
             .into_values()
             .map(|(id, name, arguments)| ToolCall {
@@ -960,6 +983,82 @@ mod tests {
                     calls[0].arguments.as_ref(),
                     "{\"x\":1}",
                     "leading empty fragment must not clobber real fragments"
+                );
+            }
+            other => panic!("expected Completed, got {other:?}"),
+        }
+    }
+
+    /// Regression for the "parallel tool calls, the first one's arguments come
+    /// out truncated" report: `ToolCallDelta::index` is `#[serde(default)]`, so
+    /// a provider that OMITS it on a parallel call's opening delta lands that
+    /// call in bucket 0, while its later argument fragment — which DOES carry
+    /// `index: 1` — opens bucket 1. Two properties are pinned here:
+    ///
+    /// 1. Bucketing is strictly positional (by the wire `index`); the
+    ///    accumulator never re-routes by id, so a mismatch surfaces as an
+    ///    `id`/`name`-less call rather than as silent corruption.
+    /// 2. No fragment is ever dropped or truncated — the assembled bytes always
+    ///    equal the sum of the deltas. A truncated-arguments report therefore
+    ///    cannot originate in this accumulator; look upstream (transport / SSE
+    ///    re-framing) for the bytes that went missing.
+    #[tokio::test]
+    async fn missing_index_defaults_to_zero_and_fragments_are_never_dropped() {
+        // Deserialized from raw JSON with no `index` key at all, so the serde
+        // default (not the test fixture) is what routes this delta into bucket 0.
+        let index_less: ChunkToolCallDelta = serde_json::from_str(
+            r#"{"id":"call_b","type":"function","function":{"name":"tool_b","arguments":"{\"j\":"}}"#,
+        )
+        .expect("index must be optional on the wire");
+        assert_eq!(index_less.index, 0, "absent index must default to 0");
+
+        let chunks: Vec<Result<ChatCompletionChunk, SamplingError>> = vec![
+            Ok(tool_chunk(vec![
+                tool_delta(
+                    0,
+                    Some("call_a"),
+                    Some("function"),
+                    Some("tool_a"),
+                    Some("{\"i\":"),
+                ),
+                index_less,
+            ])),
+            Ok(tool_chunk(vec![
+                tool_delta(0, None, None, None, Some("0}")),
+                // The continuation that belongs to `call_b`, addressed by index.
+                tool_delta(1, None, None, None, Some("1}")),
+            ])),
+            Ok(final_chunk(FinishReason::ToolCalls)),
+        ];
+        let raw = stream::iter(chunks).boxed();
+        let events = collect(stream_chat_completions(
+            raw,
+            None,
+            rid(),
+            Duration::from_secs(60),
+        ))
+        .await;
+
+        match events.last().unwrap() {
+            SamplingEvent::Completed { response, .. } => {
+                let calls = response.tool_calls();
+                assert_eq!(calls.len(), 2, "one positional bucket per wire index");
+
+                // Bucket 0: call_a, plus the index-less opening of call_b.
+                assert_eq!(calls[0].id.as_ref(), "call_a");
+                assert_eq!(calls[0].name, "tool_a");
+                assert_eq!(calls[0].arguments.as_ref(), "{\"i\":{\"j\":0}");
+
+                // Bucket 1: only the index-1 fragment, so no id and no name.
+                assert_eq!(calls[1].id.as_ref(), "");
+                assert_eq!(calls[1].name, "");
+                assert_eq!(calls[1].arguments.as_ref(), "1}");
+
+                let total_args_bytes: usize = calls.iter().map(|c| c.arguments.len()).sum();
+                assert_eq!(
+                    total_args_bytes,
+                    "{\"i\":".len() + "{\"j\":".len() + "0}".len() + "1}".len(),
+                    "accumulation must be lossless: every delta byte is kept"
                 );
             }
             other => panic!("expected Completed, got {other:?}"),

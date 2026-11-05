@@ -209,11 +209,11 @@ pub(crate) async fn handle_subagent_request(
             "Role prompt_file degraded, continuing without role prompt"
         );
     }
-    let resume_source = if let Some(resume_id) = request
+    request.resume_from = request
         .resume_from
         .as_deref()
-        .filter(|s| is_valid_resume_id(s))
-    {
+        .and_then(sanitize_quoted_arg);
+    let resume_source = if let Some(resume_id) = request.resume_from.as_deref() {
         let coord = coordinator.borrow();
         if coord.is_active(resume_id) {
             let msg = format!(

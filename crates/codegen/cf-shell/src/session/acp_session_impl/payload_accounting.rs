@@ -593,8 +593,11 @@ pub(crate) fn observe_payload(input: ObserveInputs<'_>) -> TapObservation {
             b
         })
         .sum();
-    // hosted defs 为纯 JSON（ASCII 为主），token 估算按 bytes/4——与
-    // estimate_tokens_aware 的 ASCII 恒等（同口径，离线校准器后续接）。
+    // hosted defs 为纯 JSON（ASCII 为主），token 估算沿用 bytes/4
+    // （BYTES_PER_TOKEN，与其余字节分账同口径）。注意：这**不再**与
+    // estimate_tokens_aware 的 ASCII 速率恒等——后者已校准为
+    // 3.4 字符/token（10/34，floor），bytes/4 是 4.0 字符/token，
+    // 两口径对本项会给出不同数值；此处保持 BYTES_PER_TOKEN 不变。
     let hosted_tokens = hosted_bytes / BYTES_PER_TOKEN;
 
     // ── 残差：items 线上总量 − Σ分账字节（满分类学下 ≈ 数组框架字节） ──

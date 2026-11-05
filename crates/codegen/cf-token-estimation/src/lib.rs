@@ -4,6 +4,13 @@
 //! derived-display arithmetic that `/context`, `/session-info`, the auto-compact
 //! gates, the preflight overflow check, and every client renderer use to talk
 //! about context-window usage.
+//!
+//! Two rates live here, on purpose:
+//! - the legacy bytes/4 heuristic ([`estimate_tokens`] / [`estimate_chars`] /
+//!   [`BYTES_PER_TOKEN`]), kept uncalibrated for truncation and budget callers;
+//! - the calibrated character-aware estimate ([`estimate_tokens_aware`]:
+//!   3.4 ASCII chars/token + 4/5 token per CJK character), which the context
+//!   usage display and the compact/preflight gates use.
 
 /// Bytes per token under the rough character-based heuristic.
 pub const BYTES_PER_TOKEN: u64 = 4;
@@ -18,19 +25,50 @@ pub fn estimate_tokens(s: &str) -> u64 {
     (s.len() as u64) / BYTES_PER_TOKEN
 }
 
+/// Numerator of the per-ASCII-character token ratio used by
+/// [`estimate_tokens_aware`]: `ASCII_TOKEN_NUMERATOR /
+/// ASCII_TOKEN_DENOMINATOR` tokens per ASCII character = 10/34 ≈ 0.294
+/// token/char, i.e. **3.4 ASCII characters per token** (floored).
+///
+/// Calibrated against the official DeepSeek V4.1 vocabulary: the real
+/// ASCII workload (tool output / JSON / code / markdown) tokenizes at
+/// ~3.1 chars/token, and the stratified calibration corpus (40 sessions,
+/// 6,376 items, 3.91M reference tokens) showed the old bytes/4 (4
+/// chars/token) figure under-reporting the aggregate by ~18% (measured
+/// estimate/reference = 0.819). 3.4 is deliberately on the
+/// conservative (higher-token) side of the measured ASCII band:
+/// 宁可高估（早压缩）不可低估（溢出）, per token-optimization plan §6
+/// gate 4. Exposed as a constant so the ratio can be re-tuned against a
+/// real tokenizer without touching call sites.
+///
+/// Note: [`BYTES_PER_TOKEN`] / [`estimate_tokens`] / [`estimate_chars`]
+/// are **not** calibrated and keep the raw 4-bytes-per-token contract
+/// for their own callers (read_file truncation, web_fetch budgets,
+/// tool-definition sizing, base64 counting).
+pub const ASCII_TOKEN_NUMERATOR: u64 = 10;
+
+/// Denominator of the per-ASCII-character token ratio
+/// ([`ASCII_TOKEN_NUMERATOR`] / `ASCII_TOKEN_DENOMINATOR` tokens per
+/// ASCII character). See [`ASCII_TOKEN_NUMERATOR`] for the calibration
+/// rationale.
+pub const ASCII_TOKEN_DENOMINATOR: u64 = 34;
+
 /// Numerator of the per-CJK-character token ratio used by
 /// [`estimate_tokens_aware`]: each CJK character counts as
-/// `CJK_TOKEN_NUMERATOR / CJK_TOKEN_DENOMINATOR` tokens.
+/// `CJK_TOKEN_NUMERATOR / CJK_TOKEN_DENOMINATOR` tokens = 4/5 = 0.8
+/// token/字 (ceiling of the aggregate).
 ///
-/// Measured Chinese text tokenizes at roughly 0.5–0.6 token/字, while
-/// UTF-8 encodes those characters at 3 bytes each — so the plain
-/// bytes/4 heuristic over-estimates Chinese by ~30–50% (token
-/// optimization plan §5-1). We take 3/5 = 0.6, the conservative
-/// (higher) end of the measured band:宁可高估（早压缩）不可低估
-/// （溢出）, per plan §6 gate 4. Exposed as a constant so the ratio
+/// Calibrated jointly with [`ASCII_TOKEN_NUMERATOR`]: with ASCII at 3.4
+/// chars/token, 4/5 is the CJK rate that pulls the stratified-corpus
+/// aggregate estimate/reference ratio from 0.819 to ~0.981. Pure-Chinese
+/// text on its own measures lower (~0.57 token/字), but Chinese rarely
+/// appears without the ASCII scaffolding it is priced against, and the
+/// old 3/5 (0.6) left the mixed-content aggregate 18% short. Erring high
+/// keeps the compact/preflight gates on the safe side (宁可高估（早压缩）
+/// 不可低估（溢出）, plan §6 gate 4). Exposed as a constant so the ratio
 /// can be re-tuned against a real tokenizer without touching call
 /// sites.
-pub const CJK_TOKEN_NUMERATOR: u64 = 3;
+pub const CJK_TOKEN_NUMERATOR: u64 = 4;
 
 /// Denominator of the per-CJK-character token ratio
 /// ([`CJK_TOKEN_NUMERATOR`] / [`CJK_TOKEN_DENOMINATOR`] tokens per
@@ -52,30 +90,39 @@ fn is_cjk(c: char) -> bool {
     )
 }
 
-/// Character-aware token estimate: ASCII bytes at [`BYTES_PER_TOKEN`],
-/// CJK characters at [`CJK_TOKEN_NUMERATOR`] / [`CJK_TOKEN_DENOMINATOR`]
-/// tokens each (ceiling of the aggregate), and every other non-ASCII
+/// Character-aware token estimate: ASCII characters at
+/// [`ASCII_TOKEN_NUMERATOR`] / [`ASCII_TOKEN_DENOMINATOR`] tokens each
+/// (≈3.4 chars/token, floor of the aggregate), CJK characters at
+/// [`CJK_TOKEN_NUMERATOR`] / [`CJK_TOKEN_DENOMINATOR`] tokens each
+/// (≈0.8 token/字, ceiling of the aggregate), and every other non-ASCII
 /// byte at [`BYTES_PER_TOKEN`].
 ///
-/// Formula: `ascii_len / 4 + ceil(cjk_chars * 3 / 5) + other_bytes / 4`.
+/// Formula: `floor(ascii_len * 10 / 34) + ceil(cjk_chars * 4 / 5) +
+/// other_bytes / 4`.
 ///
 /// The bytes/4 heuristic ([`estimate_tokens`]) assumes 4 bytes per
-/// token, but a CJK character costs 3 UTF-8 bytes while tokenizing at
-/// ~0.5–0.6 tokens/字， so bytes/4 over-counts Chinese text by
-/// ~30–50%. This variant splits the string into ASCII / CJK / other
-/// and applies the appropriate rate to each class; pure-ASCII input
-/// yields exactly the same value as [`estimate_tokens`] for a single
-/// string, so ASCII-only callers see no change at the string level.
-/// The equality is per string: callers that fold the estimate over
-/// several segments (such as `estimate_item_tokens` in cf-chat-state,
-/// which sums per user text part, per assistant content and per
-/// tool-call arguments) floor each ASCII/other-bytes segment
-/// separately and ceil each CJK segment separately, so a
-/// multi-segment item can land up to (segments − 1) tokens below
-/// the old merged Σbytes/4 figure only via its ASCII/other-bytes
-/// segments (pure ASCII included) — CJK segments ceil per segment
-/// and only aggregate upward (conservative), pinned by the
-/// multi-part CJK test in cf-chat-state.
+/// token. Measured against the official DeepSeek V4.1 vocabulary the
+/// real ASCII workload — tool output, JSON, code, markdown — runs at
+/// ~3.1–3.4 characters per token, so bytes/4 **under**-counts it by
+/// ~18%; on the stratified calibration corpus (3.91M reference tokens)
+/// the old estimate covered only 0.819 of the truth, which is what
+/// pushed the auto-compact gate from its configured threshold up to
+/// ~89–93% of the real window. This variant splits the string into
+/// ASCII / CJK / other and applies the calibrated rate to each class,
+/// landing the same corpus at ~0.981.
+///
+/// It therefore **diverges** from [`estimate_tokens`] for ASCII input
+/// (3.4 vs 4 chars/token). That is deliberate: `estimate_tokens` /
+/// [`estimate_chars`] keep the raw bytes/4 contract for their own
+/// callers (read_file truncation, web_fetch budgets, tool-definition
+/// sizing, base64 counting) — only this function is calibrated.
+///
+/// Callers that fold the estimate over several segments (such as
+/// `estimate_item_tokens` in cf-chat-state, which sums per user text
+/// part, per assistant content and per tool-call arguments) floor each
+/// ASCII/other-bytes segment separately and ceil each CJK segment
+/// separately, so a multi-segment item can land a couple of tokens
+/// below the merged single-pass figure.
 ///
 /// Other non-ASCII scripts and emoji are counted as raw bytes at
 /// [`BYTES_PER_TOKEN`] — their per-script token ratios are not
@@ -95,12 +142,14 @@ pub fn estimate_tokens_aware(s: &str) -> u64 {
             other_bytes += c.len_utf8() as u64;
         }
     }
-    // ceil(cjk * 3 / 5) in integer arithmetic: (x + d - 1) / d.
+    // floor(ascii * 10 / 34): integer division truncates.
+    let ascii_tokens = ascii_len.saturating_mul(ASCII_TOKEN_NUMERATOR) / ASCII_TOKEN_DENOMINATOR;
+    // ceil(cjk * 4 / 5) in integer arithmetic: (x + d - 1) / d.
     let cjk_tokens = (cjk_chars
         .saturating_mul(CJK_TOKEN_NUMERATOR)
         .saturating_add(CJK_TOKEN_DENOMINATOR - 1))
         / CJK_TOKEN_DENOMINATOR;
-    ascii_len / BYTES_PER_TOKEN + cjk_tokens + other_bytes / BYTES_PER_TOKEN
+    ascii_tokens + cjk_tokens + other_bytes / BYTES_PER_TOKEN
 }
 
 /// Inverse of [`estimate_tokens`]: convert a token budget into a character
@@ -109,6 +158,17 @@ pub fn estimate_tokens_aware(s: &str) -> u64 {
 #[inline]
 pub fn estimate_chars(tokens: u64) -> u64 {
     tokens.saturating_mul(BYTES_PER_TOKEN)
+}
+
+/// Inverse of the pure-ASCII branch of [`estimate_tokens_aware`]: return the
+/// minimum ASCII character/byte budget whose floored estimate reaches
+/// `tokens`. CJK and mixed-content estimates are not exact inverses of this
+/// function.
+#[inline]
+pub fn estimate_chars_aware(tokens: u64) -> u64 {
+    tokens
+        .saturating_mul(ASCII_TOKEN_DENOMINATOR)
+        .div_ceil(ASCII_TOKEN_NUMERATOR)
 }
 
 /// Token estimate for `image_count` images at [`IMAGE_TOKEN_ESTIMATE`] each.
@@ -203,43 +263,53 @@ mod tests {
     #[test]
     fn cjk_ratio_constants_expose_the_tunable() {
         // Locks the current tuning surface; re-tuning against a real
-        // tokenizer updates these two numbers deliberately.
-        assert_eq!(CJK_TOKEN_NUMERATOR, 3);
+        // tokenizer updates these numbers deliberately.
+        assert_eq!(CJK_TOKEN_NUMERATOR, 4);
         assert_eq!(CJK_TOKEN_DENOMINATOR, 5);
+        assert_eq!(ASCII_TOKEN_NUMERATOR, 10);
+        assert_eq!(ASCII_TOKEN_DENOMINATOR, 34);
     }
 
     #[test]
-    fn estimate_tokens_aware_matches_bytes_over_four_for_ascii() {
-        // Pure ASCII never diverges from the legacy heuristic.
+    fn estimate_tokens_aware_ascii_uses_calibrated_rate() {
+        // Pure ASCII runs at 3.4 chars/token: floor(chars * 10 / 34).
         assert_eq!(estimate_tokens_aware(""), 0);
-        assert_eq!(estimate_tokens_aware("abc"), 0);
-        assert_eq!(estimate_tokens_aware("abcd"), 1);
-        assert_eq!(estimate_tokens_aware("hello world"), estimate_tokens("hello world"));
-        assert_eq!(estimate_tokens_aware(&"x".repeat(4000)), 1000);
+        assert_eq!(estimate_tokens_aware("abc"), 0); // floor(30/34)
+        assert_eq!(estimate_tokens_aware("abcd"), 1); // floor(40/34)
+        assert_eq!(estimate_tokens_aware("hello world"), 3); // floor(110/34)
+        assert_eq!(estimate_tokens_aware(&"x".repeat(4000)), 1176); // floor(40_000/34)
+        // The calibrated rate deliberately reports MORE than bytes/4 for
+        // ASCII — that gap is the ~18% under-count being fixed.
+        assert!(
+            estimate_tokens_aware("hello world") > estimate_tokens("hello world"),
+            "calibrated ASCII rate must exceed the bytes/4 under-estimate"
+        );
     }
 
     #[test]
-    fn estimate_tokens_aware_chinese_sits_in_measured_band() {
-        // 100 CJK chars -> ceil(100 * 3 / 5) = 60 tokens, i.e. 0.6
-        // token/字. Assert the measured 0.5–0.6 band (50..=62) rather
-        // than the exact value, and that we stay strictly below the
-        // bytes/4 over-estimate (100 * 3 bytes / 4 = 75).
+    fn estimate_tokens_aware_cjk_uses_calibrated_rate() {
+        // 100 CJK chars -> ceil(100 * 4 / 5) = 80 tokens, i.e. 0.8
+        // token/字 — above the 75 the raw bytes/4 heuristic reports.
         let s = "你".repeat(100);
         let t = estimate_tokens_aware(&s);
+        assert_eq!(t, 80, "100 CJK chars must price at ceil(400/5) tokens");
         assert!(
-            (50..=62).contains(&t),
-            "100 CJK chars should land in the 0.5-0.6 token/字 band, got {t}"
+            (78..=82).contains(&t),
+            "100 CJK chars should land near 0.8 token/字, got {t}"
         );
-        assert!(t < estimate_tokens(&s), "aware must under-cut the bytes/4 over-estimate");
+        assert!(
+            t > estimate_tokens(&s),
+            "calibrated CJK rate now sits above the bytes/4 figure (75)"
+        );
     }
 
     #[test]
     fn estimate_tokens_aware_mixed_ascii_and_cjk() {
-        // 你好世界 = 4 CJK -> ceil(12/5) = 3; "hello" = 5 ASCII bytes
-        // -> 5/4 = 1. Total 4.
-        assert_eq!(estimate_tokens_aware("你好世界hello"), 4);
+        // 你好世界 = 4 CJK -> ceil(16/5) = 4; "hello" = 5 ASCII bytes
+        // -> floor(50/34) = 1. Total 5.
+        assert_eq!(estimate_tokens_aware("你好世界hello"), 5);
         // Trailing CJK rounds up on its own aggregate: 1 CJK ->
-        // ceil(3/5) = 1, plus "ab" -> 0.
+        // ceil(4/5) = 1, plus "ab" -> floor(20/34) = 0.
         assert_eq!(estimate_tokens_aware("ab你"), 1);
     }
 
@@ -259,19 +329,20 @@ mod tests {
     #[test]
     fn estimate_tokens_aware_counts_fullwidth_punctuation_as_cjk() {
         // ，= U+FF0C and ！= U+FF01 (fullwidth forms), 。= U+3002 (CJK
-        // punctuation): 3 CJK chars -> ceil(9/5) = 2.
-        assert_eq!(estimate_tokens_aware("，。！"), 2);
+        // punctuation): 3 CJK chars -> ceil(12/5) = 3.
+        assert_eq!(estimate_tokens_aware("，。！"), 3);
     }
 
     #[test]
     fn estimate_tokens_aware_cjk_block_boundaries() {
         // U+2E80 (first CJK radical) and U+9FFF (last Han) are both
-        // counted: 2 CJK -> ceil(6/5) = 2.
+        // counted: 2 CJK -> ceil(8/5) = 2.
         assert_eq!(estimate_tokens_aware("\u{2E80}\u{9FFF}"), 2);
         // U+A000 (Yi syllable) is NOT in any counted block -> other,
         // 3 bytes -> 0 tokens at bytes/4.
         assert_eq!(estimate_tokens_aware("\u{A000}"), 0);
-        // One non-CJK char plus one Han char: ceil(3/5) = 1 + 0.
+        // One non-CJK char (3 bytes -> 0) plus one Han char
+        // (ceil(4/5) = 1).
         assert_eq!(estimate_tokens_aware("\u{A000}\u{4E00}"), 1);
         // U+3000 (ideographic space, CJK punctuation block) counts.
         assert_eq!(estimate_tokens_aware("\u{3000}"), 1);
@@ -283,15 +354,78 @@ mod tests {
         // block U+3000–U+303F, which is a sub-range of the
         // U+2E80–U+9FFF arm (not listed separately): they must
         // still be counted as CJK via that arm. 2 CJK chars ->
-        // ceil(6/5) = 2.
+        // ceil(8/5) = 2.
         assert_eq!(estimate_tokens_aware("\u{3001}\u{3002}"), 2);
     }
 
+    /// Calibration fixture, fully hand-computed: representative pure-ASCII
+    /// (JSON + code), pure-CJK and mixed JSON samples must land exactly on
+    /// `floor(ascii*10/34) + ceil(cjk*4/5) + other/4`.
+    ///
+    /// Each row carries the hand-counted per-class sizes *and* the
+    /// hand-computed token total, so a drifting literal fails loudly here
+    /// (count mismatch) instead of quietly re-deriving a wrong expectation.
     #[test]
-    fn estimate_chars_is_inverse() {
+    fn calibrated_estimates_match_hand_computed_samples() {
+        // (sample, ascii chars, cjk chars, other bytes, expected tokens)
+        //
+        // ① pure-ASCII JSON, 41 chars:
+        //    floor(41 * 10 / 34) = floor(410/34) = 12
+        // ② pure-ASCII code, 29 chars:
+        //    floor(29 * 10 / 34) = floor(290/34) = 8
+        // ③ pure Chinese, 12 CJK chars (，。 are fullwidth/CJK punct):
+        //    ceil(12 * 4 / 5) = ceil(9.6) = 10
+        // ④ mixed JSON, 13 ASCII + 8 CJK:
+        //    floor(130/34) = 3, ceil(32/5) = 7  ->  10
+        let samples = [
+            ("{\"path\":\"src/lib.rs\",\"line\":42,\"ok\":true}", 41, 0, 0, 12),
+            ("fn main() { println!(\"hi\"); }", 29, 0, 0, 8),
+            ("你好世界，这是一个测试。", 0, 12, 0, 10),
+            ("{\"路径\":\"你好\",\"状态\":\"完成\"}", 13, 8, 0, 10),
+        ];
+        for (sample, ascii, cjk, other, expected) in samples {
+            let (mut a, mut c, mut o) = (0_u64, 0_u64, 0_u64);
+            for ch in sample.chars() {
+                if ch.is_ascii() {
+                    a += 1;
+                } else if is_cjk(ch) {
+                    c += 1;
+                } else {
+                    o += ch.len_utf8() as u64;
+                }
+            }
+            assert_eq!(
+                (a, c, o),
+                (ascii, cjk, other),
+                "hand-count drifted for {sample:?}"
+            );
+            let want = ascii * 10 / 34 + (cjk * 4 + 4) / 5 + other / 4;
+            assert_eq!(want, expected, "hand-computed total drifted for {sample:?}");
+            assert_eq!(
+                estimate_tokens_aware(sample),
+                expected,
+                "estimate drifted from the calibrated formula for {sample:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn estimate_chars_variants_are_inverse() {
         assert_eq!(estimate_chars(0), 0);
         assert_eq!(estimate_chars(1), 4);
         assert_eq!(estimate_chars(1000), 4000);
+        assert_eq!(estimate_chars_aware(0), 0, "zero ASCII token budget");
+        assert_eq!(estimate_chars_aware(1), 4, "ceil(1 * 34 / 10)");
+        assert_eq!(estimate_chars_aware(2), 7, "ceil(2 * 34 / 10)");
+        assert_eq!(estimate_chars_aware(1000), 3400, "1000 ASCII tokens");
+        for tokens in [0, 1, 2, 3, 17, 1000] {
+            let chars = estimate_chars_aware(tokens);
+            assert_eq!(
+                estimate_tokens_aware(&"a".repeat(chars as usize)),
+                tokens,
+                "ASCII inverse must round-trip exactly for {tokens} tokens"
+            );
+        }
     }
 
     #[test]

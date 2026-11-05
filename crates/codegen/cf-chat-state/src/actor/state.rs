@@ -17,10 +17,9 @@ pub const REPLAY_PROMPT_MAX_COUNT: u8 = 3;
 
 /// Character-aware estimate of the system prompt portion of a
 /// [`ConversationItem`] — same basis as the message path
-/// ([`estimate_item_tokens`]): bytes/4 for ASCII, 3/5 token per
-/// CJK character, so `/context`'s `system_prompt_tokens` row no
-/// longer over-reports a Chinese system prompt against
-/// `message_tokens`.
+/// ([`estimate_item_tokens`]): 3.4 ASCII characters per token and 4/5
+/// token per CJK character, so `/context`'s `system_prompt_tokens` row
+/// does not drift from `message_tokens`.
 /// Returns 0 for non-system items so callers can pipe through whatever they
 /// have without unwrapping.
 pub fn estimate_system_message_tokens(item: &ConversationItem) -> u64 {
@@ -58,8 +57,9 @@ pub fn estimate_tool_spec_tokens(spec: &cf_sampling_types::ToolSpec) -> u64 {
 
 /// Character-aware estimate for a single [`ConversationItem`]:
 /// text content goes through [`cf_token_estimation::estimate_tokens_aware`]
-/// (bytes/4 for ASCII, ~0.6 token per CJK character), so Chinese-heavy
-/// sessions are no longer over-estimated by the raw bytes/4 heuristic.
+/// (3.4 ASCII characters per token, 4/5 token per CJK character), so the
+/// provider-calibrated rate applies to every text segment instead of the
+/// raw bytes/4 heuristic that under-counted ASCII by ~18%.
 ///
 /// Images are counted at [`cf_token_estimation::IMAGE_TOKEN_ESTIMATE`] each.
 /// Shared by [`estimate_conversation_tokens`] and [`estimate_messages_tokens`]
@@ -106,16 +106,18 @@ pub fn estimate_item_tokens(item: &ConversationItem) -> u64 {
     }
 }
 
-/// Estimate token footprint: text bytes / 4, images at the per-image
+/// Estimate token footprint: character-aware text (3.4 ASCII characters
+/// per token, 4/5 token per CJK character), images at the per-image
 /// constant defined by [`cf_token_estimation::IMAGE_TOKEN_ESTIMATE`].
 pub fn estimate_conversation_tokens(items: &[ConversationItem]) -> u64 {
     items.iter().map(estimate_item_tokens).sum()
 }
 
 /// cf-tools's [`ItemTokenCounter`](cf_compaction::ItemTokenCounter)
-/// for the shared compaction engine: the bytes/4 estimate cf-tools already
-/// uses to drive its compaction triggers, exposed through the seam so the
-/// shared budgeting math gets the *same* trusted count.
+/// for the shared compaction engine: the character-aware estimate
+/// (3.4 ASCII chars/token, 4/5 token per CJK char) drives the compaction
+/// triggers, exposed through the seam so the shared budgeting math gets
+/// the *same* trusted count.
 ///
 /// Where another host plugs a real BPE tokenizer into the same seam,
 /// cf-tools estimates instead, reusing [`estimate_item_tokens`] so the
@@ -131,7 +133,7 @@ impl cf_compaction::ItemTokenCounter<ConversationItem> for EstimatedItemTokenCou
     }
 }
 
-/// Bytes/4 estimate of every non-system item in `items`.
+/// Character-aware estimate of every non-system item in `items`.
 pub fn estimate_messages_tokens(items: &[ConversationItem]) -> u64 {
     items
         .iter()
@@ -364,36 +366,37 @@ mod tests {
 
     #[test]
     fn estimate_item_tokens_uses_character_aware_text_estimate() {
-        // 100 CJK chars -> ceil(100 * 3 / 5) = 60 tokens, not
-        // the 75 the raw bytes/4 heuristic would report.
+        // 100 CJK chars -> ceil(100 * 4 / 5) = 80 tokens, above the 75
+        // the raw bytes/4 heuristic reports.
         let sys = ConversationItem::system("你".repeat(100));
-        assert_eq!(estimate_item_tokens(&sys), 60);
+        assert_eq!(estimate_item_tokens(&sys), 80);
 
-        // User text: 你好世界 = 4 CJK -> ceil(12/5) = 3,
-        // "hello" = 5 ASCII bytes -> 1.
+        // User text: 你好世界 = 4 CJK -> ceil(16/5) = 4,
+        // "hello" = 5 ASCII chars -> floor(50/34) = 1.
         let user = ConversationItem::user("你好世界hello");
-        assert_eq!(estimate_item_tokens(&user), 4);
+        assert_eq!(estimate_item_tokens(&user), 5);
 
         // Assistant content follows the same aware path.
         let asst = ConversationItem::assistant("你好世界hello");
-        assert_eq!(estimate_item_tokens(&asst), 4);
+        assert_eq!(estimate_item_tokens(&asst), 5);
 
         // Assistant tool-call arguments are text too.
-        // `{"路径":"你好"}`: 7 ASCII bytes -> 1, 4 CJK -> 3.
+        // `{"路径":"你好"}`: 7 ASCII chars -> floor(70/34) = 2,
+        // 4 CJK -> ceil(16/5) = 4.
         let tc = cf_sampling_types::ToolCall {
             id: std::sync::Arc::from("tc1"),
             name: "write_file".to_string(),
             arguments: std::sync::Arc::from("{\"路径\":\"你好\"}"),
         };
         let asst_tc = ConversationItem::assistant_tool_calls(vec![tc]);
-        assert_eq!(estimate_item_tokens(&asst_tc), 4);
+        assert_eq!(estimate_item_tokens(&asst_tc), 6);
 
         // Tool results carry text content.
         let tr = ConversationItem::tool_result("tc1", "你好世界hello");
-        assert_eq!(estimate_item_tokens(&tr), 4);
+        assert_eq!(estimate_item_tokens(&tr), 5);
 
         // Each user text part is estimated as its own segment:
-        // 2 CJK -> ceil(6/5) = 2 per part, 2 parts -> 4.
+        // 2 CJK -> ceil(8/5) = 2 per part, 2 parts -> 4.
         let parts = vec![
             cf_sampling_types::ContentPart::Text {
                 text: std::sync::Arc::from("你好"),
@@ -407,16 +410,18 @@ mod tests {
     }
 
     #[test]
-    fn estimate_item_tokens_ascii_matches_legacy_bytes_over_four() {
-        // Pure-ASCII items must keep the exact bytes/4 values the
-        // auto-compact gates were calibrated against.
+    fn estimate_item_tokens_ascii_uses_calibrated_rate() {
+        // Pure-ASCII items run at the calibrated 3.4 chars/token:
+        // floor(chars * 10 / 34).
         let items = vec![
             ConversationItem::system("you are a helpful assistant"),
             ConversationItem::user("fix the login bug in auth.rs"),
             ConversationItem::assistant("let me look at the file"),
             ConversationItem::tool_result("tc1", "fn login() {}"),
         ];
-        let expected = [27 / 4, 28 / 4, 23 / 4, 13 / 4];
+        // 27 chars -> floor(270/34) = 7; 28 -> floor(280/34) = 8;
+        // 23 -> floor(230/34) = 6; 13 -> floor(130/34) = 3.
+        let expected = [7, 8, 6, 3];
         for (item, want) in items.iter().zip(expected) {
             assert_eq!(estimate_item_tokens(item), want);
         }
@@ -426,18 +431,18 @@ mod tests {
     fn estimate_item_tokens_multisegment_ascii_is_sum_of_per_segment_floors() {
         // Per-segment semantics pin: `estimate_item_tokens` floors
         // each text segment separately and sums the floors, so a
-        // multi-segment item can land up to (segments - 1) tokens
-        // below the old merged floor(sum_bytes / 4) — pure ASCII
-        // included. These assertions lock the NEW per-segment
-        // values; the old merged values are in the comments so a
-        // future reader does not mistake the delta for a bug or
-        // "fix" the arithmetic back to the merged semantics.
+        // multi-segment item can land a couple of tokens below the
+        // merged floor(sum_chars * 10 / 34) — pure ASCII included.
+        // These assertions lock the per-segment values; the merged
+        // values are in the comments so a future reader does not
+        // mistake the delta for a bug or "fix" the arithmetic back
+        // to the merged semantics.
 
-        // User, three text parts: "ab" (2 bytes) + "cd" (2 bytes)
-        // + "efgh" (4 bytes).
-        // New (per-segment floors): floor(2/4) + floor(2/4) +
-        // floor(4/4) = 0 + 0 + 1 = 1.
-        // Old (merged 8 bytes / 4): 2.  -> 1 token lower.
+        // User, three text parts: "ab" (2 chars) + "cd" (2 chars)
+        // + "efgh" (4 chars).
+        // Per-segment floors: floor(20/34) + floor(20/34) +
+        // floor(40/34) = 0 + 0 + 1 = 1.
+        // Merged (8 chars * 10 / 34 = 80/34): 2.  -> 1 token lower.
         let parts = vec![
             cf_sampling_types::ContentPart::Text {
                 text: std::sync::Arc::from("ab"),
@@ -452,10 +457,10 @@ mod tests {
         let user = ConversationItem::user_with_parts(parts);
         assert_eq!(estimate_item_tokens(&user), 1);
 
-        // Assistant content "ab" (2 bytes) plus one tool call whose
-        // arguments are "cd" (2 bytes).
-        // New (per-segment floors): floor(2/4) + floor(2/4) = 0 + 0 = 0.
-        // Old (merged 4 bytes / 4): 1.  -> 1 token lower.
+        // Assistant content "ab" (2 chars) plus one tool call whose
+        // arguments are "cd" (2 chars).
+        // Per-segment floors: floor(20/34) + floor(20/34) = 0 + 0 = 0.
+        // Merged (4 chars * 10 / 34 = 40/34): 1.  -> 1 token lower.
         let assistant = ConversationItem::Assistant(cf_sampling_types::AssistantItem {
             content: std::sync::Arc::from("ab"),
             tool_calls: vec![cf_sampling_types::ToolCall {
@@ -495,7 +500,7 @@ mod tests {
 
     #[test]
     fn new_state_estimates_tokens_from_conversation() {
-        // 4000 bytes of text per item, bytes / 4 = 1000 tokens each
+        // 4000 ASCII chars per item -> floor(40_000 / 34) = 1176 tokens each
         let items = vec![
             ConversationItem::system("x".repeat(4000).as_str()),
             ConversationItem::user("y".repeat(4000).as_str()),
@@ -503,13 +508,14 @@ mod tests {
             ConversationItem::tool_result("call-1", "w".repeat(4000).as_str()),
         ];
         let state = ChatState::new(items, test_sampling_config());
-        assert_eq!(state.total_tokens, 4000); // 4 * (4000/4)
+        assert_eq!(state.total_tokens, 4_704); // 4 * 1176
     }
 
     #[test]
     fn estimate_system_message_tokens_only_counts_system_items() {
         let sys = ConversationItem::system("a".repeat(400));
-        assert_eq!(estimate_system_message_tokens(&sys), 100);
+        // 400 ASCII chars -> floor(4_000 / 34) = 117
+        assert_eq!(estimate_system_message_tokens(&sys), 117);
         let user = ConversationItem::user("hello");
         assert_eq!(estimate_system_message_tokens(&user), 0);
         let asst = ConversationItem::assistant("hi");
@@ -532,16 +538,16 @@ mod tests {
 
     #[test]
     fn estimate_messages_tokens_excludes_system_and_sums_rest() {
-        // 4000 bytes per item -> 1000 tokens each.
+        // 4000 ASCII chars per item -> 1176 tokens each.
         let items = vec![
             ConversationItem::system("x".repeat(4000).as_str()),
             ConversationItem::user("y".repeat(4000).as_str()),
             ConversationItem::assistant("z".repeat(4000).as_str()),
             ConversationItem::tool_result("call-1", "w".repeat(4000).as_str()),
         ];
-        // Total = 4000 (4 items * 1000), system = 1000, messages = 3000.
-        assert_eq!(estimate_conversation_tokens(&items), 4000);
-        assert_eq!(estimate_messages_tokens(&items), 3000);
+        // Total = 4704 (4 items * 1176), system = 1176, messages = 3528.
+        assert_eq!(estimate_conversation_tokens(&items), 4_704);
+        assert_eq!(estimate_messages_tokens(&items), 3_528);
     }
 
     #[test]

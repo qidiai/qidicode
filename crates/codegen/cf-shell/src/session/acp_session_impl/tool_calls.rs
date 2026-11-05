@@ -7,6 +7,37 @@
 //! the parent module's private helpers.
 use super::*;
 use futures::StreamExt;
+
+/// Byte cap for the raw tool-argument text carried by the
+/// arguments-parse-failure WARN in `prepare_tool_call`.
+///
+/// 2 KiB keeps a whole small payload (`read_file`, `grep`) verbatim and enough
+/// head context to spot where a large payload stops making sense, without
+/// letting a 100 KiB `write` argument blob flood the log.
+const RAW_ARGS_LOG_CAP: usize = 2048;
+
+/// Render `s` for logging, capped at `cap` bytes.
+///
+/// The cut always lands on a UTF-8 char boundary (never panics on multibyte
+/// arguments), and a truncated result self-reports as
+/// `…[truncated, total N bytes]` so one log line is enough to tell "the model
+/// sent something enormous" from "the stream stopped mid-payload".
+///
+/// Diagnostics only — the result never flows back into parsing or dispatch.
+fn cap_raw_args_for_log(s: &str, cap: usize) -> (String, bool) {
+    if s.len() <= cap {
+        return (s.to_owned(), false);
+    }
+    let mut end = cap;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    (
+        format!("{}…[truncated, total {} bytes]", &s[..end], s.len()),
+        true,
+    )
+}
+
 /// Whether a tool name is an MCP `create_pull_request` (qualified
 /// `server__create_pull_request` or bare).
 fn is_mcp_create_pull_request(tool_name: &str) -> bool {
@@ -876,7 +907,22 @@ impl SessionActor {
                         best_match
                     }
                 } else {
+                    // Observability-only: this branch wraps the unparseable text
+                    // in `raw` and keeps going, so a truncation here is invisible
+                    // downstream except as `missing field` / `EOF while parsing`.
+                    // Log the payload itself (capped + self-annotating) plus the
+                    // ids needed to correlate the call with the sampler's
+                    // per-index accumulator dump.
+                    let args_len = call.function.arguments.len();
+                    let (raw_args, raw_args_truncated) =
+                        cap_raw_args_for_log(&call.function.arguments, RAW_ARGS_LOG_CAP);
                     tracing::warn!(
+                        session_id = %self.session_info.id.0,
+                        tool_name = %call.function.name,
+                        call_id = %call.id,
+                        args_len,
+                        raw_args_truncated,
+                        raw_args = %raw_args,
                         "Failed to parse arguments as JSON ({}), wrapping in 'raw' field",
                         e
                     );
@@ -1907,9 +1953,18 @@ impl SessionActor {
         raw_arguments: &str,
         model_id: &str,
     ) -> Result<(), acp::Error> {
+        // Same observability contract as the arguments-parse WARN in
+        // `prepare_tool_call`: the payload itself (capped + self-annotating)
+        // plus the ids needed to correlate the call, so a truncated-argument
+        // failure is diagnosable on this path too (it is `error!`-level and
+        // carries JSON that is syntactically valid but schema-invalid).
+        let args_len = raw_arguments.len();
+        let (raw_args, raw_args_truncated) =
+            cap_raw_args_for_log(raw_arguments, RAW_ARGS_LOG_CAP);
         tracing::error!(
-            session_id = % self.session_info.id.0, tool_name = function_name, model_id =
-            model_id, error_kind = "parse_failure", error_message = % err,
+            session_id = % self.session_info.id.0, tool_name = function_name,
+            call_id = call_id, model_id = model_id, args_len, raw_args_truncated,
+            raw_args = % raw_args, error_kind = "parse_failure", error_message = % err,
             "tool_error: parse_failure"
         );
         self.signals_handle().record_tool_failure(function_name);
@@ -3065,5 +3120,65 @@ mod wait_interrupt_tests {
         task.abort();
         let _ = task.await;
         assert_eq!(depth.load(Ordering::SeqCst), 0, "abort must not leak");
+    }
+}
+
+#[cfg(test)]
+mod raw_args_log_cap_tests {
+    use super::{RAW_ARGS_LOG_CAP, cap_raw_args_for_log};
+
+    /// A payload that fits the cap is logged verbatim — no marker, no loss.
+    #[test]
+    fn short_args_pass_through_verbatim() {
+        let raw = "{\"target_file\":\"crates/lib.rs\"}";
+        let (text, truncated) = cap_raw_args_for_log(raw, RAW_ARGS_LOG_CAP);
+        assert_eq!(text, raw);
+        assert!(!truncated);
+    }
+
+    /// Exactly at the cap is a complete payload, not a truncation.
+    #[test]
+    fn exactly_at_cap_is_not_truncated() {
+        let raw = "a".repeat(RAW_ARGS_LOG_CAP);
+        let (text, truncated) = cap_raw_args_for_log(&raw, RAW_ARGS_LOG_CAP);
+        assert_eq!(text, raw);
+        assert!(!truncated);
+    }
+
+    /// Over the cap: the kept prefix is byte-identical and the marker reports
+    /// the ORIGINAL length, so a log reader can tell how much was cut.
+    #[test]
+    fn over_cap_truncates_and_reports_original_length() {
+        let body = "x".repeat(RAW_ARGS_LOG_CAP * 4);
+        let (text, truncated) = cap_raw_args_for_log(&body, RAW_ARGS_LOG_CAP);
+        assert!(truncated);
+        assert!(text.starts_with(&"x".repeat(RAW_ARGS_LOG_CAP)));
+        assert!(
+            text.ends_with(&format!("…[truncated, total {} bytes]", body.len())),
+            "marker must carry the untruncated length, got: {text}"
+        );
+    }
+
+    /// Multibyte arguments must never be split mid-char — a panic here would
+    /// turn a diagnostics aid into an outage. Backing off may drop the whole
+    /// prefix when the cap lands inside the first char; that is acceptable.
+    #[test]
+    fn multibyte_args_never_split_a_char() {
+        // 6 bytes (2 chars) per unit, so almost every cap below is mid-char.
+        let raw = "参数".repeat(16);
+        for cap in [1usize, 2, 3, 4, 5, 7, 8, 11] {
+            let (text, truncated) = cap_raw_args_for_log(&raw, cap);
+            assert!(truncated, "cap {cap} is below the input length");
+            let prefix = text.split('…').next().expect("text before the marker");
+            assert!(
+                raw.starts_with(prefix),
+                "kept bytes must be a prefix of the input (cap {cap})"
+            );
+            assert_eq!(
+                prefix.len() % 3,
+                0,
+                "prefix must end on a char boundary (cap {cap})"
+            );
+        }
     }
 }

@@ -110,24 +110,25 @@ pub struct SubagentRuntimeOverrides {
 /// Re-export of [`cf_tool_types::is_not_sentinel`] for existing call sites.
 pub use cf_tool_types::is_not_sentinel;
 
-/// Sanitize a model-emitted `cwd` argument for the `task` tool.
-///
-/// Strips stray surrounding quote/backtick characters (matched or unmatched),
-/// trims whitespace, expands a leading `~` to the user's home directory, and
-/// rejects sentinel placeholders (`""`, `"null"`, `"none"`, `"undefined"`).
+/// Sanitize a model-emitted string argument by trimming whitespace, stripping
+/// stray surrounding quote/backtick characters (matched or unmatched), and
+/// rejecting sentinel placeholders (`""`, `"null"`, `"none"`, `"undefined"`).
+pub fn sanitize_quoted_arg(s: &str) -> Option<String> {
+    let unquoted = s.trim().trim_matches(['"', '\'', '`']);
+    // Re-trim after stripping quotes: this trim flows into the returned
+    // value; the trim inside `is_not_sentinel` does not.
+    let cleaned = unquoted.trim();
+    is_not_sentinel(cleaned).then(|| cleaned.to_string())
+}
+
+/// Sanitize a model-emitted `cwd` argument for the `task` tool, then expand a
+/// leading `~` to the user's home directory.
 ///
 /// Returns `Some(cleaned)` for a usable path, `None` if the value should be
 /// treated as absent. Shared by the tool layer (`task::mod`) and the
 /// defense-in-depth check in `qidi-code`'s subagent coordinator.
 pub fn sanitize_cwd_value(s: &str) -> Option<String> {
-    let unquoted = s.trim().trim_matches(['"', '\'', '`']);
-    // Re-trim after stripping quotes: this trim flows into the returned
-    // value; the trim inside `is_not_sentinel` does not.
-    let cleaned = unquoted.trim();
-    if !is_not_sentinel(cleaned) {
-        return None;
-    }
-    Some(shellexpand::tilde(cleaned).into_owned())
+    sanitize_quoted_arg(s).map(|cleaned| shellexpand::tilde(&cleaned).into_owned())
 }
 
 /// Returns `true` if the string looks like a real subagent ID rather than a

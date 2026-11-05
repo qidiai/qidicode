@@ -195,7 +195,7 @@ pub fn estimate_tokens_aware(s: &str) -> u64 {
 ## 6. 验收标准（全部可脚本判定）
 
 1. `cargo test -p cf-token-estimation` 全绿（含夹具测试）。
-2. **夹具聚合比 ∈ [0.97, 1.01]，MAPE ≤ 18%**（实测 **0.9841 / 16.3%**）。上界 1.01 与 §0「±2%」自洽，下界 0.97 留采样余量。
+2. **夹具聚合比 ∈ [0.97, 1.01]，MAPE ≤ 18%**（实测 **0.9841 / 16.3%**）。上界 1.01 与 §0「±2%」自洽，下界 0.97 留采样余量。**公式转写勘误（2026-11-05）**：MAPE 是逐项相对误差的算术均值，即 `(100/n) × Σ(|h_i−t_i|/t_i)`；早期测试误写为 `100 × Σ|h_i−t_i| / Σt_i / n`，把 WAPE 又多除了 `n`，导致 18% 阈值恒真。修正公式是恢复本节 16.3% 的规格意图，不新增逐项门槛。
 3. `cargo test -p cf-chat-state --lib` 全绿（含 §3.2 A **10 处** + B **11 处** = ≥21 处；若还有清单外红灯，按 §3.0 规则重算）。
 4. `cargo test -p cf-shell --lib` 全绿（按 AGENTS.md §12 现行口径：**跳过 17 项**、`CARGO_PROFILE_TEST_DEBUG='0'` + C 盘热 target，基线 5630 passed / 0 failed / 7 ignored；含 §3.3 inspect 1 处 + §3.4 session_recap 1 处）。
 5. `cargo check --workspace` 0 error。

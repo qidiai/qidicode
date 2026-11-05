@@ -313,12 +313,13 @@ async fn estimated_tokens_tracks_tool_result_delta() {
     let h = TestHarness::new();
     h.handle.record_token_usage(100_000);
 
-    // Push a tool result with 4000 chars → ~1000 estimated tokens
+    // Push a tool result with 4000 ASCII chars → floor(40_000 / 34) = 1176
+    // estimated tokens
     h.handle
         .push_tool_result(ConversationItem::tool_result("call-1", "x".repeat(4000)));
 
     let estimated = h.handle.get_estimated_total_tokens().await;
-    assert_eq!(estimated, 101_000); // 100K model-reported + 1K delta
+    assert_eq!(estimated, 101_176); // 100K model-reported + 1176 delta
 
     // model-reported total_tokens is unchanged
     let actual = h.handle.get_total_tokens().await;
@@ -332,7 +333,7 @@ async fn estimated_tokens_resets_on_model_response() {
     h.handle
         .push_tool_result(ConversationItem::tool_result("call-1", "x".repeat(4000)));
 
-    assert_eq!(h.handle.get_estimated_total_tokens().await, 101_000);
+    assert_eq!(h.handle.get_estimated_total_tokens().await, 101_176);
 
     // Model responds with a new total — delta resets
     h.handle.record_token_usage(105_000);
@@ -346,16 +347,17 @@ async fn estimated_tokens_tracks_synthetic_user_message_delta() {
     h.handle.record_token_usage(100_000);
 
     // Simulate a 4MB background-task completion notification pushed as a
-    // synthetic User item between turns.
+    // synthetic User item between turns. 4,000,027 ASCII chars →
+    // floor(40_000_270 / 34) = 1_176_478 estimated tokens.
     h.handle.push_user_message(ConversationItem::user(
         "Background task completed:\n".to_string() + &"x".repeat(4_000_000),
     ));
 
     let estimated = h.handle.get_estimated_total_tokens().await;
-    // 100K model-reported + ~1M tokens for the 4MB reminder.
+    // 100K model-reported + ~1.18M tokens for the 4MB reminder.
     assert!(
-        (1_099_000..=1_101_000).contains(&estimated),
-        "expected ~1.1M tokens estimated, got {estimated}",
+        (1_276_000..=1_277_000).contains(&estimated),
+        "expected ~1.28M tokens estimated, got {estimated}",
     );
 
     // model-reported `total_tokens` is unchanged — only the delta moved.
@@ -371,14 +373,14 @@ async fn estimated_tokens_tracks_real_user_message_and_resets_on_response() {
     let h = TestHarness::new();
     h.handle.record_token_usage(100_000);
 
-    // Real user turn — 4000 chars / 4 = ~1000 tokens.
+    // Real user turn — 4000 ASCII chars → floor(40_000 / 34) = 1176 tokens.
     h.handle
         .push_user_message(ConversationItem::user("u".repeat(4000)));
 
     let pre = h.handle.get_estimated_total_tokens().await;
     assert!(
-        (101_000..=101_010).contains(&pre),
-        "expected ~101K after user push, got {pre}",
+        (101_100..=101_250).contains(&pre),
+        "expected ~101.2K after user push, got {pre}",
     );
 
     // Model responds; the API's `usage.total_tokens` already includes
@@ -417,7 +419,7 @@ async fn estimated_tokens_resets_on_truncate() {
     h.handle
         .push_tool_result(ConversationItem::tool_result("call-1", "x".repeat(4000)));
 
-    assert_eq!(h.handle.get_estimated_total_tokens().await, 101_000);
+    assert_eq!(h.handle.get_estimated_total_tokens().await, 101_176);
 
     // Rewind removes the tool result — delta must reset
     h.drain_events();
@@ -467,7 +469,8 @@ async fn replace_conversation_persists_and_emits_reset() {
 #[tokio::test]
 async fn compaction_reseed_carries_provider_overhead() {
     let h = TestHarness::new();
-    // ~1k estimated tokens; provider reports 51k → 50k overhead.
+    // 4000 ASCII chars -> floor(40_000 / 34) = 1176 estimated tokens;
+    // provider reports 51k -> ~49.8k overhead.
     h.handle
         .push_user_message(ConversationItem::user("x".repeat(4000)));
     h.handle.record_token_usage(51_000);
@@ -479,7 +482,7 @@ async fn compaction_reseed_carries_provider_overhead() {
     h.handle.replace_conversation_for_compaction(compacted);
 
     let total = h.handle.get_total_tokens().await;
-    let estimate_only = 1_000u64;
+    let estimate_only = 1_176u64;
     assert!(
         total > estimate_only * 10,
         "reseed must carry provider overhead, got {total}"
@@ -497,19 +500,22 @@ async fn compaction_reseed_scales_overhead_down_with_deleted_content() {
         .push_user_message(ConversationItem::user("x".repeat(160_000)));
     let estimate_at_response =
         crate::estimate_conversation_tokens(&h.handle.get_conversation().await);
-    assert_eq!(estimate_at_response, 40_000);
+    // 160_000 ASCII chars -> floor(1_600_000 / 34) = 47_058
+    assert_eq!(estimate_at_response, 47_058);
     let provider_total = 87_000;
     h.handle.record_token_usage(provider_total);
 
     let compacted = vec![ConversationItem::user("z".repeat(12_000))];
     let compacted_estimate = crate::estimate_conversation_tokens(&compacted);
-    assert_eq!(compacted_estimate, 3_000);
+    // 12_000 ASCII chars -> floor(120_000 / 34) = 3_529
+    assert_eq!(compacted_estimate, 3_529);
     h.handle.replace_conversation_for_compaction(compacted);
 
     let total = h.handle.get_total_tokens().await;
-    assert_eq!(total, 6_525, "expected ratio-scaled overhead, got {total}");
+    // round(3_529 * 87_000 / 47_058) = round(6_524.35) = 6_524
+    assert_eq!(total, 6_524, "expected ratio-scaled overhead, got {total}");
     let additive_model = compacted_estimate + (provider_total - estimate_at_response);
-    assert_eq!(additive_model, 50_000);
+    assert_eq!(additive_model, 43_471);
     assert!(
         total < additive_model / 4,
         "ratio reseed ({total}) must be far below the additive over-count ({additive_model})"
@@ -536,8 +542,8 @@ async fn compaction_reseed_excludes_post_response_deltas_from_overhead() {
     assert_eq!(
         total, 5_500,
         "overhead ratio must be measured against the last-response estimate \
-         (1k), not the live estimate inflated by the 25k post-response tool \
-         result, got {total}"
+         (1176), not the live estimate inflated by the 29.4k post-response \
+         tool result, got {total}"
     );
 }
 
@@ -653,8 +659,9 @@ async fn compaction_reseed_without_provider_count_matches_plain_estimate() {
     h.handle.replace_conversation_for_compaction(compacted);
 
     let total = h.handle.get_total_tokens().await;
+    // 8_000 ASCII chars -> floor(80_000 / 34) = 2_352
     assert_eq!(
-        total, 2_000,
+        total, 2_352,
         "fresh-session reseed must be the raw estimate"
     );
 }
@@ -670,8 +677,9 @@ async fn non_compaction_replace_does_not_carry_overhead() {
         .replace_conversation(vec![ConversationItem::user("q".repeat(4000))]);
 
     let total = h.handle.get_total_tokens().await;
+    // 4_000 ASCII chars -> floor(40_000 / 34) = 1_176
     assert_eq!(
-        total, 1_000,
+        total, 1_176,
         "non-compaction replace (e.g. rewind) keeps the plain estimate"
     );
 }
