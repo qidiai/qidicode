@@ -340,6 +340,13 @@
   - **rebrand 漏网默认端点**：`CLI_CHAT_PROXY_BASE_URL_DEFAULT="https://cli-chat-proxy.grok.com/v1"`（config.rs:46）与 `XAI_API_BASE_URL_DEFAULT="https://api.x.ai/v1"`（config.rs:48）——无覆盖时启动期 aux（models fetch 等）真打 grok.com（缓存 origin mismatch 行铁证），非致命但方向错误；已改 `https://api.qidiai.ltd/v1`
   - **rebrand 漏网清算（2026-10-19 批次3）**：L1.5 清单**大部分已清**——`cf-env` cli_chat_proxy/asset_server（`cf-env/src/lib.rs:16` 区块）、`cf-workspace/src/handle.rs` fallback、`ASSET_SERVER_URL_DEFAULT`、billing UPSELL 全套（含 FREE_USAGE 文案）、`MANAGED_SECTION_CONNECTORS_URL`、app.rs 文案、B5 前缀 "grok:"、console.x.ai、install 脚本代理 URL、mcp_doctor、share/relay URL——全部改到 qidi 域。**`QIDI_COM_METHOD_ID` 已按迁移容忍改造**：新值 `qidi.com`（待用户最终确认）只写不读旧，`LEGACY_QIDI_COM_METHOD_ID="grok.com"` 只读不写新，`from_id` 双认+`is_qidi_com_method_id()` helper+钉常量防漂移测试（存量会话/老 peer 不掉线）。**WS relay 已切（2026-10-19 深挖后）**：`wss://ba.qidiai.ltd/ws` 是用户实测在跑的**手机遥控中继**（`agent headless` 模式，Bearer secret+JSON-RPC/ACP，配 ws://192.168.1.222:2419 局域网直连；握手/鉴权/协议全实证）——`cf-env` relay_ws_url+ws_origin 默认值已切到 ba，CLI flag 去 grok 化（`--qidi-ws-url/origin` 主名+`--grok-ws-*` visible alias），leader 派生与文档同步切主名。**仍留 grok 上游的**：gateway `/ws/gw/`（ba 实测 404、无 qidi 部署，待运营方部署后同方式切）、`leader/server.rs` `PROD_COMPUTER_HUB_URL`、`workspace_server.rs` computer-hub 默认值、`remote/client.rs` `QIDI_CODE_BACKEND_URL=code.grok.com`、`remote/chat_models_client.rs`——另一条后端链，需真实值后替换。**猜措值状态（2026-10-19 用户确认）**：`https://assets.qidiai.ltd` 与 `https://qidiai.ltd/superqidi` **已确认可用**（用户将注册 qidiai.ltd 域名，代码值已就位无需改）；auth 新 ID = **`qidiai.ltd`**（2026-10-19 用户确认 qidiai.ltd 为其域名后改定；legacy `grok.com` 仍双认，存量会话不掉线）
 
+### 2026-11-05 编码手通道与子代理会话实测（新会话必读）
+
+- **子代理自我报告的模型身份不可信**：deepseek 探针自称 `qwen3.8-flash-next-ms-222`（纯属臆造）。验席位唯一可靠口径 = 会话目录 `summary.json` 的 `current_model_id`（本会话两个魔搭 slug 均以此实证落地）。
+- **spawn `model` 参数序列化 bug 的绕法**：fresh spawn 连续失败时（畸形 JSON/EOF），用 `resume_from` 续跑一个既有同模型会话可完全绕开该 bug（resume 不携带 model 参数、继承会话模型）——2026-11-05 qwen3.8-flash-next-ms-222 fresh 5 连败后以此恢复。
+- **2026-11-05 当日通道状态**：`glm-5.3-flashx-222` 503 `no available upstream account` 两次（审计席不可用，以 step-5-preview-222 顶替）；`qwen3.8-flash-next-ms-222` spawn 序列化错误 5 连败（上午首派成功过，下午系统性坏）；`deepseek-v4-1-flash-1017-ms-222`（luyou→amd 池）429 波动——长会话（>5 分钟）易被切断，**resume 可续命**（实测续跑 30 分钟又断，半成品保留在树），池饱和时 fresh spawn 也会 2 分钟内死。跨天必须重测，勿以当日状态推明天。
+- **pre-commit 钩子 MSYS 路径 bug（2026-11-05 修复））**：钩子 wrapper 用 bash `pwd` 得 `/c/...` 路径直传 `powershell -File`，PS 不认 ⇒ 一切提交 fail-closed（exit 127）。已改 cygpath -w 转换（备份 `pre-commit.bak-20261105-pathconv`）。若提交莫名被钩子拦且报 "-File 缺少参数"，先查此处。
+
 ## 10. Git 提交与推送（生产纪律）
 
 | 项 | 约定 |
