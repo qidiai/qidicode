@@ -343,7 +343,7 @@
 ### 2026-11-05 编码手通道与子代理会话实测（新会话必读）
 
 - **子代理自我报告的模型身份不可信**：deepseek 探针自称 `qwen3.8-flash-next-ms-222`（纯属臆造）。验席位唯一可靠口径 = 会话目录 `summary.json` 的 `current_model_id`（本会话两个魔搭 slug 均以此实证落地）。
-- **spawn `model` 参数序列化 bug 的绕法**：fresh spawn 连续失败时（畸形 JSON/EOF），用 `resume_from` 续跑一个既有同模型会话可完全绕开该 bug（resume 不携带 model 参数、继承会话模型）——2026-11-05 qwen3.8-flash-next-ms-222 fresh 5 连败后以此恢复。
+- **spawn `model` 参数序列化 bug 的绕法**：fresh spawn 连续失败时（畸形 JSON/EOF）可试 `resume_from` 续跑既有同模型会话（resume 不携带 model 参数、继承会话模型）——对 deepseek 实测有效；**但对 qwen 无效**：qwen 的序列化错误也发生在会话模型自身的工具调用生成上，resume 后 turn 1 即复发（2026-11-05 实测 fresh 5 连败 + resume 1 连败）。结论：resume 只绕得开 spawn 层，绕不开会话模型层的畸形输出。
 - **2026-11-05 当日通道状态**：`glm-5.3-flashx-222` 503 `no available upstream account` 两次（审计席不可用，以 step-5-preview-222 顶替）；`qwen3.8-flash-next-ms-222` spawn 序列化错误 5 连败（上午首派成功过，下午系统性坏）；`deepseek-v4-1-flash-1017-ms-222`（luyou→amd 池）429 波动——长会话（>5 分钟）易被切断，**resume 可续命**（实测续跑 30 分钟又断，半成品保留在树），池饱和时 fresh spawn 也会 2 分钟内死。跨天必须重测，勿以当日状态推明天。
 - **pre-commit 钩子 MSYS 路径 bug（2026-11-05 修复））**：钩子 wrapper 用 bash `pwd` 得 `/c/...` 路径直传 `powershell -File`，PS 不认 ⇒ 一切提交 fail-closed（exit 127）。已改 cygpath -w 转换（备份 `pre-commit.bak-20261105-pathconv`）。若提交莫名被钩子拦且报 "-File 缺少参数"，先查此处。
 
