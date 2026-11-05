@@ -323,7 +323,8 @@
 
 **spawn 路由实测注意（2026-10-11 深挖）**：
 - spawn 子代理的模型调用**与本机 config.toml / auth.json 解耦**（走平台内置目录+独立凭据，细节未全还原）：同模型手动直连 200 而 spawn 可能 401/503（实测：kimi-k2.6 手动 200 / spawn 503 `no usable credential for provider 'intern'`；kimi-k2.7-code 手动 200 / spawn 401 `Invalid token` from api.openai-next.com）——**派活前先 spawn 小任务验连通，勿以手动直连结果为准**
-- **spawn_subagent 的 `model` 参数序列化 bug（2026-10-15 实测 10+ 连败）**：`model` 值的引号被序列化层稳定吞掉（`"model": KIMI-K3-222` 裸 token → Invalid JSON，改参数顺序/转义/换 slug 全无效；**不带 model 继承父模型可正常 spawn**）。**根治通道：qidi CLI headless——`qidi.exe --prompt-file <任务书> -m "<模型>" --permission-mode ... --cwd ... --output-format plain`**（同走云端中转，实测 KIMI-K3-222 审计 170s 成跑；编码手派工用 `--permission-mode bypassPermissions`+相应工具面）。**B5 门坑**：`bypassPermissions`（=yolo）无 OS 沙箱时 CLI 拒启——解法按安全等级选：`--yolo-tools <逗号白名单>`（收窄自动批准面，推荐）或 `--ack-no-sandbox`（全放行，慎用）或 `--sandbox <profile>`；**2026-10-19 补实测：本机 config.toml `[ui] permission_mode="always-approve"` 即触发 B5 门——headless 默认跑法必挂（0.5s 拒启），任何 headless 任务书都须带 `--yolo-tools` 收窄**；另注意 PowerShell `>` 重定向默认写 UTF-16，报告落盘后须转 UTF8 再读。~~指针式短 prompt 可降低序列化风险~~（**勘误 2026-10-16 三测：短报文不豁免、值加尾随空格强制引号也不豁免——与报文大小无关；slug 选择性实存（同会话 DeepSeek-V4.1-Flash-222 spawn 正常成跑）。再勘误（用户口径）：故障为**间歇性非确定性**——另会话 GLM-5.3-FLASH-222 第三次重试成功；机制=参数 JSON 由会话模型逐 token 采样生成（无 schema 约束解码），丢引号是概率事件，畸形率按（会话模型×slug）分布（KIMI-K3-222 极高、DeepSeek ≈0）；产品的错误回带闭环（原始参数+列号塞回上下文）使重试自带 in-context 修正机会——**重试本身是有效应急绕法**，根治=宽容解析层（2026-10-16 落地，见当日 commit）**）
+- **spawn_subagent 的 `model` 参数序列化 bug（2026-10-15 实测 10+ 连败）**：`model` 值的引号被序列化层稳定吞掉（`"model": KIMI-K3-222` 裸 token → Invalid JSON，改参数顺序/转义/换 slug 全无效；**不带 model 继承父模型可正常 spawn**）。**〔2026-11-05 用户裁定：此通道停用〕** qidi CLI headless——`qidi.exe --prompt-file <任务书> -m "<模型>" --permission-mode ... --cwd ... --output-format plain`（不经过 spawn_subagent 工具、直启无人值守 CLI 会话的派工通道；同走云端中转，实测 KIMI-K3-222 审计 170s 成跑；编码手派工用 `--permission-mode bypassPermissions`+相应工具面）。**B5 门坑**：`bypassPermissions`（=yolo）无 OS 沙箱时 CLI 拒启——解法按安全等级选：`--yolo-tools <逗号白名单>`（收窄自动批准面，推荐）或 `--ack-no-sandbox`（全放行，慎用）或 `--sandbox <profile>`；**2026-10-19 补实测：本机 config.toml `[ui] permission_mode="always-approve"` 即触发 B5 门——headless 默认跑法必挂（0.5s 拒启），任何 headless 任务书都须带 `--yolo-tools` 收窄**；另注意 PowerShell `>` 重定向默认写 UTF-16，报告落盘后须转 UTF8 再读。~~指针式短 prompt 可降低序列化风险~~（**勘误 2026-10-16 三测：短报文不豁免、值加尾随空格强制引号也不豁免——与报文大小无关；slug 选择性实存（同会话 DeepSeek-V4.1-Flash-222 spawn 正常成跑）。再勘误（用户口径）：故障为**间歇性非确定性**——另会话 GLM-5.3-FLASH-222 第三次重试成功；机制=参数 JSON 由会话模型逐 token 采样生成（无 schema 约束解码），丢引号是概率事件，畸形率按（会话模型×slug）分布（KIMI-K3-222 极高、DeepSeek ≈0）；产品的错误回带闭环（原始参数+列号塞回上下文）使重试自带 in-context 修正机会——**重试本身是有效应急绕法**，根治=宽容解析层（2026-10-16 落地，见当日 commit）**）
+  **⚠ 2026-11-05 用户裁定（生产纪律变更）**：headless CLI 通道**停用**——派工一律走 `spawn_subagent` 子代理；子代理渠道故障（429/序列化）时只重试或等窗口，**不得**改道 headless CLI。原因：双通道并存使凭证/额度/审计面分裂，子代理通道是可观测（会话 `current_model_id` 可验）的唯一通道。
 - **派发任务的会话卫生（2026-10-20）**：headless（`qidi -p/--prompt-file`，initialize `startupHints.nonInteractive=true`）新建会话自动写 `session_kind=subagent_headless`——**历史选择器默认不展示、搜索仍可见、凭 session id 可 `--resume`**（`Summary::is_hidden`，与子代理子会话同档）；`-c`/裸 `--resume` 也会跳过它们。显式控制（**仅 headless 路径**）：`--session-kind subagent` / 环境变量 `QIDI_SESSION_KIND=subagent`；`--session-kind user` 保留在历史。**交互式 TUI 尚未透传该标记**——派发任务统一走 headless，勿依赖交互式建会话隐藏。**历史里已存在的派发任务一次性回溯隐藏**：先 `qidi sessions hide --headless --dry-run` 看清单，确认后去掉 `--dry-run`（只匹配「无 session_kind + `system_prompt.txt` 含 "an autonomous agent that completes software engineering tasks"」的会话，用户自己的交互会话不动；跨工作区加 `--all-workspaces`）。
 - **2026-10-17 标书编写实测补记**：①DeepSeek-V4.1-Flash-222 走 luyou 池当日 401（upstream returned 401 / no account could serve it）6 连败，不带 model 参数（继承父模型）可正常 spawn；②**父模型 step-5-preview 对大输出必截断**（max_tokens_truncation）——凡要求子代理重写整章/整文件的任务 100% 失败，必须改小步模式（逐节 search_replace、单次输出≤600字），并防跑偏（有个例转去 web 浏览需 kill）；③**并行写章的跨章口径冲突是最大质量风险**（两章各自自洽但互相矛盾：工种人数/工期窗口/曲线峰值），指挥官合并后必须做全案数据对账；④50 页硬限制的容积手段：表格 9.5 磅+12 磅行距、去 cantSplit、标题单倍行距、封面目录合一（本次 76→53 页）
 
@@ -346,6 +347,18 @@
 - **spawn `model` 参数序列化 bug 的绕法**：fresh spawn 连续失败时（畸形 JSON/EOF）可试 `resume_from` 续跑既有同模型会话（resume 不携带 model 参数、继承会话模型）——对 deepseek 实测有效；**但对 qwen 无效**：qwen 的序列化错误也发生在会话模型自身的工具调用生成上，resume 后 turn 1 即复发（2026-11-05 实测 fresh 5 连败 + resume 1 连败）。结论：resume 只绕得开 spawn 层，绕不开会话模型层的畸形输出。
 - **2026-11-05 当日通道状态**：`glm-5.3-flashx-222` 503 `no available upstream account` 两次（审计席不可用，以 step-5-preview-222 顶替）；`qwen3.8-flash-next-ms-222` spawn 序列化错误 5 连败（上午首派成功过，下午系统性坏）；`deepseek-v4-1-flash-1017-ms-222`（luyou→amd 池）429 波动——长会话（>5 分钟）易被切断，**resume 可续命**（实测续跑 30 分钟又断，半成品保留在树），池饱和时 fresh spawn 也会 2 分钟内死。跨天必须重测，勿以当日状态推明天。
 - **pre-commit 钩子 MSYS 路径 bug（2026-11-05 修复））**：钩子 wrapper 用 bash `pwd` 得 `/c/...` 路径直传 `powershell -File`，PS 不认 ⇒ 一切提交 fail-closed（exit 127）。已改 cygpath -w 转换（备份 `pre-commit.bak-20261105-pathconv`）。若提交莫名被钩子拦且报 "-File 缺少参数"，先查此处。
+
+### 派工额度纪律（2026-11-05 实测 ≈15–18M token/午间后的裁定，用户确认）
+
+**实测账**：单日乐团派工（2 编码手 + 2 审计席 + 返工）约 15–18M token，其中 ≈9.5M 纯损耗于基础设施死亡（deepseek AMD 池 429 七连败 × 死前全额计费、qwen 序列化六连败）。烧得快四机制：① 会话上下文每轮全量重发（4M token 会话 = 58 轮 × 7 万/轮，cache read 94–96% 只省计算不省额度）；② 大文件整读（server.py 3695 行 ≈4 万 token/次，读一次永久驻留）；③ 全量 pytest 输出反复进上下文；④ 长会话被 429 切断 = 死前 2M 全额烧掉 + resume 再重载。
+
+**纪律（写进每份派工单）**：
+1. 输出纪律：命令输出超 40 行只 `tail -20`；pip/venv 输出重定向日志再 grep；全量 pytest 每轮最多贴一次 `tail -5`；**大文件只许 `sed -n 'a,bp'` 行范围，禁止整读 server.py/run_all.py 级文件**；
+2. 切片：单次派工 ≤20 次工具调用，超了拆两次——长会话是 429 死亡与额度双损的来源；
+3. 编码手只跑靶向测试；**全量套件由指挥官收尾跑**（指挥官在 step-5 池，不烧魔搭额度）；
+4. 编码手每 ~15 次工具调用落一次进度笔记（文件），429 死后下一会话从笔记续，不重读盘；
+5. 审计席提示词给精确行域与证据包，不让漫游读全仓；
+6. 重试前先评估池窗口（死会话不退款，连败 3 次即停手上报，不盲烧）。
 
 ## 10. Git 提交与推送（生产纪律）
 
