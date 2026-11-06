@@ -153,7 +153,20 @@
 
 | 审计 | **首席深审 `GLM-5.3-FLASHX`**（codely pro 账号 39640，3.4s，**计费 1×（与 deepseek-flash 同价）**，池模型只能直选、不能做兜底）；**巡查 `Qwen/Qwen3.8-Flash-Next`**（ModelScope 免费池 0.6s）或 `a`agnes-2.5-flash``（免费 0.4s）；**第二席 `jw/kimi-k3-1`**（jiuwei，6/6 硬题，10× 成本；**2026-10-31 实测 403，派前先探活**）。apigoto `GLM-5.3-222` / `claude-haiku-5-5` 自 2026-10-22 起余额 0.1 元不可用。**2026-10-29 二次勘误**：`claude-haiku-5-5-ago-222` 探针可用（3.9s PONG，能跑只读审计并已产出完整报告），**但 0.1 元余额只够短任务**——同日子代理跑到 50 次工具调用 / 34 分钟、累计 5.32M tokens 时被 `429 Credits不足，账户余额 0.1 不足 1 元、无法自动兑换` 中止（退出码 1）。**结论：haiku 可用于探针与 10 分钟内的小审计，长审计必须选别的席位或先充值**；`go-claude-haiku-5-5` 路由始终 401 `Go requires a credential`（不可用）。**2026-10-30 三次勘误（apigoto 额度性质）**：apigoto **每天都有推广收益到账**，余额按天恢复、呈波动态——10-29 全天 429（余额 0.1 元），10-30 16:45 实测 `www.apigoto.com` 对 `deepseek-flash` 返回 200。所以"不可用"这类判定**只在当天有效**，跨天必须重测；另注意小写 `deepseek-flash` 由 apigoto 与 sensenova 同时声明，`match()` 先到先得 → 该请求实际由 apigoto 服务，**不是 52duck**（裸名 `deepseek-v4.1-flash` 又被 sensenova 抢，52duck 只能靠独占别名到达）。 | 双模型交叉审计；结论分歧时以代码证据裁决 |
 | 只读探查 | `subagent_type="explore"` / `plan`（只读侦察/方案规划；**2026-10-19 起可指定 `Qwen/Qwen3.8-Flash-Next`（modelscope 魔粒池，slug `qwen3.8-flash-next-ms-222`）——零成本白嫖池，6/6 推理基准支撑规划质量；重规划仍建议 GLM/haiku**） | 只读侦察/规划 |
+| 苦力活（**2026-11-06 新增，本节 slug 已实测**） | `model="agnes-2.5-flash"`——**19.6s 成跑、4 次工具调用、零污染**（同轮实测：DeepSeek-V4.1-Flash 277s 后 429、`agnes-3.0-flash` 4.9s 404）。适用：打包/校验和/批量改名/格式转换/抄写文件/跑脚本收日志等**步骤明确、无需判断**的活，不要拿它做设计或审计。⚠️ slug 陷阱见下行 | 机械执行，附 sha256 回执 |
 | 隔离 | `isolation="worktree"` | 需要隔离时用（有冷构建代价） |
+| **讯飞星火（2026-11-06 实测：长文写作可用，但并发是硬门槛）** | `model="spark-x2.6"`（config 条目，直连 `maas-api.cn-huabei-1.xf-yun.com/v2`，262K 窗口）| **探针 27.4s / 2 次调用成跑**，write 落盘 + sha256 与本地重算逐位吻合；正章写作 30 分钟级、25～33 次工具调用；**`cwd` 指到工作区外（E 盘项目目录）后 `write`/`read_file` 的边界检查随 cwd 放开**——跨盘写盘可用，这是标书类"交付物不进仓库"任务的标准派工形态。⚠️ **同模型并发上限 4**：5 并发触发 `429 Too Many Requests`（`rate_limit_error: request frequency limit exceeded`），死前全额计费（一次返工死会话 46.5 万 token，其中 44 万是 cache read）。⚠️ **resume 长会话（>45 万 token）在 4 并发下同样 429**——返工一律新开会话＋精确返工单，别 resume 长会话省那几个字。**副作用实测**：返工死在 2/4 项时，落盘部分是好的（数字修正生效）、未完成部分静默缺失，必须按返工单逐项 grep 复验磁盘，不能信"已发出" |
+
+**⚠️ agnes slug 归一化陷阱（2026-11-06 实测，易反复踩）**：`spawn_subagent` 传入的 `model` 与 relay 实际收到的模型名**可能不一致**——网关侧存在归一化/改写，而报错里列出的可用清单是 relay 侧的声明面。两层不同步时，**清单里看得见的条目不代表可调**，读者极易误判成"清单里有、那就是我传错了"。实测三连（同一轮、同一任务、仅差 slug）：
+
+- `model="agnes-2.5-flash"` ✅ **19.6s 成跑**，4 次工具调用，产出 sha256 与本地重算逐位吻合
+- `model="DeepSeek-V4.1-Flash"`（不带 model 时的默认） ❌ **277s 后 429**，input 53K / output 110 / `numTurns=1`——并发池满，死在第一轮
+- `model="agnes-3.0-flash"` ❌ **4.9s 404**，报错正文 `The model 'agnes-3.0-flash' does not exist`，但错误头 `Model:` 字段与清单里都**写着同一个名字**；本会话另有一次 `agnes-3.0-flash-222` 同样 404，报错正文却变成 `'agnes-3.0-flash'`——**传进去的和报出来的不是一个串**，是归一化而非拼写问题
+
+**纪律**：
+1. 派 agnes 前**先派 30 秒探针**（"读一个文件回 sha256 前 8 位"），成跑再派正式任务；不要靠清单推断可用性。
+2. 404 报错里"清单包含该名字"**不是**反证——那是 relay 声明面，与网关归一化面不同步。
+3. agnes-3.0 在 spawn 通道**截至 2026-11-06 不可达**，需要的走 `agnes-2.5-flash` 或换模型；跨天重测再定。
 
 
 ### 回执契约（2026-11-03，relay 改动实战教训）
@@ -476,6 +489,7 @@ Git Bash 分支已预设 `MSYS_NO_PATHCONV=1` 与 `MSYS2_ARG_CONV_EXCL=*`（`she
 | `setx PATH` | User PATH 已 1327 字符，`setx` 有 1024/2048 截断风险，**静默损坏** | 用 `[Environment]::SetEnvironmentVariable(...,'User')`，改前备份、改后回读校验 |
 | 整目录入 PATH | 会把 `link.exe` 带进来，**cargo 链接直接失败且难定位** | 只用精选 `.shims`，排除 `link/find/sort/tar/gzip/ssh` |
 | 子进程环境变量 | 改系统/用户环境变量后，**运行中的进程看不到**（继承启动期环境块） | 需重启进程；免重启只能用**已在启动期 PATH 内**的目录（如 `.cargo\bin`） |
+| 主会话读图 | 主会话模型**不支持视觉**：`read_file` 读 PNG 只返回"本模型不支持视觉"＋落盘路径 `/opt/codely-relay/media/<hash>.jpg` | 派视觉席读图**抄录**（提示的优先级 agnes-2.5-flash → codely-vl → agnes-2.5-pro-beta），指挥官按抄录自行比对；不要让视觉模型下"合格与否"的结论——它只负责转录像素里的文字与缺陷 |
 
 ### 13.4 回滚
 
