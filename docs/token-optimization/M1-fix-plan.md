@@ -1,6 +1,10 @@
 # M1 修复方案：token 估算常数校正（v5，2026-10-21 四轮审计返工后）
 
-> **状态**：**已定稿，未实施**。2026-10-21 用户决定：不单独编译，随下次改动一起出包；不新建分支（直接在当前分支提交）。缺陷记录见 `docs/fix-plans/2026-10-21-token-estimate-underreport.md`。
+> **状态**：**已定稿，~~未实施~~→ 已实施**（2026-11-06 状态勘误；"未实施"是 2026-10-21 定稿时点快照，保留作历史记录）。
+> **落地实证**：常数、断言/注释、校准夹具与 dev-dep 由 `5e0c0521`（2026-11-05，`fix(token): 收口估算校准与任务参数消毒`）入库——`cf-token-estimation`（`src/lib.rs` 新常数 + `tests/calibration.rs` + `tests/data/calibration_stats.json` + `Cargo.toml` 的 dev-dep `serde_json`）、`cf-chat-state`（`actor/state.rs`、`actor/tests.rs`、`compaction_utils.rs`）、`cf-shell`（`inspect/mod.rs`、`session/acp_session_impl/payload_accounting.rs`、`session/helpers/session_recap.rs`）、`cf-sampler`（`stream/chat_completions.rs`）全部按本方案改动（来源：`git show --stat 5e0c0521`）。估算器耦合的 P1 残留（golden 期望、生产注释、§5 消费方地图、RUBRICS R-001 修订）由 `e95177bc`（2026-11-06）收口（来源：`git show --stat e95177bc`）。
+> **因此本文件的 §3 清单与 §6 门禁自 2026-11-06 起转为"施工/复核台账"**：行号一律按**当轮工作树**重取（见 §3.2/§3.4 的坐标口径注），§11 审计记录保留当年原坐标不改。
+>
+> 2026-10-21 用户决定：不单独编译，随下次改动一起出包；不新建分支（直接在当前分支提交）。缺陷记录见 `docs/fix-plans/2026-10-21-token-estimate-underreport.md`。
 >
 > **依据**：`docs/token-optimization/tokenizer-calibration-and-plan.md` v2（分层语料 40 会话 / 6,376 项 / 3.91M 真值 token，聚合比 0.819）
 > **审计**：codely-core（GLM-5.3）**四轮**——v1 REJECT（7 项）、v2 REJECT（5 项）、v3 REJECT（1 项）、v4 REJECT（断言清单仍漏 ≥7 处，且**按符号名 grep 收口本身不完备**）。四轮均确认**核心设计、常数、公式、夹具、回滚无需改动**。本 v5 除补全清单外，**改了方法论**：把"穷举断言"降级为"已知清单 + 机械重算规则"，因为零符号测试无法被任何 grep 穷举（见 §3.0）。
@@ -43,12 +47,12 @@
 | # | 文件 | 改动 | 风险 |
 |---|---|---|---|
 | C1 | `cf-token-estimation/src/lib.rs` | 新增 `ASCII_TOKEN_NUMERATOR=10` / `ASCII_TOKEN_DENOMINATOR=34`；`CJK_TOKEN_NUMERATOR` 3→4；ASCII 分支改有理数 floor，CJK 仍 ceil，`other` 仍 `/BYTES_PER_TOKEN` | 低 |
-| C2 | 5 个文件 **7 处生产注释 + 13 处测试内注释/消息** | `lib.rs:24-30`、`:59-65`、`:66-81`、`state.rs:20`、**`state.rs:60-61`**、`payload_accounting.rs:597`、**`inspect/mod.rs:1970-1976`**；测试内：`lib.rs` ~:269/:272/:284、`tests.rs` :316/:355/:375/:470/:538、`state.rs:411-412/:498/:535/:542`、`payload_accounting.rs:17` | 无 |
+| C2 | 5 个文件 **7 处生产注释 + 13 处测试内注释/消息** | `lib.rs:24-30`、`:59-65`、`:66-81`、`state.rs:20`、**`state.rs:60-61`**、`payload_accounting.rs:597`、**`inspect/mod.rs:1970-1976`**；测试内：`lib.rs` ~:269/:272/:284、`tests.rs` :316/:350-351/:376/:472-473/:542-543、`state.rs:414-415/:503/:541/:548`、`payload_accounting.rs:17` | 无 |
 | C3 | `lib.rs` 测试区 | 5 个测试函数更新 + 1 个新增锁定测试（§3.1） | 无 |
 | C4 | `cf-chat-state/src/actor/state.rs`（**内嵌 `#[cfg(test)] mod tests`**） | **10 处断言** + 1 个测试改名（§3.2 A） | 低 |
 | C5 | `cf-chat-state/src/actor/tests.rs` | **11 处断言**（§3.2 B；四轮审计逐步补齐） | 低 |
-| C6 | `cf-shell/src/inspect/mod.rs:1978-2003` | 注释算式 + 断言方向翻转（§3.3） | 低 |
-| C9 | `cf-shell/src/session/helpers/session_recap.rs:804` | **改构造**（filler 按新速率反推），非改期望值（§3.4） | 低 |
+| C6 | `cf-shell/src/inspect/mod.rs:1982-2008`（原 `:1978-2003`） | 注释算式 + 断言方向翻转（§3.3） | 低 |
+| C9 | `cf-shell/src/session/helpers/session_recap.rs:810/:813`（原 `:802/:804`） | **改构造**（filler 按新速率反推），非改期望值（§3.4） | 低 |
 | C7 | `cf-token-estimation/tests/calibration.rs` + `tests/data/calibration_stats.json` | 校准回归（已试生成：194 条 / 15.2KB / 0.9841 / 16.3%） | 低 |
 | C8 | `cf-token-estimation/Cargo.toml` | **`[dev-dependencies] serde_json`**（C7 解析夹具所需；该 crate 现无此依赖） | 无 |
 
@@ -98,55 +102,61 @@ pub fn estimate_tokens_aware(s: &str) -> u64 {
 
 不受影响（已手算）：`empty`、`emoji`(1/2)、`cjk_block_boundaries`(2/0/1/1)、`punct_via_han_arm`(2)。
 
-### 3.2 A. `cf-chat-state/src/actor/state.rs`（内嵌测试模块，:340 起；**10 处**）
+### 3.2 A. `cf-chat-state/src/actor/state.rs`（内嵌 `#[cfg(test)] mod tests` 在 `:328-329`，测试体自 `:332` 起；**10 处**）
+
+> 坐标口径（2026-11-06 重取）：下列行号由 `sed -n`/`grep -n` 从**当前工作树**（HEAD `29b1d2d8`，含实施提交 `5e0c0521` 与收口提交 `e95177bc`）重取，括注内为 2026-10-21 定稿时的原坐标（对应 `5e0c0521^`）。
 
 | 行 | 断言对象 | 旧 | **新** |
 |---|---|---|---|
-| `:370` | 100 CJK system | 60 | **80** |
-| `:375` | `"你好世界hello"` user | 4 | **5** |
-| `:379` | 同上 assistant | 4 | **5** |
-| `:389` | `{"路径":"你好"}`（7 ASCII + 4 CJK） | 4 | **6**（70/34=2 + ceil(16/5)=4） |
-| `:393` | `"你好世界hello"` tool_result | 4 | **5** |
-| `:406` | `multi`（两段各 2 CJK） | 4 | **4 不变**，注释 `ceil(6/5)` 须改 `ceil(8/5)` |
-| `:410` | `..._ascii_matches_legacy_bytes_over_four` | 名与语义失效 | **改名** `..._ascii_uses_calibrated_rate` |
-| `:419-421` | `[27,28,23,13]` 纯 ASCII | `[6,7,5,3]` | **`[7,8,6,3]`** |
-| `:453` / `:470` | multisegment `ab/cd/efgh` | 1 / 0 | **不变**（注释算式过时） |
-| **`:506`** | `new_state_estimates_tokens_from_conversation`：4×`"x"*4000` 的 `ChatState::new` | `4_000` | **`4_704`**（4×1,176）；`:498` 注释"bytes/4=1000 each"同步改 |
-| **`:512`** | `estimate_system_message_tokens(...)`，`"a"*400` | `100` | **`117`**（4,000/34） |
-| **`:543` / `:544`** | `estimate_messages_tokens...`（4 项 / 3 项） | `4000` / `3000` | **`4_704`** / **`3_528`**；`:535/:542` 注释同步 |
+| `:372`（原 `:370`） | 100 CJK system | 60 | **80** |
+| `:377`（原 `:375`） | `"你好世界hello"` user | 4 | **5** |
+| `:381`（原 `:379`） | 同上 assistant | 4 | **5** |
+| `:392`（原 `:389`） | `{"路径":"你好"}`（7 ASCII + 4 CJK） | 4 | **6**（70/34=2 + ceil(16/5)=4） |
+| `:396`（原 `:393`） | `"你好世界hello"` tool_result | 4 | **5** |
+| `:409`（原 `:406`） | `multi`（两段各 2 CJK） | 4 | **4 不变**，注释 `ceil(6/5)` 须改 `ceil(8/5)`（注释现居 `:399`，已同步） |
+| `:413`（原 `:410`） | `..._ascii_matches_legacy_bytes_over_four` | 名与语义失效 | **改名** `..._ascii_uses_calibrated_rate` |
+| `:424-426`（原 `:419-421`） | `[27,28,23,13]` 纯 ASCII（items 现居 `:416-421`） | `[6,7,5,3]` | **`[7,8,6,3]`** |
+| `:458` / `:475`（原 `:453` / `:470`） | multisegment `ab/cd/efgh` | 1 / 0 | **不变**（注释算式过时） |
+| **`:511`**（原 `:506`） | `new_state_estimates_tokens_from_conversation`：4×`"x"*4000` 的 `ChatState::new` | `4_000` | **`4_704`**（4×1,176）；注释"bytes/4=1000 each"同步改（原 `:498`，现 `:503`） |
+| **`:518`**（原 `:512`） | `estimate_system_message_tokens(...)`，`"a"*400` | `100` | **`117`**（4,000/34） |
+| **`:549` / `:550`**（原 `:543` / `:544`） | `estimate_messages_tokens...`（4 项 / 3 项） | `4000` / `3000` | **`4_704`** / **`3_528`**；注释同步（原 `:535`、`:542`，现 `:541`、`:548`） |
 
 ### 3.2 B. `cf-chat-state/src/actor/tests.rs`（**11 处**；四轮审计逐步补齐）
 
+> 坐标口径（2026-11-06 重取）：同 §3.2 A，行号从当前工作树重取，括注为定稿时原坐标。**本节表格以下的引号块（grep 教训）与 §11 审计记录仍保留当年原坐标**——它们是施工前的审计史实，不是派工坐标，改写会造成历史记录失真。
+
 | 行 | 场景 | 旧 | **新** |
 |---|---|---|---|
-| `:321` | 4000 字符 tool_result 增量 | `101_000` | **`101_176`**（40000/34=1176） |
-| `:335` | 同上 + model response | `101_000` | **`101_176`** |
-| `:357` | 4,000,027 ASCII（4MB 后台通知） | 区间 `1_099_000..=1_101_000` | **`1_276_478`**；区间改 `1_276_000..=1_277_000` |
-| `:380` | `"u"*4000` user 推送 | 区间 `101_000..=101_010` | **`101_176`**；区间改 `101_100..=101_250` |
-| `:420` | 同上 rewind 后 | `101_000` | **`101_176`** |
-| **`:500`** | `compaction_reseed_...`：`"x"*160_000` 的 `estimate_conversation_tokens` | `40_000` | **`47_058`**（1,600,000/34） |
-| **`:506`** | 压缩后 `"z"*12_000` | `3_000` | **`3_529`**（120,000/34） |
-| **`:510`** | ratio-scaled reseed 结果 | `6_525` | **`6_524`**（`mutations.rs:665-668` 实证为 f64 `.round()`：3,529×87,000/47,058=6,524.35 → 6,524，**确定值**） |
-| **`:512`** | `additive_model = compacted + (provider − at_response)` | `50_000` | **`43_471`**（3,529+39,942） |
-| **`≈:657`** | `compaction_reseed_without_provider_count_matches_plain_estimate`：`"w"*8_000` | `2_000` | **`2_352`**（80,000/34） |
-| **`≈:674`** | `non_compaction_replace_does_not_carry_overhead`：`"q"*4_000` | `1_000` | **`1_176`** |
+| `:322`（原 `:321`） | 4000 字符 tool_result 增量 | `101_000` | **`101_176`**（40000/34=1176） |
+| `:336`（原 `:335`） | 同上 + model response | `101_000` | **`101_176`** |
+| `:359`（原 `:357`） | 4,000,027 ASCII（4MB 后台通知） | 区间 `1_099_000..=1_101_000` | **`1_276_478`**；区间改 `1_276_000..=1_277_000` |
+| `:382`（原 `:380`） | `"u"*4000` user 推送 | 区间 `101_000..=101_010` | **`101_176`**；区间改 `101_100..=101_250` |
+| `:422`（原 `:420`） | 同上 rewind 后 | `101_000` | **`101_176`** |
+| **`:504`**（原 `:500`） | `compaction_reseed_...`：`"x"*160_000` 的 `estimate_conversation_tokens` | `40_000` | **`47_058`**（1,600,000/34） |
+| **`:511`**（原 `:506`） | 压缩后 `"z"*12_000` | `3_000` | **`3_529`**（120,000/34） |
+| **`:516`**（原 `:510`） | ratio-scaled reseed 结果 | `6_525` | **`6_524`**（`mutations.rs:665-668` 实证为 f64 `.round()`：3,529×87,000/47,058=6,524.35 → 6,524，**确定值**） |
+| **`:518`**（原 `:512`） | `additive_model = compacted + (provider − at_response)` | `50_000` | **`43_471`**（3,529+39,942） |
+| **`:664`**（原 `≈:657`） | `compaction_reseed_without_provider_count_matches_plain_estimate`：`"w"*8_000` | `2_000` | **`2_352`**（80,000/34） |
+| **`:682`**（原 `≈:674`） | `non_compaction_replace_does_not_carry_overhead`：`"q"*4_000` | `1_000` | **`1_176`** |
 
 > **为什么连 grep 都靠不住（四轮审计的教训）**：`:657`/`:674` 这类测试正文里**一个估算符号都没有**（直接 `ChatState::new` 或纯字面量断言），任何名字模式都扫不到；`:512` 走的是 `estimate_system_message_tokens`，也不在原四符号里。**所以：名字 grep 只能"尽量多捞"，真正的完备闸门是 §6 的全量跑绿 + §3.0 的机械重算规则。**
 >
 > 建议的捞取命令（补充用，非完备）：
 > `git grep -nE "estimat|101_000|1_099_000|4_000" -- crates/codegen/cf-chat-state crates/codegen/cf-shell`
 >
-> **已验证不受影响、编码手勿改**：`:484/:487` 的 `51_000`（compacted==at_response，线性缩放不变）、`:536` 的 `5_500`（2,000/4,000 与 588/1,176 同为 0.5 比例，精确不动）、`:404` 的 `100_000`（no-bump 语义与内容大小无关）、`:545`（用 `.round()` 现场算，速率自消）。
+> **已验证不受影响、编码手勿改**（坐标 2026-11-06 从当前工作树重取，括注原坐标）：`:487/:490-491`（原 `:484/:487`）的 `51_000`（compacted==at_response，线性缩放不变）、`:542-543`（原 `:536`）的 `5_500`（2,000/4,000 与 588/1,176 同为 0.5 比例，精确不动）、`:406`（原 `:404`）的 `100_000`（no-bump 语义与内容大小无关）、`:551`（原 `:545`，`compaction_overhead_unaffected_by_pruning_after_last_response`，用 `.round()` 现场算，速率自消）。
 
 ### 3.4 `cf-shell/src/session/helpers/session_recap.rs`（**1 处**）
 
-`:804`（`budget_threshold_boundary_selects_fast_vs_over_budget`）：断言 `estimate_conversation_tokens(&at) == snapshot_budget`，而 filler 是按 `"a".repeat(filler_tokens * 4)` 构造的——**与 bytes/4 精确耦合，M1 后必挂**。
-**修法不是改期望值，而是改构造**（§3.0 规则）：`filler_chars = ceil((snapshot_budget − reasoning_tokens) × 34 / 10)`，**且 `:816` 的 over 用例必须同步反推**（它复用同一 `filler_tokens×4` 构造；只改 `:802` 会让边界语义被稀释）。数学上该反推**精确成立**：`floor(10·ceil(34X/10)/34) = X` 零残差，`over = N+4` 时 `floor ≥ X+1`，`:818` 的 `>` 仍严格成立（五轮审计已证，无需实跑试数）。
+坐标口径（2026-11-06 重取）：施工前坐标见括注"原"，当前工作树坐标为首位；测试函数 `budget_threshold_boundary_selects_fast_vs_over_budget` 现居 `:786`。
+
+`:813`（原 `:804`）：断言 `estimate_conversation_tokens(&at) == snapshot_budget`，而 filler 原按 `"a".repeat(filler_tokens * 4)` 构造（原 `:802`/`:816`，现 `:810`/`:826`）——**与 bytes/4 精确耦合，M1 后必挂**。
+**修法不是改期望值，而是改构造**（§3.0 规则）：`filler_chars = ceil((snapshot_budget − reasoning_tokens) × 34 / 10)`，**且 over 用例（原 `:816`，现 `:826`）必须同步反推**（它复用同一 `filler_tokens×4` 构造；只改原 `:802`（现 `:810`）会让边界语义被稀释）。数学上该反推**精确成立**：`floor(10·ceil(34X/10)/34) = X` 零残差，`over = N+4` 时 `floor ≥ X+1`，原 `:818`（现 `:829`）的 `>` 仍严格成立（五轮审计已证，无需实跑试数）。**落地实证（2026-11-06）**：`:810` 与 `:826` 已改为 `"a".repeat(cf_token_estimation::estimate_chars_aware(...) as usize)`，`estimate_chars_aware`（`cf-token-estimation/src/lib.rs:168-172`）= `tokens × 34 ÷ 10` 上取整，与本节公式逐字一致（提交 `5e0c0521`）。
 
 ### 3.3 `cf-shell/src/inspect/mod.rs`
 
-- `:1978-1979` 注释：`ceil(200*3/5)=120` → `ceil(200*4/5)=160`；
-- `:2000-2003` 断言 `approx_tokens < estimate_tokens(&zh)`（160 < 150 为假）→ **翻转为 `>`**，消息改"aware 现高于旧 bytes/4 低估"。
+- `:1982-1983` 注释（原 `:1978-1979`）：`ceil(200*3/5)=120` → `ceil(200*4/5)=160`；
+- `:2004-2008` 断言（原 `:2000-2003`）`approx_tokens < estimate_tokens(&zh)`（160 < 150 为假）→ **翻转为 `>`**，消息改"aware 现高于旧 bytes/4 低估"。
 
 ---
 
@@ -178,7 +188,9 @@ pub fn estimate_tokens_aware(s: &str) -> u64 {
 | 逐项 MAPE 16% | 两常数混排互补 | 单条可偏 20%+ | 对外只声称"聚合层"；根治靠 M2 |
 | 非 DeepSeek 词表 | GLM/Kimi/Qwen 未标定 | 方向未知 | 只声称 DeepSeek 系 |
 
-**直接消费方（原 21 处 + cf-sampler 12 处 = 33 处）**：
+**直接消费方（生产代码口径：原 21 处 + cf-sampler 12 处 = 33 处）**：
+
+> **口径限定（2026-11-06 补，来源：`git grep -c "estimate_tokens_aware(" -- crates`）**：33 处是**生产代码**的直接调用数。按字面 grep 会更多——本表五个消费文件所在 crate 内另 **+2** 处（合计 35）：`cf-shell/src/inspect/mod.rs:2001`（§3.3 那条测试自己的断言）与 `cf-chat-state/src/compaction_utils.rs:3575`（位于 `:1023` 起的 `#[cfg(test)]` 内，是 `5e0c0521` **新增**的钉住断言，**不是待改的旧断言**）；再加上定义方 `cf-token-estimation` 内部的 `src/lib.rs` 21 处与 `tests/calibration.rs` 2 处，全仓字面总数为 58。**下轮审计勿据字面 grep 数判为"消费方地图漏列"**。
 
 | 文件 | 行 | 方向 |
 |---|---|---|
@@ -200,7 +212,7 @@ pub fn estimate_tokens_aware(s: &str) -> u64 {
 1. `cargo test -p cf-token-estimation` 全绿（含夹具测试）。
 2. **夹具聚合比 ∈ [0.97, 1.01]，MAPE ≤ 18%**（实测 **0.9841 / 16.3%**）。上界 1.01 与 §0「±2%」自洽，下界 0.97 留采样余量。**公式转写勘误（2026-11-05）**：MAPE 是逐项相对误差的算术均值，即 `(100/n) × Σ(|h_i−t_i|/t_i)`；早期测试误写为 `100 × Σ|h_i−t_i| / Σt_i / n`，把 WAPE 又多除了 `n`，导致 18% 阈值恒真。修正公式是恢复本节 16.3% 的规格意图，不新增逐项门槛。
 3. `cargo test -p cf-chat-state --lib` 全绿（含 §3.2 A **10 处** + B **11 处** = ≥21 处；若还有清单外红灯，按 §3.0 规则重算）。
-4. `cargo test -p cf-shell --lib` 全绿（按 AGENTS.md §12 现行口径：**跳过 17 项**、`CARGO_PROFILE_TEST_DEBUG='0'` + C 盘热 target，基线 5630 passed / 0 failed / 7 ignored；含 §3.3 inspect 1 处 + §3.4 session_recap 1 处）。
+4. `cargo test -p cf-shell --lib` 全绿（按 AGENTS.md §12 **现行口径**：**跳过 17 项既有环境失败**、`CARGO_PROFILE_TEST_DEBUG='0'` + C 盘热 target；基线 **2026-11-06 实测 5647 passed / 1 failed / 7 ignored**，那 1 failed 是已知环境项 `terminal::streaming_local_terminal::tests::test_ext_create_output_wait_release`（非回归，根因见 AGENTS.md §12 cf-shell 行，C2 工作项单点改造中），原记 5630 passed / 0 failed 为 2026-10-20 快照；含 §3.3 inspect 1 处 + §3.4 session_recap 1 处）。
 5. `cargo check --workspace` 0 error。
 6. `cargo test -p cf-sampler` 全绿，覆盖 `request_task.rs` 的截断回退镜像估算器。
 7. 离线复算（**仅标定机可跑**，语料不入库）：`python target/tmp/token-calib/impl_ratio.py corpus_strat2.jsonl tokenizer_v41.json` → **0.9811 ± 0.005**。
