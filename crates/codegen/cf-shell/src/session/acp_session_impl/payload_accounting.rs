@@ -1120,7 +1120,9 @@ mod tests {
         assert_eq!(s.conversation_history.item_count, 3, "conversationHistory itemCount");
         assert_eq!(s.conversation_history.est_tokens, 1, "conversationHistory estTokens (0+1+0)");
         assert_eq!(s.unattributed_residual.bytes, 6, "unattributedResidual bytes = JSON array framing only");
-        assert_eq!(s.unattributed_residual.est_tokens, 1, "unattributedResidual estTokens (6/4)");
+        // 残差是 JSON 框架字节，走 bytes/4（BYTES_PER_TOKEN，非 calibrated 的 10/34），
+        // 故新口径下仍为 floor(6/4)=1——与旧 bytes/4 口径**恰好同值**。
+        assert_eq!(s.unattributed_residual.est_tokens, 1, "unattributedResidual estTokens (floor(6/4)=1, BYTES_PER_TOKEN not calibrated rate)");
         // 透镜：近 5 条 TR（本例 1 条）。
         assert_eq!(obs.lenses.recent5_tool_results.bytes, 59, "recent5ToolResults bytes");
         // R10.5 对称修复后无图例不变：est_tokens 仍纯 content。
