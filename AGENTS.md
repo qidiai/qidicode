@@ -154,6 +154,29 @@ $env:QIDI_AGENT = "pure"; qidi         # 等价
 - TUI 内 `/config-agents`（别名 `/agents`）按 `s` 可把选中 agent 写进 `[agent] name`（`cf-pager/src/views/agents_modal.rs:2023` → `:2032` → `:637`），再按一次清除。
 - **验证生效**：查 `~/.qidi/sessions/<ws>/<session-id>/summary.json` 的 `agent_name`（本机实测当前会话为 `qidi-build-plan`，即第 8 级兜底）。
 
+### 7.2 模型条目的两个坑（2026-11-09 实测）
+
+**① `-ms-222` 后缀不代表 ModelScope 直连。** `[model.deepseek-v4-1-flash-1017-ms-222]`
+名字带 ms、`group = "modelscope"`，但 `base_url` 实际是 `https://luyou.qidiai.ltd:8443/v1`。
+**本机所有模型条目都走同一个 luyou 网关，没有"换上游即可并行"这条路**——
+按名字挑"另一个上游"派并行工，只会在同一网关上叠加并发触发 429（实测：T2 用该条目
+与 T1 并行，两个任务一起被挤爆，报错模型名还被归一化成 `amd/DeepSeek-V4.1-Flash`）。
+**要并行只能错开时间（串行）。**
+
+**② 项目级 `.qidi/config.toml` 的 `[model.*]` 不进模型目录。** 模型目录唯一来源是
+`ConfigLayers::load()`（`cf-config/src/loader.rs:186-200`），只由 `system_managed` /
+`managed` / `user` / `*_requirements` 四层构成，**没有项目层**；
+`find_project_configs` 的调用方全是 MCP / watcher / folder_trust / claude_import /
+project-plugin-dirs / reloader，**没有一处向模型目录喂数据**。
+后果：agent 定义写 `model: <项目级 id>` → `resolve_model_id` 返回
+`Err("unknown model id")`（`cf-shell/src/agent/mvp_agent/agent_ops.rs:1076-1081`），
+**且只有 `tracing::debug!`（正常日志级别看不到）** → 子代理 warn 后回落父模型，
+该模型的 `auto_compact_threshold_percent` 等 per-model 设置**全部静默失效、零报错**。
+**要 per-model 设置必须写全局 `~/.qidi/config.toml`（user 层）。**
+（对照：`[permission]` 段确实从项目层加载——`cf-workspace/src/permission/resolution.rs:253-282`
+会 `find_project_grok_configs(cwd)`。同一个 `.qidi/config.toml`，不同段加载路径不同，
+**不能因为文件在项目级就假设它的所有段都生效**。）
+
 ## 8. Skills（技能）
 
 - 触发：`/<技能名>` 或自然语言触发词（`SkillInfo.when_to_use`）；技能库 `C:\Users\ASUS\.qidi\skills\`
