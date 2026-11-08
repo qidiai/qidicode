@@ -1,7 +1,25 @@
-# C2 剩余 5 处 · 短切片任务书（备用，等 r4 窗口恢复后派发）
+# C2 剩余 5 处 · 短切片任务书
 
-**状态**：待派发。基线 HEAD = `953b51ea`（C2 单点已提交，工作区干净）。
-**编制日期**：2026-11-06。**派发模型**：`r4-deepseek-v4-1-flash-222`（今日 429，恢复后派）。
+**状态（2026-11-08 更新）**：待派发 5 片。基线 HEAD = `7a292af6`。
+**已追加**：切片 1（`process_group_probe_command` 坐标）已于 `20798714` 完成收尾——
+标记副作用验收已接进 `test_process_group_kill_with_session`，双 shell 实测通过。
+故 §2 表格中「#1」行已完成，**实际待派为 4 片（表中 #2~#6 共 5 个坐标）**。
+**编制日期**：2026-11-06。**派发模型**：`r4-deepseek-v4-1-flash-222`。
+
+> ⚠️ **2026-11-08 实测补记（影响验收口径，派工前必读）**
+> 验收要求"双 shell 全绿 0 failed"在**当前状态下无法由单片达成**：
+> `test_ext_create_output_wait_release` 在 Git Bash 下报 `Some(127) != Some(0)`
+> （`Write-Output hello` 在 bash 中不存在），即 AGENTS.md §12 第 18 项已知环境失败，
+> 而它正是表中 **#2** 要修的坐标。实测（2026-11-08）：
+> - PowerShell：`terminal::` **48 passed / 0 failed / 0 ignored**
+> - Git Bash：`terminal::` **47 passed / 1 failed / 0 ignored**（唯一失败即上述 #2）
+>
+> **因此验收口径修正为**：#2 落地前，其余各片以"PowerShell 全绿 + Git Bash 除 #2 外全绿"为准；
+> #2 落地后恢复"双 shell 全绿"硬要求。#2 建议**优先派发**，以恢复双 shell 全绿基线。
+>
+> 另补充总则（来自切片 1 的 27.7M token 教训）：**迭代期只用短对照组验证逻辑，
+> 600 s 全量测试只在收尾跑一次**；切片 1 收尾实测单个 kill 测试耗时 10.19 s
+> （等 marker 约 1 s + 反证轮询 10 s），迭代时优先跑 `test_process_group_probe_control_completes_without_kill`（0.57 s）。
 
 ---
 
