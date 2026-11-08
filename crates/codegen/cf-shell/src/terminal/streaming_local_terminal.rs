@@ -1628,7 +1628,7 @@ mod tests {
                 #[cfg(not(unix))]
                 let id = create_terminal(
                     &session_id,
-                    "Write-Output hello",
+                    &shell_snippet("Write-Output hello", "echo hello"),
                     &[],
                     HashMap::new(),
                     None,
