@@ -119,6 +119,26 @@
 - 仅对支持推理的模型生效（模型目录 meta `supportsReasoningEffort` 门控）；`/effort` 默认会话级，`--save` 才持久化
 - 推理强度默认：`ReasoningEffort` 枚举 `#[default] Medium`（`cf-sampling-types/src/types.rs`）；`SamplingConfig.reasoning_effort` 字段默认 `None`（未显式设置时不带 effort 参数）
 - （勘误 2026-10-04）`Some(0.35)` 是 `memory_search` 的 `min_score` 默认（`cf-config/src/types.rs:2189/2343`、`cf-memory/src/search.rs:926`），与推理强度无关——本节原误植该数字，勿再混入
+### 7.1 agent 选择（2026-11-08 实测，易错）
+
+**agent 在会话 initialize 那一刻定型，运行中无法切换**（无 `/agent` 斜杠命令；dashboard 的 `/agent <name>` 只给"下一个新建会话"暂存 `_meta.agentName`）。
+
+**⚠️ 最常见的坑：`--agent <名字>` 对交互式 TUI 无效**。`cf-pager-bin/src/main.rs` 里 `args.agent` 只有一处消费点（`:1934`），写进的是 `HeadlessOptions { agent: ... }`——**只对无头模式（`-p`）生效**。交互式敲 `qidi --agent pure` 会被静默忽略并落到兜底。
+
+**解析链（`cf-shell/src/agent/mvp_agent/agent_ops.rs:2723` 起，命中即止）**：
+
+| 级 | 来源 | 行 |
+|---|---|---|
+| 1 | 模型 `agent_type` 强制档（仅在**未设** `QIDI_AGENT` 且**未设** `[agent] name` 时生效） | 2738 |
+| 2 | `_meta.agentName`（dashboard 派发显式指定） | 2753 |
+| 3 | `_meta.agentProfile`（pager 在 `--plan`/`--subagents`/ask-user 时 stamp） | 2759 |
+| 4 | **`--agent-profile <文件路径>`**（收路径不是名字） | 2766 |
+| 5 | `[agent] definition = "<路径>"` | 2781 |
+| 6 | **`[agent] name = "<名字>"`** ← 最稳，走 discovery | 2799 |
+| 7 | `QIDI_AGENT=<名字或绝对路径>` | 2813 |
+| 8 | 兜底 `qidi_build_plan()`（**不是** `config.rs:1674` doc 注释写的 cf-tools） | 2835 |
+
+**要点**：①想在 TUI 用命名 agent，用 `--agent-profile` 或 `[agent] name` 或 `QIDI_AGENT`，**别用 `--agent`**；②只设 `QIDI_AGENT` 时第 1 级 strict-harness 模型仍能顶掉你，设 `[agent] name` 才免疫；③TUI 里 `/config-agents`（别名 `/agents`）按 `s` 可把选中 agent 写进 `[agent] name`（`cf-pager/src/views/agents_modal.rs:2023` → `:2032` → `:637`），再按一次清除。
 
 ## 8. Skills（技能）
 
