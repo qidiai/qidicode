@@ -1,6 +1,35 @@
 # C2 剩余 5 处 · 短切片任务书
 
+**状态（2026-11-08 收尾）：全部完成 ✅**
+
+| 片 | 坐标 | 提交 |
+|---|---|---|
+| 单点 | `kill_probe_command` | `9c613f45`（2026-11-06） |
+| 1 | `process_group_probe_command` → 标记验收 | `20798714` |
+| 2 | `Write-Output hello` | `e7503b8a` |
+| 3~6 | 四处 `Start-Sleep -Seconds 30` | `0674176a` |
+
+**终态门禁（2026-11-08 实测）**：Git Bash 与 PowerShell 双 shell 均
+`terminal::` **48 passed / 0 failed / 0 ignored**；无 sleep 进程、无标记文件残留。
+**双 shell 全绿硬要求已恢复**，先前的"带例外"口径作废（保留在下方备查）。
+
+**基线 HEAD** = `0674176a`。**派发模型**：`r4-deepseek-v4-1-flash-222`。
+**编制日期**：2026-11-06。
+
+> 剩余已知缺口（另开单，不属 C2）：
+> ① 4 个 kill/release 测试在 Git Bash 下进程现已真正存活，但仍只断言注册表状态，
+> 没有像切片 1 那样用标记证明"进程确实在跑"；
+> ② `JobObject`/`KillOnDrop` 回收进程树的保证仍无测试钉住（实测零残留靠代码正确，
+> 不是靠测试保护）。
+
+---
+
+<details>
+<summary>历史状态（2026-11-08 中途，已作废，仅备查）</summary>
+
 **状态（2026-11-08 更新）**：待派发 5 片。基线 HEAD = `7a292af6`。
+</details>
+
 **已追加**：切片 1（`process_group_probe_command` 坐标）已于 `20798714` 完成收尾——
 标记副作用验收已接进 `test_process_group_kill_with_session`，双 shell 实测通过。
 故 §2 表格中「#1」行已完成，**实际待派为 4 片（表中 #2~#6 共 5 个坐标）**。
