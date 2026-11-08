@@ -1652,6 +1652,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_ext_release_cleans_up() {
+        let markers = probe_marker_paths("ext-release");
+        cleanup_probe_markers(&markers);
         tokio::task::LocalSet::new()
             .run_until(async {
                 let session_id = format!("ext-release-{}", std::process::id());
@@ -1670,7 +1672,7 @@ mod tests {
                 #[cfg(not(unix))]
                 let id = create_terminal(
                     &session_id,
-                    &shell_snippet("Start-Sleep -Seconds 30", "sleep 30"),
+                    &marker_probe_snippet(&markers.0, &markers.1, "Start-Sleep -Seconds 30", "sleep 30"),
                     &[],
                     HashMap::new(),
                     None,
@@ -1681,16 +1683,39 @@ mod tests {
 
                 tokio::time::sleep(Duration::from_millis(50)).await;
 
+                // The registry assertions below cannot tell "released a live
+                // process" from "released a process that died instantly in
+                // this shell". The start marker can: it is written before the
+                // 30 s sleep, so waiting for it *before* the release proves
+                // the sleep really started and the release therefore landed on
+                // a running terminal.
+                assert!(
+                    wait_for_marker(&markers.0).await,
+                    "probe start marker {} never appeared, so this shell ({}) \
+                     did not run the sleep snippet and the release assertions \
+                     below would pass vacuously",
+                    markers.0.display(),
+                    cf_config::shell::detect_windows_shell().name(),
+                );
+
                 release_terminal(&session_id, &id).await;
 
                 assert!(get_terminal_output(&session_id, &id).await.is_none());
                 assert_eq!(kill_terminal(&session_id, &id).await, Ok(None));
             })
             .await;
+
+        cleanup_probe_markers(&markers);
     }
 
     #[tokio::test]
     async fn test_kill_and_release_all_kills_non_bg_and_preserves_bg() {
+        // One marker pair per terminal: the normal one must be killed while
+        // sleeping, the backgrounded one must keep sleeping after the sweep.
+        let normal_markers = probe_marker_paths("killall-normal");
+        let bg_markers = probe_marker_paths("killall-bg");
+        cleanup_probe_markers(&normal_markers);
+        cleanup_probe_markers(&bg_markers);
         tokio::task::LocalSet::new()
             .run_until(async {
                 let session_id = format!("kill-all-{}", std::process::id());
@@ -1710,7 +1735,12 @@ mod tests {
                 #[cfg(not(unix))]
                 let normal_id = create_terminal(
                     &session_id,
-                    &shell_snippet("Start-Sleep -Seconds 30", "sleep 30"),
+                    &marker_probe_snippet(
+                        &normal_markers.0,
+                        &normal_markers.1,
+                        "Start-Sleep -Seconds 30",
+                        "sleep 30",
+                    ),
                     &[],
                     HashMap::new(),
                     None,
@@ -1733,7 +1763,12 @@ mod tests {
                 #[cfg(not(unix))]
                 let bg_id = create_terminal(
                     &session_id,
-                    &shell_snippet("Start-Sleep -Seconds 30", "sleep 30"),
+                    &marker_probe_snippet(
+                        &bg_markers.0,
+                        &bg_markers.1,
+                        "Start-Sleep -Seconds 30",
+                        "sleep 30",
+                    ),
                     &[],
                     HashMap::new(),
                     None,
@@ -1744,6 +1779,29 @@ mod tests {
 
                 // Wait for both to start.
                 tokio::time::sleep(Duration::from_millis(100)).await;
+
+                // "In the registry" does not mean "still running": a shell that
+                // cannot execute the snippet exits at once and the sweep below
+                // would then pass without ever killing a live process. Both
+                // start markers are written before the 30 s sleep, so waiting
+                // for them here (still before any kill) proves both terminals
+                // were observed alive in this shell.
+                assert!(
+                    wait_for_marker(&normal_markers.0).await,
+                    "normal terminal's probe start marker {} never appeared, so \
+                     this shell ({}) did not run the sleep snippet and the \
+                     kill-all assertions below would pass vacuously",
+                    normal_markers.0.display(),
+                    cf_config::shell::detect_windows_shell().name(),
+                );
+                assert!(
+                    wait_for_marker(&bg_markers.0).await,
+                    "backgrounded terminal's probe start marker {} never \
+                     appeared, so this shell ({}) did not run the sleep snippet \
+                     and the kill-all assertions below would pass vacuously",
+                    bg_markers.0.display(),
+                    cf_config::shell::detect_windows_shell().name(),
+                );
 
                 // Mark one as backgrounded.
                 background_terminal(&session_id, &bg_id).await;
@@ -1771,6 +1829,9 @@ mod tests {
                 release_terminal(&session_id, &bg_id).await;
             })
             .await;
+
+        cleanup_probe_markers(&normal_markers);
+        cleanup_probe_markers(&bg_markers);
     }
 
     /// Verify that `ProcessSession` (setsid) prevents child processes from
@@ -1961,6 +2022,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_kill_and_release_all_noop_for_other_sessions() {
+        let markers = probe_marker_paths("killall-other");
+        cleanup_probe_markers(&markers);
         tokio::task::LocalSet::new()
             .run_until(async {
                 let session_a = format!("kill-all-a-{}", std::process::id());
@@ -1981,7 +2044,7 @@ mod tests {
                 #[cfg(not(unix))]
                 let id_b = create_terminal(
                     &session_b,
-                    &shell_snippet("Start-Sleep -Seconds 30", "sleep 30"),
+                    &marker_probe_snippet(&markers.0, &markers.1, "Start-Sleep -Seconds 30", "sleep 30"),
                     &[],
                     HashMap::new(),
                     None,
@@ -1991,6 +2054,20 @@ mod tests {
                 .unwrap();
 
                 tokio::time::sleep(Duration::from_millis(50)).await;
+
+                // Being in the registry is not the same as still running, so
+                // "untouched" below could hold trivially if the shell had
+                // exited at once. The start marker is written before the 30 s
+                // sleep; waiting for it (before any kill) proves session B's
+                // terminal was really sleeping when session A was swept.
+                assert!(
+                    wait_for_marker(&markers.0).await,
+                    "session B probe start marker {} never appeared, so this \
+                     shell ({}) did not run the sleep snippet and the \
+                     'untouched' assertion below would pass vacuously",
+                    markers.0.display(),
+                    cf_config::shell::detect_windows_shell().name(),
+                );
 
                 // Kill all for session A (different session).
                 kill_and_release_all_for_session(&session_a).await;
@@ -2005,5 +2082,7 @@ mod tests {
                 release_terminal(&session_b, &id_b).await;
             })
             .await;
+
+        cleanup_probe_markers(&markers);
     }
 }
