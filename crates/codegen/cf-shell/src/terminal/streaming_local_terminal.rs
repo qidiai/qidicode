@@ -1670,7 +1670,7 @@ mod tests {
                 #[cfg(not(unix))]
                 let id = create_terminal(
                     &session_id,
-                    "Start-Sleep -Seconds 30",
+                    &shell_snippet("Start-Sleep -Seconds 30", "sleep 30"),
                     &[],
                     HashMap::new(),
                     None,
@@ -1710,7 +1710,7 @@ mod tests {
                 #[cfg(not(unix))]
                 let normal_id = create_terminal(
                     &session_id,
-                    "Start-Sleep -Seconds 30",
+                    &shell_snippet("Start-Sleep -Seconds 30", "sleep 30"),
                     &[],
                     HashMap::new(),
                     None,
@@ -1733,7 +1733,7 @@ mod tests {
                 #[cfg(not(unix))]
                 let bg_id = create_terminal(
                     &session_id,
-                    "Start-Sleep -Seconds 30",
+                    &shell_snippet("Start-Sleep -Seconds 30", "sleep 30"),
                     &[],
                     HashMap::new(),
                     None,
@@ -1981,7 +1981,7 @@ mod tests {
                 #[cfg(not(unix))]
                 let id_b = create_terminal(
                     &session_b,
-                    "Start-Sleep -Seconds 30",
+                    &shell_snippet("Start-Sleep -Seconds 30", "sleep 30"),
                     &[],
                     HashMap::new(),
                     None,
