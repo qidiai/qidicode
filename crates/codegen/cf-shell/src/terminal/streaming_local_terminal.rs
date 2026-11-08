@@ -1420,6 +1420,103 @@ mod tests {
     /// How often [`test_kill_returns_signal`] polls for the probe's start marker.
     const PROBE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+    /// How long [`test_kill_reaps_process_tree`] waits for the reaped processes
+    /// to leave the MSYS `/proc` table after a successful kill.
+    ///
+    /// Measured 2026-11-09: on Windows the killed tree is already gone from the
+    /// process table at the instant `wait()` returns (0 ms), so 2 s is a wide
+    /// margin, not a tight budget. A pid that is still visible after this long
+    /// was simply not reclaimed.
+    const REAP_OBSERVE_DEADLINE: Duration = Duration::from_secs(2);
+
+    /// Pids whose MSYS `/proc/<pid>/cmdline` contains `needle`.
+    ///
+    /// Git Bash's `/proc` keeps a live process *with its full argv* after the
+    /// shell execs into the target (`ps -W` only shows the truncated image
+    /// path, so it cannot answer this), which is why this reads `/proc` and not
+    /// `ps`. Matching only sees the bytes before a `cmdline`'s first NUL, so a
+    /// needle that starts with the test tag is matched on the payload, never on
+    /// the leading `/usr/bin/bash` of a wrapper. Our own pid is skipped in case
+    /// the harness command line ever contains the run tag.
+    #[cfg(unix)]
+    fn pids_with_cmdline(needle: &str) -> Vec<u32> {
+        let mut pids = Vec::new();
+        let entries = match std::fs::read_dir("/proc") {
+            Ok(entries) => entries,
+            Err(_) => return pids,
+        };
+        for entry in entries.flatten() {
+            let pid = match entry.file_name().to_string_lossy().parse::<u32>() {
+                Ok(pid) => pid,
+                Err(_) => continue,
+            };
+            if pid == std::process::id() {
+                continue;
+            }
+            // An entry that cannot be read has exited mid-scan.
+            let cmdline = match std::fs::read(entry.path().join("cmdline")) {
+                Ok(raw) => String::from_utf8_lossy(&raw).replace('\0', " "),
+                Err(_) => continue,
+            };
+            if cmdline.contains(needle) {
+                pids.push(pid);
+            }
+        }
+        pids
+    }
+
+    /// Windows counterpart of [`pids_with_cmdline`], over the same MSYS `/proc`
+    /// (see its doc for why not `ps -W`).
+    ///
+    /// The scan has to run *inside* Git Bash: MSYS `/proc` is a virtual mount
+    /// that only that shell resolves. Measured 2026-11-09, both attempts to
+    /// reach it from Rust directly fail — `read_dir("/proc")` yields nothing for
+    /// a Win32 process, and `cygpath -w /proc` does not map the virtual mount
+    /// (it echoes `/proc` back, so `read_dir` fails with `InvalidFilename`).
+    /// NULs never cross a command line either, so `CreateProcess` never sees
+    /// one. The needle is restricted to a plain tag so it cannot carry quoting
+    /// or a NUL into the query.
+    #[cfg(windows)]
+    fn pids_with_cmdline(needle: &str) -> Vec<u32> {
+        debug_assert!(
+            !needle.is_empty()
+                && needle
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "needle must be a plain tag, got {needle:?}"
+        );
+        let bash = match cf_config::shell::detect_windows_shell() {
+            cf_config::shell::WindowsShell::GitBash(path) => path.clone(),
+            _ => return Vec::new(),
+        };
+        // Print the `<pid>/cmdline` wrapper only for matches; `-a` keeps the
+        // read binary-safe, and the wrapper is cut back to a pid in Rust.
+        let query = concat!(
+            "for d in /proc/[0-9]*/cmdline; do ",
+            "[ -f \"$d\" ] && grep -qaF -- '$NEEDLE' \"$d\" && printf '%s\\n' \"$d\"; ",
+            "done; true"
+        )
+        .replace("$NEEDLE", needle);
+        let output = match std::process::Command::new(&bash)
+            .arg("-c")
+            .arg(&query)
+            .output()
+        {
+            Ok(output) => output,
+            Err(_) => return Vec::new(),
+        };
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| {
+                let path = line.trim();
+                let pid = path.strip_suffix("/cmdline")?.rsplit('/').next()?;
+                pid.parse::<u32>().ok()
+            })
+            .filter(|pid| *pid != std::process::id())
+            .collect()
+    }
+
+
     /// Deadline for the probe to reach its start marker. Generous on purpose:
     /// PowerShell has to boot a CLR runtime, Git Bash has to fork MSYS, and a
     /// cold-first-spawn host can take a couple of seconds for either.
@@ -1874,6 +1971,111 @@ mod tests {
             "DETACHED",
             "child process should not be able to open /dev/tty after setsid()"
         );
+    }
+
+    /// `kill_terminal` must reclaim the whole spawned tree, not just the
+    /// outermost `bash.exe`: after a `Killed` outcome neither the shell nor the
+    /// `sleep` it blocks on may survive in the MSYS `/proc` table.
+    ///
+    /// Guarded twice against passing vacuously. The probe has to *write its
+    /// start marker* (so the snippet really ran in this shell, and something
+    /// was alive when the kill landed), and the feature string has to be *found
+    /// alive before* the kill — an empty `/proc` scan would otherwise satisfy
+    /// "no process left" without any reap having happened. After the kill only
+    /// pids that were already alive before it count as survivors, so the
+    /// scan's own short-lived shell can never turn a clean reap red.
+    #[tokio::test]
+    async fn test_kill_reaps_process_tree() {
+        let session_id = format!("s1-reap-{}", std::process::id());
+        let tool_id = format!("t1-reap-{}", std::process::id());
+        let markers = probe_marker_paths("reap");
+        cleanup_probe_markers(&markers);
+        // The tag itself is the needle, with a sentinel on both sides so a
+        // pid or timestamp in some unrelated command line cannot alias it.
+        let needle = format!("qidi-reap-{}-sentinel", std::process::id());
+
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let notifier = Arc::new(TestNotifier {
+                    notifications: Mutex::new(vec![]),
+                });
+                let session_id_clone = session_id.clone();
+                let tool_id_clone = tool_id.clone();
+                let runner = StreamingLocalTerminalRunner {
+                    notifier: notifier.clone(),
+                    session_id: acp::SessionId::new(session_id_clone),
+                };
+
+                // The feature string rides on `sleep`'s own argv, not on
+                // `echo`'s: the shell execs into the foreground `sleep 30
+                // <tag>`, so both the interpreter the terminal spawned and the
+                // child it blocks on carry the tag in `/proc`.
+                let command = marker_probe_snippet(
+                    &markers.0,
+                    &markers.1,
+                    &format!("Start-Sleep -Seconds 30; Write-Host {needle}"),
+                    &format!("sleep 30 {needle}; sleep 30"),
+                );
+                let handle = tokio::task::spawn_local(async move {
+                    runner.run(make_request(&tool_id_clone, &command)).await
+                });
+
+                assert!(
+                    wait_for_marker(&markers.0).await,
+                    "probe never wrote its start marker {} — the kill probe does \
+                     not match the shell this host spawns commands into",
+                    markers.0.display()
+                );
+                let before_kill = pids_with_cmdline(&needle);
+                assert!(
+                    !before_kill.is_empty(),
+                    "feature string {needle:?} is not visible in MSYS /proc before \
+                     the kill — the survival check would be vacuous"
+                );
+
+                assert_eq!(
+                    kill_terminal(&session_id, &tool_id).await,
+                    Ok(Some(KillOutcome::Killed))
+                );
+
+                let is_survivor = |pids: &[u32]| -> Vec<u32> {
+                    pids.iter()
+                        .copied()
+                        .filter(|pid| before_kill.contains(pid))
+                        .collect()
+                };
+                let deadline = tokio::time::Instant::now() + REAP_OBSERVE_DEADLINE;
+                let mut survivors = is_survivor(&pids_with_cmdline(&needle));
+                while !survivors.is_empty() && tokio::time::Instant::now() < deadline {
+                    tokio::time::sleep(PROBE_POLL_INTERVAL).await;
+                    survivors = is_survivor(&pids_with_cmdline(&needle));
+                }
+                assert!(
+                    survivors.is_empty(),
+                    "processes {survivors:?} (alive before the kill: {before_kill:?}) \
+                     still matched {needle:?} {} ms after kill_terminal reported \
+                     Killed — the tree was not reaped",
+                    REAP_OBSERVE_DEADLINE.as_millis()
+                );
+
+                // The kill cut the sleeps short, so the post-sleep marker must
+                // be absent, and the command must not look successful.
+                let result = handle.await.unwrap().unwrap();
+                assert!(
+                    !markers.1.exists(),
+                    "finish marker {} exists — the sleeps ran to completion",
+                    markers.1.display()
+                );
+                assert_eq!(
+                    result.exit_code,
+                    Some(1),
+                    "killed command should not exit cleanly; output: {:?}",
+                    result.combined_output
+                );
+            })
+            .await;
+
+        cleanup_probe_markers(&markers);
     }
 
     /// Verify that process group kill still works after switching from
