@@ -177,6 +177,29 @@ project-plugin-dirs / reloader，**没有一处向模型目录喂数据**。
 会 `find_project_grok_configs(cwd)`。同一个 `.qidi/config.toml`，不同段加载路径不同，
 **不能因为文件在项目级就假设它的所有段都生效**。）
 
+### 7.3 agent 定义解析失败会静默回落到默认 agent（2026-11-09 实测）
+
+**现象**：`~/.qidi/agents/<name>.md` 的 frontmatter 任何解析错误（字段值非法、YAML 语法错、
+键名拼错），会话**照常启动并正常应答**，但 `summary.json` 的 `agent_name` 是
+`qidi-build-plan`（第 8 级兜底），**没有任何报错**。
+
+**实证**：把 `orchestra-coder.md` 的 `maxTurns` 临时改成 `0`
+（`deserialize_nonzero_u32` 对 0 返回 `Err("maxTurns must be greater than 0")`，
+`cf-agent/src/config.rs:616-617`，有测试 `test_parse_max_turns_zero_rejected` 钉住）：
+```
+maxTurns: 16 → agent_name='orchestra-coder', current_model_id='seat-coder'
+maxTurns: 0  → agent_name='qidi-build-plan', current_model_id='step-5-preview-222'   ← 静默回落
+```
+
+**判据**：验 agent 是否真加载，**唯一可靠口径是 `summary.json` 的 `agent_name`
+必须等于目标名**。只看到"会话能跑/PONG 正常"什么都证明不了——两种失败
+（flag 名拼错、定义文件解析失败）都会落到 `qidi-build-plan`。
+
+**顺带证明**：`maxTurns` 键名正确（`AgentDefinition` 有
+`#[serde(rename_all = "camelCase")]`，`cf-agent/src/config.rs:697-698`）；
+正因为键名被识别，`0` 才触发校验错误。30 秒自检法：临时设 `maxTurns: 0` 起会话，
+回落=键名通且定义坏，报错=键名不通。
+
 ## 8. Skills（技能）
 
 - 触发：`/<技能名>` 或自然语言触发词（`SkillInfo.when_to_use`）；技能库 `C:\Users\ASUS\.qidi\skills\`
