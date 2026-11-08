@@ -1297,17 +1297,62 @@ mod tests {
         marker_probe_snippet(start, finish, "Start-Sleep -Seconds 30", "sleep 30")
     }
 
+    /// The 600 s sleep the process-group tests kill: two consecutive
+    /// `Start-Sleep -Seconds 300` (PowerShell) / `sleep 1` repeated 600 times
+    /// (Git Bash), never a shorter stand-in.
+    ///
+    /// The POSIX form is a loop rather than `sleep 300 & sleep 300 & wait` on
+    /// purpose (measured 2026-11-06): Git Bash starts an extra runtime process
+    /// before it parses `-c` (`bash.exe -c` → `<git>/usr/bin/bash.exe -c
+    /// <snippet>`, an MSYS launcher in front of the interpreter), and every `&`
+    /// leaves a second live shell behind, so the live set no longer matches
+    /// PowerShell's known-good shape (the shell plus the `sleep` it blocks on).
+    /// With the loop the shapes agree, and the group kill reaches the
+    /// interpreter because process-wrap's `start_kill()` + `wait()` relays onto
+    /// the outermost `bash.exe`.
+    const PROCESS_GROUP_SLEEP_PS: &str = "Start-Sleep -Seconds 300; Start-Sleep -Seconds 300";
+    #[cfg(not(unix))]
+    const PROCESS_GROUP_SLEEP_SH: &str = "i=0; while [ $i -lt 600 ]; do sleep 1; i=$((i+1)); done";
+    #[cfg(unix)]
+    const PROCESS_GROUP_SLEEP_SH: &str = "sleep 300 & sleep 300 & wait";
+
     /// Cross-platform two-children-plus-wait snippet for process-group
-    /// semantics tests (POSIX job-control syntax; PowerShell equivalent).
-    fn process_group_probe_command() -> String {
-        #[cfg(windows)]
-        {
-            "Start-Sleep -Seconds 300; Start-Sleep -Seconds 300".to_string()
-        }
-        #[cfg(not(windows))]
-        {
-            "sleep 300 & sleep 300 & wait".to_string()
-        }
+    /// semantics tests (POSIX job-control syntax; PowerShell equivalent),
+    /// bracketed by the same start/finish markers as the other probes, so
+    /// "the process really ran" and "the kill really cut the sleep short" are
+    /// observable instead of inferred.
+    ///
+    /// Both markers are read through [`wait_for_marker`] rather than once: the
+    /// test reaches the kill as soon as `InProgress` is reported, which can be
+    /// before the first marker write has become visible, and a missing `finish`
+    /// must be "still absent after ample time" rather than "absent at one
+    /// instant". The unwritable-snippet failure mode is caught by the
+    /// deterministic [`test_process_group_probe_control_completes_without_kill`].
+    fn process_group_marker_probe_command(
+        start: &std::path::Path,
+        finish: &std::path::Path,
+    ) -> String {
+        marker_probe_snippet(
+            start,
+            finish,
+            PROCESS_GROUP_SLEEP_PS,
+            PROCESS_GROUP_SLEEP_SH,
+        )
+    }
+
+    /// Short-sleep variant of [`process_group_marker_probe_command`] for the
+    /// anti-vacuity control: same tree shape, own markers, sleeps 0.3 s
+    /// instead of ten minutes.
+    fn process_group_control_probe_command(
+        start: &std::path::Path,
+        finish: &std::path::Path,
+    ) -> String {
+        marker_probe_snippet(
+            start,
+            finish,
+            "Start-Sleep -Milliseconds 300",
+            "sleep 0.3",
+        )
     }
     use super::*;
     use crate::terminal::DEFAULT_OUTPUT_BYTE_LIMIT;
@@ -1379,6 +1424,31 @@ mod tests {
     /// PowerShell has to boot a CLR runtime, Git Bash has to fork MSYS, and a
     /// cold-first-spawn host can take a couple of seconds for either.
     const PROBE_START_DEADLINE: Duration = Duration::from_secs(20);
+
+    /// How long a marker write may take to become visible to this process.
+    ///
+    /// Ten seconds is deliberately generous because the same budget covers two
+    /// different waits: a marker written by an already-running shell (pure
+    /// visibility lag, needs well under a second) and the first marker of a
+    /// freshly spawned one, where the shell itself still has to start and
+    /// parse its `-c` payload. Callers that have already waited for
+    /// `InProgress` only need the former, but nothing is lost by allowing for
+    /// the latter — the successful path returns the moment the file appears,
+    /// so only a genuinely absent marker pays the full deadline.
+    const MARKER_VISIBLE_DEADLINE: Duration = Duration::from_secs(10);
+
+    /// Poll until `path` shows up, giving up after [`MARKER_VISIBLE_DEADLINE`].
+    /// Returns whether it appeared.
+    async fn wait_for_marker(path: &std::path::Path) -> bool {
+        let deadline = tokio::time::Instant::now() + MARKER_VISIBLE_DEADLINE;
+        while !path.exists() {
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(PROBE_POLL_INTERVAL).await;
+        }
+        true
+    }
 
     #[tokio::test]
     async fn test_kill_returns_signal() {
@@ -1750,6 +1820,8 @@ mod tests {
     /// a background child; killing the terminal should reap both.
     #[tokio::test]
     async fn test_process_group_kill_with_session() {
+        let markers = probe_marker_paths("pgkill");
+        cleanup_probe_markers(&markers);
         tokio::task::LocalSet::new()
             .run_until(async {
                 let session_id = format!("pgkill-{}", std::process::id());
@@ -1765,10 +1837,9 @@ mod tests {
                     session_id: acp::SessionId::new(session_id_clone),
                 };
 
+                let command = process_group_marker_probe_command(&markers.0, &markers.1);
                 let handle = tokio::task::spawn_local(async move {
-                    runner
-                        .run(make_request(&tool_id_clone, &process_group_probe_command()))
-                        .await
+                    runner.run(make_request(&tool_id_clone, &command)).await
                 });
 
                 // Wait for the process to start.
@@ -1782,6 +1853,26 @@ mod tests {
                     attempts += 1;
                     assert!(attempts < 40, "process did not start in time");
                 }
+
+                // Wait until the probe has actually reached its sleep. The
+                // `InProgress` status above only proves the child was spawned;
+                // it can be reported before the shell has run the first
+                // `echo`, so killing on it alone would sometimes cut the probe
+                // down before it wrote `start` — making the side-effect
+                // assertions below fail for a reason that has nothing to do
+                // with process-group kill. Waiting for `start` first is what
+                // makes "the sleep was running when the kill landed" true by
+                // construction, so the `finish` assertion below then proves the
+                // kill cut it short.
+                assert!(
+                    wait_for_marker(&markers.0).await,
+                    "start marker {} still missing {} s after the process was \
+                     reported in progress ({}), so the group probe never ran in \
+                     this shell and there is nothing to kill",
+                    markers.0.display(),
+                    MARKER_VISIBLE_DEADLINE.as_secs(),
+                    cf_config::shell::detect_windows_shell().name(),
+                );
 
                 // Kill — should reap the whole process group.
                 assert_eq!(
@@ -1798,8 +1889,74 @@ mod tests {
                 );
                 #[cfg(windows)]
                 assert_eq!(result.exit_code, Some(1), "group-killed exit code");
+
+                // Side effect: the kill must have cut the sleep short. The
+                // start marker was already awaited before the kill, so this
+                // half is exactly the "was it interrupted" question; a snippet
+                // the shell could not execute is ruled out by the awaited
+                // start above and by
+                // [`test_process_group_probe_control_completes_without_kill`].
+                assert!(
+                    !wait_for_marker(&markers.1).await,
+                    "finish marker {} appeared — the 600 s sleep ran to \
+                     completion, so nothing was interrupted by the group kill",
+                    markers.1.display()
+                );
             })
             .await;
+
+        cleanup_probe_markers(&markers);
+    }
+
+    /// Anti-vacuity control for [`test_process_group_kill_with_session`].
+    ///
+    /// That test asserts the *finish* marker stays absent, which a snippet the
+    /// shell cannot execute would also satisfy. This control runs the same
+    /// probe shape with a 0.3 s sleep and no kill, in the same runner, and
+    /// requires the sleep to complete and both markers to appear — so the
+    /// absence in the kill test can only come from the kill.
+    #[tokio::test]
+    async fn test_process_group_probe_control_completes_without_kill() {
+        let markers = probe_marker_paths("pgkill-ctrl");
+        cleanup_probe_markers(&markers);
+
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let session_id = format!("pgkill-ctrl-{}", std::process::id());
+                let tool_id = format!("pgkill-ctrl-tool-{}", std::process::id());
+                let notifier = Arc::new(TestNotifier {
+                    notifications: Mutex::new(vec![]),
+                });
+                let runner = StreamingLocalTerminalRunner {
+                    notifier: notifier.clone(),
+                    session_id: acp::SessionId::new(session_id),
+                };
+
+                let command = process_group_control_probe_command(&markers.0, &markers.1);
+                let result = runner.run(make_request(&tool_id, &command)).await.unwrap();
+                assert_eq!(
+                    result.exit_code,
+                    Some(0),
+                    "untouched group probe must exit cleanly; output: {:?}",
+                    result.combined_output
+                );
+
+                assert!(
+                    markers.0.exists(),
+                    "control probe must write its start marker in this shell ({})",
+                    markers.0.display()
+                );
+                assert!(
+                    markers.1.exists(),
+                    "control probe must reach the post-sleep marker ({}) — if it \
+                     does not, the group probe does not fit this shell and the \
+                     kill test's 'finish marker absent' proves nothing",
+                    markers.1.display()
+                );
+            })
+            .await;
+
+        cleanup_probe_markers(&markers);
     }
 
     #[tokio::test]
