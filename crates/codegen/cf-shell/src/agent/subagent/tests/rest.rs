@@ -3402,6 +3402,160 @@ async fn unknown_model_override_yields_shared_fallback_notice() {
         resolved.config.model
     );
 }
+/// R2 (reviewer audit) — a stale `[subagents.models]` pin must NOT raise the
+/// notice when the agent definition carries a valid `model:`.
+///
+/// Scenario: the pin for this agent is a broken id, but `AgentDefinition.model`
+/// resolves to a real model. Resolution walks past the failed pin and returns
+/// the definition's model, so the subagent is NOT on the inherited model. The
+/// pre-R2 code accumulated "some pin failed" in a `Cell` and returned it on the
+/// success branch, telling the subagent it "silently fell back to the inherited
+/// model" while it was running on exactly the model it asked for.
+#[tokio::test]
+async fn stale_pin_with_valid_agent_definition_model_emits_no_notice() {
+    use cf_agent::config::ModelOverride;
+    let mut models = indexmap::IndexMap::new();
+    models.insert(
+        "agentdef-model".to_string(),
+        test_model_entry("agentdef-model"),
+    );
+    let mut ctx = ctx_with_toggle(HashMap::new());
+    ctx.available_models = models;
+    ctx.subagent_model_overrides =
+        HashMap::from([("explore".to_string(), "ghost-pin".to_string())]);
+
+    let resolved = resolve_effective_model_config(
+            None,
+            "explore",
+            &ModelOverride::Override("agentdef-model".to_string()),
+            &ctx,
+        )
+        .await;
+
+    assert_eq!(
+        resolved.config.model, "agentdef-model",
+        "the agent definition's model must still be honoured after the stale pin"
+    );
+    assert!(
+        !resolved.inherited_parent,
+        "the subagent resolved a concrete model, so it did not inherit the parent's"
+    );
+    assert_eq!(
+        resolved.fallback_notice, None,
+        "a stale pin whose fall-through resolved a REAL model must not raise the \
+         'fell back to the inherited model' notice — that would be a false \
+         diagnosis, got: {:?}",
+        resolved.fallback_notice
+    );
+}
+
+/// R2 (reviewer audit) — the same false-diagnosis case on the runtime
+/// (goal/persona) override path: the override id is broken, but the agent
+/// definition supplies a real model, so the subagent is not degraded and the
+/// tool-visible notice must stay empty (only the `tracing::warn!` log remains).
+#[tokio::test]
+async fn stale_runtime_override_with_valid_agent_definition_model_emits_no_notice() {
+    use cf_agent::config::ModelOverride;
+    let mut models = indexmap::IndexMap::new();
+    models.insert(
+        "agentdef-model".to_string(),
+        test_model_entry("agentdef-model"),
+    );
+    let mut ctx = ctx_with_toggle(HashMap::new());
+    ctx.available_models = models;
+
+    let resolved = resolve_effective_model_config(
+            Some("ghost-runtime"),
+            "explore",
+            &ModelOverride::Override("agentdef-model".to_string()),
+            &ctx,
+        )
+        .await;
+
+    assert_eq!(
+        resolved.config.model, "agentdef-model",
+        "the unresolved runtime override must fall through to the definition model"
+    );
+    assert!(
+        !resolved.inherited_parent,
+        "the pin path resolved a concrete model, so the parent model was not used"
+    );
+    assert_eq!(
+        resolved.fallback_notice, None,
+        "a failed runtime override that fell through to a REAL model must not \
+         raise the fallback notice, got: {:?}",
+        resolved.fallback_notice
+    );
+}
+
+/// R11-B / R2 — the notice's one legitimate case: every requested model source
+/// is unresolvable, so the subagent genuinely lands on the parent's model. The
+/// downgrade must be visible instead of dying in a log line.
+#[tokio::test]
+async fn all_three_model_sources_unresolved_emits_fallback_notice() {
+    use cf_agent::config::ModelOverride;
+    // Catalogue is non-empty (so this is genuinely "unknown id", not "no
+    // catalogue"), but none of the three requested ids exist in it.
+    let mut models = indexmap::IndexMap::new();
+    models.insert("pinned-model".to_string(), test_model_entry("pinned-model"));
+    let mut ctx = ctx_with_toggle(HashMap::new());
+    ctx.available_models = models;
+    ctx.subagent_model_overrides =
+        HashMap::from([("explore".to_string(), "ghost-pin".to_string())]);
+
+    let resolved = resolve_effective_model_config(
+            Some("ghost-runtime"),
+            "explore",
+            &ModelOverride::Override("ghost-agentdef".to_string()),
+            &ctx,
+        )
+        .await;
+
+    // The fixture's parent sampling config carries no model string, so the
+    // inherited identity is observable through the model id ("test").
+    assert_eq!(
+        resolved.model_id.0.as_ref(),
+        "test",
+        "with nothing resolvable the parent's live model is inherited"
+    );
+    assert!(resolved.config.model.is_empty() || resolved.config.model == "test");
+    assert!(
+        resolved.inherited_parent,
+        "nothing resolved, so resolution really did end on the inherited model"
+    );
+    assert_eq!(
+        resolved.fallback_notice,
+        Some(MODEL_OVERRIDE_FALLBACK_NOTICE),
+        "a real downgrade to the inherited model must be surfaced verbatim"
+    );
+}
+
+/// R2 — mirror case that pins the notice's meaning: inheriting by *design*
+/// (no model configured anywhere — `ModelOverride::Inherit`, no pin, no runtime
+/// override) is not a downgrade, so it must stay silent. Without this, the
+/// "structural" rule would degenerate into "always notify whenever we inherit",
+/// spamming every unpinned subagent's tool result with a bogus override error.
+#[tokio::test]
+async fn configured_less_inheritance_emits_no_notice() {
+    use cf_agent::config::ModelOverride;
+    let ctx = ctx_with_toggle(HashMap::new());
+
+    let resolved =
+        resolve_effective_model_config(None, "explore", &ModelOverride::Inherit, &ctx).await;
+
+    assert_eq!(
+        resolved.model_id.0.as_ref(),
+        "test",
+        "inheritance is by design here"
+    );
+    assert!(resolved.inherited_parent);
+    assert_eq!(
+        resolved.fallback_notice, None,
+        "inheriting without any requested override is not a fallback, got: {:?}",
+        resolved.fallback_notice
+    );
+}
+
 /// Source-level guard for the same contract: `MODEL_OVERRIDE_FALLBACK_NOTICE`
 /// must be *defined once and reused verbatim by all three fallback sites*, and
 /// the three ad-hoc strings this task replaced must stay gone. Reverting any

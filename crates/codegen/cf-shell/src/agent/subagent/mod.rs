@@ -778,7 +778,17 @@ use cf_subagent_resolution::resolve_effective_overrides;
 struct ResolvedSubagentModel {
     config: cf_sampler::SamplerConfig,
     model_id: acp::ModelId,
+    /// Set ONLY when a model was actually requested and none of the requested
+    /// ids resolved, so the subagent really is running on the parent's model.
+    /// Never set when a pin did resolve — telling a subagent it "fell back"
+    /// while it is running on the model it asked for is a false diagnosis.
     fallback_notice: Option<&'static str>,
+    /// True iff resolution ended on the parent's live model instead of a
+    /// resolved pin. Callers use this (not the notice, and not an id
+    /// comparison — an override may legitimately name the parent's own model)
+    /// to decide whether a higher-precedence override that failed to resolve
+    /// actually degraded the subagent.
+    inherited_parent: bool,
 }
 /// Resolve the sampling config and model ID for a subagent.
 ///
@@ -814,11 +824,16 @@ async fn resolve_subagent_sampling_config(
 ) -> ResolvedSubagentModel {
     use cf_agent::config::ModelOverride;
     let (parent_config, parent_mid) = read_parent_sampling_config(ctx).await;
-    // Set when a requested id did not resolve, so the caller can surface
-    // `MODEL_OVERRIDE_FALLBACK_NOTICE` on the tool-visible path (a log line
-    // alone is invisible to the model).
-    let pin_unknown = std::cell::Cell::new(false);
+    // Whether a model pin was requested at all. Deliberately records the
+    // ATTEMPT (order-insensitive), not "some attempt failed": a pin that
+    // resolves returns immediately, so on the inherit path below every recorded
+    // attempt is necessarily an unresolved one. Deciding the notice here — at
+    // the point where we know we are inheriting — keeps it structural instead
+    // of comparing ids, which would mis-fire when an override happens to name
+    // the parent's own model.
+    let pin_attempted = std::cell::Cell::new(false);
     let try_pin = |model_id: &str, source: &'static str| {
+        pin_attempted.set(true);
         match resolve_model_override_to_config(model_id, ctx) {
             Some((config, canonical_id)) => {
                 log_subagent_model_resolution(
@@ -834,7 +849,6 @@ async fn resolve_subagent_sampling_config(
                 tracing::warn!(
                     agent = agent_name, model_id, "{}", MODEL_OVERRIDE_FALLBACK_NOTICE
                 );
-                pin_unknown.set(true);
                 None
             }
         }
@@ -842,23 +856,23 @@ async fn resolve_subagent_sampling_config(
     if let Some(model_id) = ctx.subagent_model_overrides.get(agent_name)
         && let Some((config, canonical_id)) = try_pin(model_id, "config_override")
     {
+        // A pin resolved: this is not a downgrade, so no notice.
         return ResolvedSubagentModel {
             config,
             model_id: canonical_id,
-            fallback_notice: pin_unknown
-                .get()
-                .then_some(MODEL_OVERRIDE_FALLBACK_NOTICE),
+            fallback_notice: None,
+            inherited_parent: false,
         };
     }
     if let ModelOverride::Override(model_id) = agent_model
         && let Some((config, canonical_id)) = try_pin(model_id, "agent_definition")
     {
+        // A pin resolved: this is not a downgrade, so no notice.
         return ResolvedSubagentModel {
             config,
             model_id: canonical_id,
-            fallback_notice: pin_unknown
-                .get()
-                .then_some(MODEL_OVERRIDE_FALLBACK_NOTICE),
+            fallback_notice: None,
+            inherited_parent: false,
         };
     }
     log_subagent_model_resolution(
@@ -871,9 +885,10 @@ async fn resolve_subagent_sampling_config(
     ResolvedSubagentModel {
         config: parent_config,
         model_id: parent_mid,
-        fallback_notice: pin_unknown
+        fallback_notice: pin_attempted
             .get()
             .then_some(MODEL_OVERRIDE_FALLBACK_NOTICE),
+        inherited_parent: true,
     }
 }
 /// Resolve a subagent's effective sampling config + model id, honoring the
@@ -902,17 +917,23 @@ async fn resolve_effective_model_config(
                     config,
                     model_id: canonical_id,
                     fallback_notice: None,
+                    inherited_parent: false,
                 };
             }
             None => {
                 tracing::warn!(model_id, "{}", MODEL_OVERRIDE_FALLBACK_NOTICE);
-                // Fall through to the pin path, but keep the notice: the
-                // caller appends it to the subagent's tool-visible result so
-                // the downgrade is not silent.
+                // Fall through to the pin path. Whether that counts as a
+                // downgrade is decided by the pin path itself: only if it ended
+                // up on the parent's model (no pin resolved either) did this
+                // failed override actually cost the subagent its model. If a
+                // pin/agent-definition resolved a concrete model, the subagent
+                // is NOT on the inherited model and the notice would be false.
                 let mut resolved =
                     resolve_subagent_sampling_config(subagent_type, definition_model, ctx)
                         .await;
-                resolved.fallback_notice = Some(MODEL_OVERRIDE_FALLBACK_NOTICE);
+                if resolved.inherited_parent {
+                    resolved.fallback_notice = Some(MODEL_OVERRIDE_FALLBACK_NOTICE);
+                }
                 return resolved;
             }
         }
