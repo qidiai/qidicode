@@ -42,6 +42,28 @@ mod coordinator_lifecycle;
 mod coordinator_query;
 mod handle_request;
 pub(crate) use handle_request::handle_subagent_request;
+/// Shared notice for every "requested model id is not in the catalogue" fallback.
+///
+/// Reused **verbatim** by the three resolution sites in this module
+/// (`[subagents.models]` pin, `AgentDefinition.model`, runtime/goal override):
+/// as the `tracing::warn!` message *and* as text appended to the subagent's
+/// tool-visible result, so the downgrade is visible without reading logs.
+///
+/// Why not log-only: a bare `tracing::warn!` never reaches the model — the
+/// user sees a subagent quietly running on the parent model with no signal.
+/// Same pattern as `RG_UNAVAILABLE_NOTICE` in cf-tools' grep.
+///
+/// The text must keep all three elements: what happened, the consequence
+/// (silent downgrade, not an error), and how to fix it — including the
+/// catalogue-layer caveat from the project-level `[model.*]` trap.
+pub(crate) const MODEL_OVERRIDE_FALLBACK_NOTICE: &str = concat!(
+    "Subagent model override ignored: the requested model id is not in the model catalogue. ",
+    "The subagent silently fell back to the inherited model — this is a downgrade, not an error. ",
+    "To fix: check the id for typos, and make sure a `[model.<id>]` section exists in a layer ",
+    "that actually feeds the catalogue (system_managed / managed / user). A project-level ",
+    "`.qidi/config.toml` `[model.*]` block is NOT loaded into the catalogue, so an id defined ",
+    "only there resolves to nothing."
+);
 /// How the child session's initial context was bootstrapped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum InitialContextSource {
@@ -749,6 +771,15 @@ fn instant_to_epoch_ms(instant: std::time::Instant) -> u64 {
         .as_millis() as u64
 }
 use cf_subagent_resolution::resolve_effective_overrides;
+/// Result of model resolution for a subagent: the sampling config to use, the
+/// canonical model id it came from, and — when a requested override did not
+/// resolve — the shared [`MODEL_OVERRIDE_FALLBACK_NOTICE`] to surface to the
+/// model/user (resolution still succeeds by falling back; it never fails).
+struct ResolvedSubagentModel {
+    config: cf_sampler::SamplerConfig,
+    model_id: acp::ModelId,
+    fallback_notice: Option<&'static str>,
+}
 /// Resolve the sampling config and model ID for a subagent.
 ///
 /// Subagents inherit the parent session's model by default. Only an
@@ -780,10 +811,14 @@ async fn resolve_subagent_sampling_config(
     agent_name: &str,
     agent_model: &cf_agent::config::ModelOverride,
     ctx: &SubagentSpawnContext,
-) -> (cf_sampler::SamplerConfig, acp::ModelId) {
+) -> ResolvedSubagentModel {
     use cf_agent::config::ModelOverride;
     let (parent_config, parent_mid) = read_parent_sampling_config(ctx).await;
-    let try_pin = |model_id: &str, source: &'static str, unknown_msg: &'static str| {
+    // Set when a requested id did not resolve, so the caller can surface
+    // `MODEL_OVERRIDE_FALLBACK_NOTICE` on the tool-visible path (a log line
+    // alone is invisible to the model).
+    let pin_unknown = std::cell::Cell::new(false);
+    let try_pin = |model_id: &str, source: &'static str| {
         match resolve_model_override_to_config(model_id, ctx) {
             Some((config, canonical_id)) => {
                 log_subagent_model_resolution(
@@ -796,28 +831,35 @@ async fn resolve_subagent_sampling_config(
                 Some((config, canonical_id))
             }
             None => {
-                tracing::warn!(agent = agent_name, model_id, "{unknown_msg}");
+                tracing::warn!(
+                    agent = agent_name, model_id, "{}", MODEL_OVERRIDE_FALLBACK_NOTICE
+                );
+                pin_unknown.set(true);
                 None
             }
         }
     };
     if let Some(model_id) = ctx.subagent_model_overrides.get(agent_name)
-        && let Some(resolved) = try_pin(
-            model_id,
-            "config_override",
-            "Subagent model override references unknown model, falling through to inherit",
-        )
+        && let Some((config, canonical_id)) = try_pin(model_id, "config_override")
     {
-        return resolved;
+        return ResolvedSubagentModel {
+            config,
+            model_id: canonical_id,
+            fallback_notice: pin_unknown
+                .get()
+                .then_some(MODEL_OVERRIDE_FALLBACK_NOTICE),
+        };
     }
     if let ModelOverride::Override(model_id) = agent_model
-        && let Some(resolved) = try_pin(
-            model_id,
-            "agent_definition",
-            "Agent definition model references unknown model, falling through to inherit",
-        )
+        && let Some((config, canonical_id)) = try_pin(model_id, "agent_definition")
     {
-        return resolved;
+        return ResolvedSubagentModel {
+            config,
+            model_id: canonical_id,
+            fallback_notice: pin_unknown
+                .get()
+                .then_some(MODEL_OVERRIDE_FALLBACK_NOTICE),
+        };
     }
     log_subagent_model_resolution(
         agent_name,
@@ -826,7 +868,13 @@ async fn resolve_subagent_sampling_config(
         &parent_mid,
         &parent_config,
     );
-    (parent_config, parent_mid)
+    ResolvedSubagentModel {
+        config: parent_config,
+        model_id: parent_mid,
+        fallback_notice: pin_unknown
+            .get()
+            .then_some(MODEL_OVERRIDE_FALLBACK_NOTICE),
+    }
 }
 /// Resolve a subagent's effective sampling config + model id, honoring the
 /// model-resolution precedence (Key Decision #16).
@@ -846,15 +894,28 @@ async fn resolve_effective_model_config(
     subagent_type: &str,
     definition_model: &cf_agent::config::ModelOverride,
     ctx: &SubagentSpawnContext,
-) -> (cf_sampler::SamplerConfig, acp::ModelId) {
+) -> ResolvedSubagentModel {
     if let Some(model_id) = runtime_override_model {
-        if let Some(resolved) = resolve_model_override_to_config(model_id, ctx) {
-            return resolved;
+        match resolve_model_override_to_config(model_id, ctx) {
+            Some((config, canonical_id)) => {
+                return ResolvedSubagentModel {
+                    config,
+                    model_id: canonical_id,
+                    fallback_notice: None,
+                };
+            }
+            None => {
+                tracing::warn!(model_id, "{}", MODEL_OVERRIDE_FALLBACK_NOTICE);
+                // Fall through to the pin path, but keep the notice: the
+                // caller appends it to the subagent's tool-visible result so
+                // the downgrade is not silent.
+                let mut resolved =
+                    resolve_subagent_sampling_config(subagent_type, definition_model, ctx)
+                        .await;
+                resolved.fallback_notice = Some(MODEL_OVERRIDE_FALLBACK_NOTICE);
+                return resolved;
+            }
         }
-        tracing::warn!(
-            model_id,
-            "Runtime model override references unknown model, falling through"
-        );
     }
     resolve_subagent_sampling_config(subagent_type, definition_model, ctx).await
 }

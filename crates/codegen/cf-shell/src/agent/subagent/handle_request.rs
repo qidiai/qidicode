@@ -465,13 +465,19 @@ pub(crate) async fn handle_subagent_request(
     if request.fork_context {
         effective_runtime.model = Some(ctx.model_id.0.to_string());
     }
-    let (mut effective_sampling_config, mut effective_model_id) = resolve_effective_model_config(
+    let resolved_model = resolve_effective_model_config(
             effective_runtime.model.as_deref(),
             &request.subagent_type,
             &definition.model,
             &ctx,
         )
         .await;
+    // Model resolution still falls back (never fails), but a fallback is a
+    // silent downgrade: carry the notice to the tool-visible result below so
+    // it reaches the model/user instead of dying in a log line.
+    let model_fallback_notice = resolved_model.fallback_notice;
+    let (mut effective_sampling_config, mut effective_model_id) =
+        (resolved_model.config, resolved_model.model_id);
     let subagent_max_turns = resolve_subagent_max_turns(
         definition.max_turns,
         ctx.parent_max_turns,
@@ -1642,6 +1648,20 @@ pub(crate) async fn handle_subagent_request(
             }
         }
     };
+    // Surface a model-override fallback (unknown id → inherited model) on the
+    // tool-visible result, not just in the log: the model must be able to see
+    // that the subagent did not run on the model it asked for.
+    if let Some(notice) = model_fallback_notice {
+        if result.success {
+            result.output = format!("{}\n\n{notice}", result.output).into();
+        } else {
+            let error = result.error.get_or_insert_with(String::new);
+            if !error.is_empty() {
+                error.push_str("\n\n");
+            }
+            error.push_str(notice);
+        }
+    }
     if let Some(trace_gcs_config) = gcs_upload_ctx
         .upload_method
         .as_ref()
