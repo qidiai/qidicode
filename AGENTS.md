@@ -520,7 +520,7 @@ maxTurns: 0  → agent_name='qidi-build-plan', current_model_id='step-5-preview-
    ```
    缺陷详情与修复方案（Job Object / static take / 启动期 GC）见 `docs/fix-plans/2026-10-19-缺陷修复方案.md` F9。
 15. **sccache 会污染 target 缓存**（2026-10-07 实测）：sccache.exe 服务挂掉后，经它包装的 rustc 会产出**坏元数据产物**——后续编译报 `E0460 found possibly newer version of crate` 或直接 "process didn't exit successfully: sccache.exe..."（同一 target 内 release lib 与 test 二进制可同时中招，cf-shell 是高发点）。**解药：`$env:RUSTC_WRAPPER=''` 禁用后增量重编**（16 分钟级可过）；若增量仍 E0460 则 `cargo clean -p <crate>` 强制重编该 crate。多轮审计/长任务中 sccache 反复崩是本机常态（2026-10-06 起三次实测），长编译/测试任务建议起手就禁用
-16. **⚠️ 经 `run_terminal_command` 启动的常驻/GUI 进程会被连带回收（2026-10-25 第三次实测，同机制第 3 次踩坑）**：本 TUI 的每条终端命令都圈在一个 Job Object 里，**调用返回即终止其全部子孙进程**（无宽限期）。实证两例：①`Start-Process msedge` 起独立 profile 实例，快照见 14 进程，调用一结束**整树归零**（不是应用崩溃，是被 Job 收掉，EventLog 无相关错误）；②headless 包装脚本走 `run_terminal_command` 跑长任务，同样需要 Detached 才能活过调用。**唯一可靠解法 = WMI 在 Job 外创建进程**：
+16. **⚠️ 经 `run_terminal_command` 启动的常驻/GUI 进程会被连带回收（2026-10-25 第三次实测，同机制第 3 次踩坑）**：本 TUI 的每条终端命令都圈在一个 Job Object 里，**调用返回即终止其全部子孙进程**（无宽限期）。实证两例：①`Start-Process msedge` 起独立 profile 实例，快照见 14 进程，调用一结束**整树归零**（不是应用崩溃，是被 Job 收掉，EventLog 无相关错误）；②headless 包装脚本走 `run_terminal_command` 跑长任务，同样需要 Detached 才能活过调用。**唯一可靠解法 = WMI 在 Job 外创建进程**。⚠️ **`nohup`、`&`、`Start-Process` 全部无效**——2026-11-09 实测：`nohup cargo build ... &` 启动的后台构建，在**调用返回的瞬间就死了**（无 error、无 Finished、日志停在 20 行），白跑 20 分钟。Job Object 杀子孙进程不看 nohup 标志。：
     ```powershell
     $cls = [WMIClass]'root\cimv2:Win32_Process'
     $res = $cls.Create('<完整命令行>', '<工作目录>')   # ReturnValue=0 即成

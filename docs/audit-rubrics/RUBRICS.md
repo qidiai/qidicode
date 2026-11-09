@@ -270,7 +270,23 @@
 - **配套**：写测试时问自己"**这条消息在什么情况下会是假话**"——为假话的每种情况写一个
   `emits_no_notice` 类测试，比多写一个 `emits_notice` 有价值得多。
 
-## 变更记录## 变更记录## 变更记录## 变更记录
+### R-038 【门控】验证新构建的行为，必须用新构建去派发；当前会话的 spawn 用的是自己进程里的旧代码
+- **触发**：改了代码 → 重新编译 → 想验证新行为是否生效；尤其是"子代理/spawn 相关"的改动
+- **规则**：`spawn_subagent` 的执行方是**当前会话所在的进程**。会话在构建前启动，它进程里载入的就是**旧二进制**，
+  与磁盘上刚编出的新 exe 无关。所以：
+  - 验 spawn/subagent/task 相关改动 → **必须用新 exe 起一个 headless 会话去派**
+    （`新exe -p "<让它用 task 派子代理并原样贴回输出>" --agent <有 task 工具的 agent> --cwd ... --permission-mode default`）
+  - 验 CLI 参数、权限规则加载、agent 定义加载 → 同样用新 exe 起会话
+  - **只有**不经过 spawn 的纯函数/纯数据改动，才能用当前会话间接验证
+- **实证**（2026-11-09 R11-B）：改完 `resolve_effective_model_config` 等三处、编出新 exe 后，
+  用当前会话的 `spawn_subagent` 派了一个 `model: no-such-model-xyz` 的探针 agent，
+  返回只有 `PONG`、**没有 notice** → 差点判成"R11-B 没生效"。
+  实际是当前会话跑的是旧 exe（会话早于构建启动），spawn 走的是旧代码路径。
+  改用**新 exe** headless 派同一个探针，notice 立刻出现（`Subagent model override ignored: ...`）。
+- **配套判据**：换 exe 验证时，先 `新exe --version` 确认它含目标 commit
+  （本次为 `qidi 0.1.220-alpha.4 (5b601d33)`，与 `git rev-parse --short HEAD` 对齐），再跑探针。
+
+## 变更记录## 变更记录## 变更记录## 变更记录## 变更记录
 
 - 2026-11-08：新增 R-033（kill/超时类测试须先证靶子真在跑 + 探测命令不得自命中）
 - 2026-11-08：新增 R-034
