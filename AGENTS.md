@@ -529,6 +529,25 @@ maxTurns: 0  → agent_name='qidi-build-plan', current_model_id='step-5-preview-
 
 ---
 
+### 12.1 Windows 上观测进程树的三个实测事实（2026-11-09，写进程类测试必读）
+
+1. **`/proc/<pid>/cmdline` 的匹配只能看到第一段。** 可读，但 ` ` 之后的内容
+   `grep` 碰不到——`sleep 30 <tag>` 时 `cmdline` 只剩 `sleep|30|`，tag 所在的 bash 段是第二段。
+   **要把特征串挂在最终 exec 进去的那个进程自己的 argv 上**（`sleep 30 <tag>`），
+   不能挂在 shell 段里。
+2. **Windows 上不能从 Rust 直接 `read_dir("/proc")`。** 对 Win32 进程返回空；
+   `cygpath -w /proc` **不做映射**（原样回 `/proc`，`read_dir` 报 `InvalidFilename` code 123）。
+   必须经 Git Bash 跑（`Command::new(bash)`）。
+3. **kill 后进程表消失是 0 ms**（插桩实测：kill 完成即取样，目标已不在
+   `Get-CimInstance` 表里）。所以**不需要长轮询**，短轮询（≤2 s）足够。
+
+另有两个坑：
+- **幸存判定必须只认"杀前已存在的 pid"**：kill 后短窗口会出现**扫描查询自身 shell**
+  的自命中 pid（`/usr/bin/bash -c for d in … grep -qaF -- '<needle>' …`，第一段就含 needle），
+  它会自行消失、不是残留。用"杀前快照 ∩ 杀后匹配"即可排除。
+- `ps -W` 的 COMMAND 列**截断成可执行文件路径**，拿不到命令行；`ps` 输出里 `3.6.6`
+  那类"伪 pid"一律以 `C:\…` 开头，按"首列是数字且行里没有 `:`"过滤。
+
 ## 13. 工具链与 shell（2026-11-03，立项 v3，step-5 两轮审计通过）
 
 > 规格：`docs/tooling/2026-11-03-工具链修复立项.md`（v3，唯一真值）
